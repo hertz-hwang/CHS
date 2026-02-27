@@ -1,5 +1,7 @@
 import { IDSNode, parseIDS } from './ids'
 import { unicodeBlock, unicodeHex } from './unicode'
+import { IDSTransformer, TransformResult } from './transformer'
+import { UserConfig, RootCode, parseRootCodes, rootCodesToRecord } from './config'
 
 export interface DecompResult {
   leaves: string[]
@@ -59,6 +61,15 @@ export class CharsHijack {
   roots = new Set<string>()
   charsets = new Map<string, string[]>()
   private _cache = new Map<string, DecompResult>()
+
+  // 转换引擎
+  transformer: IDSTransformer | null = null
+
+  // 命名字根的 IDS 定义 { "{落字框}" => "⿱艹氵" }
+  namedRoots = new Map<string, string>()
+
+  // 字根编码 { "一" => { main: "f", sub: "k", supplement: "i" } }
+  rootCodes = new Map<string, RootCode>()
 
   private _pickG(variants: string[]): string | null {
     let universal: string | null = null
@@ -216,10 +227,99 @@ export class CharsHijack {
     return false
   }
 
+  // ============ 转换引擎相关方法 ============
+
+  setTransformer(t: IDSTransformer | null): void {
+    this.transformer = t
+    this._cache.clear()
+    if (t) {
+      t.onRulesChange(() => this._cache.clear())
+    }
+  }
+
+  setNamedRoots(namedRoots: Record<string, string>): void {
+    this.namedRoots = new Map(Object.entries(namedRoots))
+    // 命名字根也应该加入 roots
+    for (const name of this.namedRoots.keys()) {
+      this.roots.add(name)
+    }
+    this._cache.clear()
+  }
+
+  setRootCodes(rootCodes: Record<string, string>): void {
+    this.rootCodes = parseRootCodes(rootCodes)
+  }
+
+  applyConfig(config: UserConfig): void {
+    // 设置命名字根
+    if (config.named_roots) {
+      this.setNamedRoots(config.named_roots)
+    }
+
+    // 设置字根编码
+    if (config.roots) {
+      this.setRootCodes(config.roots)
+      // 同时将字根加入 roots
+      for (const root of Object.keys(config.roots)) {
+        this.roots.add(root)
+      }
+    }
+
+    // 设置转换器
+    if (config.rules && config.rules.length > 0) {
+      const t = new IDSTransformer(config.rules)
+      this.setTransformer(t)
+    } else {
+      this.setTransformer(null)
+    }
+
+    this._cache.clear()
+  }
+
+  getConfig(): UserConfig {
+    const rules = this.transformer?.getRules() || []
+    const namedRootsObj: Record<string, string> = {}
+    for (const [k, v] of this.namedRoots) {
+      namedRootsObj[k] = v
+    }
+    return {
+      meta: { version: '1.0' },
+      roots: rootCodesToRecord(this.rootCodes),
+      named_roots: namedRootsObj,
+      rules,
+    }
+  }
+
+  // 获取字的根编码
+  getRootCode(root: string): RootCode | undefined {
+    return this.rootCodes.get(root)
+  }
+
+  // 获取字的根编码字符串（用于显示）
+  getRootCodeString(root: string): string {
+    const code = this.rootCodes.get(root)
+    if (!code) return ''
+    return (code.main || '') + (code.sub || '') + (code.supplement || '')
+  }
+
   decompose(char: string): DecompResult {
     const cached = this._cache.get(char)
     if (cached) return cached
-    const tree = this._build(char, new Set())
+
+    // 获取原始 IDS
+    let ids = this.decomp.get(char)
+    if (!ids) {
+      const res: DecompResult = { leaves: [char], ids: char, tree: new IDSNode(char) }
+      this._cache.set(char, res)
+      return res
+    }
+
+    // 应用转换规则（实时计算）
+    if (this.transformer) {
+      ids = this.transformer.transform(ids)
+    }
+
+    const tree = this._buildWithIds(char, ids, new Set())
     const res: DecompResult = { leaves: tree.leaves(), ids: tree.toIDS(), tree }
     this._cache.set(char, res)
     return res
@@ -229,7 +329,24 @@ export class CharsHijack {
     if (this.roots.has(char)) return new IDSNode(char)
     if (visited.has(char) || !this.decomp.has(char)) return new IDSNode(char)
     const nv = new Set(visited); nv.add(char)
-    const tree = parseIDS(this.decomp.get(char)!)
+    const ids = this.decomp.get(char)!
+
+    // 应用转换规则
+    let transformedIds = ids
+    if (this.transformer) {
+      transformedIds = this.transformer.transform(ids)
+    }
+
+    const tree = parseIDS(transformedIds)
+    if (!tree) return new IDSNode(char)
+    return this._expand(tree, nv)
+  }
+
+  private _buildWithIds(char: string, ids: string, visited: Set<string>): IDSNode {
+    if (this.roots.has(char)) return new IDSNode(char)
+    if (visited.has(char)) return new IDSNode(char)
+    const nv = new Set(visited); nv.add(char)
+    const tree = parseIDS(ids)
     if (!tree) return new IDSNode(char)
     return this._expand(tree, nv)
   }

@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "smol-toml": "^1.6.0",
     "vue": "^3.4.0"
   },
   "devDependencies": {

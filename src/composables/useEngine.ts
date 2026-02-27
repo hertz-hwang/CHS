@@ -1,5 +1,6 @@
 import { reactive, ref, readonly, computed } from 'vue'
 import { CharsHijack } from '@/engine/engine'
+import { UserConfig, parseConfig, exportConfig, saveConfigToStorage, loadConfigFromStorage } from '@/engine/config'
 
 const engine = new CharsHijack()
 
@@ -13,12 +14,16 @@ let toastTimer: ReturnType<typeof setTimeout> | null = null
 // 响应式版本号，用于触发计算属性更新
 const rootsVersion = ref(0)
 
+// 配置版本号，用于触发配置相关的更新
+const configVersion = ref(0)
+
 function refreshStats() {
   stats.decomp = engine.decomp.size
   stats.roots = engine.roots.size
   stats.strokes = engine.strokes.size
   stats.freq = engine.freq.size
   rootsVersion.value++ // 触发依赖 roots 的计算属性更新
+  configVersion.value++ // 触发配置相关的更新
 }
 
 function toast(msg: string, duration = 2500) {
@@ -73,12 +78,53 @@ async function loadDefaultData(): Promise<{ loaded: string[]; failed: string[] }
   return { loaded, failed }
 }
 
+// ============ 配置管理方法 ============
+
+function applyConfig(config: UserConfig): void {
+  engine.applyConfig(config)
+  refreshStats()
+}
+
+function getConfig(): UserConfig {
+  return engine.getConfig()
+}
+
+function importConfigFromToml(toml: string): boolean {
+  try {
+    const config = parseConfig(toml)
+    applyConfig(config)
+    return true
+  } catch (e) {
+    console.error('Failed to parse config:', e)
+    return false
+  }
+}
+
+function exportConfigToToml(): string {
+  return exportConfig(getConfig())
+}
+
+function saveCurrentConfig(): void {
+  saveConfigToStorage(getConfig())
+}
+
+function loadSavedConfig(): boolean {
+  const config = loadConfigFromStorage()
+  if (config) {
+    applyConfig(config)
+    return true
+  }
+  return false
+}
+
 export function useEngine() {
   return {
-    engine, stats: readonly(stats), refreshStats, rootsVersion,
+    engine, stats: readonly(stats), refreshStats, rootsVersion, configVersion,
     currentPage, switchPage,
     selectedChar, selectChar,
     toastMsg: readonly(toastMsg), toastVisible: readonly(toastVisible), toast,
     loadDefaultData,
+    // 配置管理
+    applyConfig, getConfig, importConfigFromToml, exportConfigToToml, saveCurrentConfig, loadSavedConfig,
   }
 }
