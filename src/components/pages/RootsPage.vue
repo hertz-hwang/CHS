@@ -1,119 +1,397 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import ModalDialog from '../ModalDialog.vue'
-import RootCodeEditor from '../shared/RootCodeEditor.vue'
-import NamedRootEditor from '../shared/NamedRootEditor.vue'
+import KeyboardLayout from '../shared/KeyboardLayout.vue'
 import { useEngine } from '../../composables/useEngine'
+import { parseCode } from '../../engine/config'
+
 const { engine, refreshStats, toast, rootsVersion } = useEngine()
-const modalMode = ref<'set' | 'add' | 'remove' | null>(null); const modalInput = ref('')
-const showCodeEditor = ref(false)
-const showNamedRootEditor = ref(false)
 
-const rootsByStroke = computed(() => {
-  // 依赖 rootsVersion 确保在 roots 变化时重新计算
+// 弹窗状态
+const modalMode = ref<'set' | 'add' | 'remove' | null>(null)
+const modalInput = ref('')
+
+// 随机打乱弹窗
+const showShuffleModal = ref(false)
+const shufflePattern = ref('[a-z]')
+
+// 所有可用键位
+const ALL_KEYS = 'qwertyuiopasdfghjkl;zxcvbnm,./_'
+
+// 添加字根弹窗
+const showAddRoot = ref(false)
+const addForm = ref({ root: '', code: 'd' })
+
+// 统计信息
+const rootsCount = computed(() => {
   rootsVersion.value
-  const bySC = new Map<number, string[]>()
-  for (const r of [...engine.roots].sort()) { const sc = engine.strokeCount(r); if (!bySC.has(sc)) bySC.set(sc, []); bySC.get(sc)!.push(r) }
-  return [...bySC.entries()].sort(([a], [b]) => a - b)
+  return engine.roots.size
 })
 
-// 带编码显示的字根
-const rootsWithCode = computed(() => {
+// 未编码的字根（没有在 rootCodes 中定义）
+const unencodedRoots = computed(() => {
   rootsVersion.value
-  const result: { root: string; sc: number; code: string }[] = []
-  for (const r of [...engine.roots].sort()) {
-    const sc = engine.strokeCount(r)
-    const code = engine.getRootCodeString(r)
-    result.push({ root: r, sc, code })
+  const result: string[] = []
+  for (const root of engine.roots) {
+    if (!engine.rootCodes.has(root)) {
+      result.push(root)
+    }
   }
-  return result
+  return result.sort()
 })
 
-function openModal(mode: 'set' | 'add' | 'remove') { modalMode.value = mode; modalInput.value = mode === 'set' ? [...engine.roots].join('') : '' }
-function confirmModal() {
-  if (modalMode.value === 'set') { engine.setRoots(modalInput.value); toast(`已设置 ${engine.roots.size} 个字根`) }
-  else if (modalMode.value === 'add') { engine.addRoots(modalInput.value); toast(`已追加，共 ${engine.roots.size} 个`) }
-  else if (modalMode.value === 'remove') { engine.removeRoots(modalInput.value); toast(`已移除，共 ${engine.roots.size} 个`) }
-  modalMode.value = null; refreshStats()
+function openModal(mode: 'set' | 'add' | 'remove') {
+  modalMode.value = mode
+  modalInput.value = mode === 'set' ? [...engine.roots].join('') : ''
 }
-function removeRoot(r: string) { engine.removeRoots(r); toast(`移除: ${r}`); refreshStats() }
-function initAtomic() { if (!engine.decomp.size) { toast('请先加载数据'); return }; engine.useAtomicRoots(); refreshStats(); toast(`原子字根: ${engine.roots.size} 个`) }
+
+function confirmModal() {
+  if (modalMode.value === 'set') {
+    engine.setRoots(modalInput.value)
+    toast(`已设置 ${engine.roots.size} 个字根`)
+  } else if (modalMode.value === 'add') {
+    engine.addRoots(modalInput.value)
+    toast(`已追加，共 ${engine.roots.size} 个`)
+  } else if (modalMode.value === 'remove') {
+    engine.removeRoots(modalInput.value)
+    toast(`已移除，共 ${engine.roots.size} 个`)
+  }
+  modalMode.value = null
+  refreshStats()
+}
+
+function initAtomic() {
+  if (!engine.decomp.size) {
+    toast('请先加载数据')
+    return
+  }
+  engine.useAtomicRoots()
+  // 初始化所有原子字根的默认编码为 "d"
+  for (const root of engine.roots) {
+    if (!engine.rootCodes.has(root)) {
+      engine.rootCodes.set(root, { root, main: 'd' })
+    }
+  }
+  refreshStats()
+  toast(`原子字根: ${engine.roots.size} 个`)
+}
+
 function exportRoots() {
   const blob = new Blob([engine.exportRootsText()], { type: 'text/plain;charset=utf-8' })
-  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'roots.txt'; a.click(); toast('已导出')
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(blob)
+  a.download = 'roots.txt'
+  a.click()
+  toast('已导出')
 }
-const modalTitle = computed(() => ({ set: '✏️ 手动设置字根', add: '➕ 追加字根', remove: '➖ 移除字根' }[modalMode.value!] || ''))
 
-// 渲染编码（带颜色）
-function renderCode(code: string): { main: string; sub?: string; supplement?: string } {
-  if (!code) return { main: '' }
-  return {
-    main: code[0] || '',
-    sub: code.length > 1 ? code[1] : undefined,
-    supplement: code.length > 2 ? code.slice(2) : undefined,
+// 添加新字根
+function addRoot() {
+  if (!addForm.value.root) {
+    toast('请输入字根')
+    return
   }
+
+  const root = addForm.value.root
+  const code = addForm.value.code || 'd'
+  const parsed = parseCode(code)
+
+  engine.rootCodes.set(root, { root, ...parsed })
+  engine.roots.add(root)
+
+  showAddRoot.value = false
+  addForm.value = { root: '', code: 'd' }
+  refreshStats()
+  toast(`已添加字根: ${root}`)
 }
+
+// 为所有未编码字根设置默认编码
+function setDefaultCodes() {
+  let count = 0
+  for (const root of engine.roots) {
+    if (!engine.rootCodes.has(root)) {
+      engine.rootCodes.set(root, { root, main: 'd' })
+      count++
+    }
+  }
+  refreshStats()
+  toast(`已为 ${count} 个字根设置默认编码 "d"`)
+}
+
+// 解析键位正则模式，返回匹配的键位列表
+function parseKeyPattern(pattern: string): string[] {
+  const keys: string[] = []
+
+  // 使用正则匹配所有字符
+  const regex = new RegExp(pattern, 'gi')
+  const matches = ALL_KEYS.match(regex) || []
+
+  // 去重并转为小写
+  for (const k of matches) {
+    const key = k.toLowerCase()
+    if (!keys.includes(key)) {
+      keys.push(key)
+    }
+  }
+
+  return keys
+}
+
+// 随机打乱所有字根到指定键位上
+function shuffleRoots() {
+  const keys = parseKeyPattern(shufflePattern.value)
+
+  if (keys.length === 0) {
+    toast('未匹配到任何键位')
+    return
+  }
+
+  if (engine.roots.size === 0) {
+    toast('没有字根可打乱')
+    return
+  }
+
+  // 收集所有字根及其编码信息（保留 sub 和 supplement）
+  const rootsData: { root: string; sub?: string; supplement?: string }[] = []
+
+  for (const root of engine.roots) {
+    const code = engine.rootCodes.get(root)
+    rootsData.push({
+      root,
+      sub: code?.sub,
+      supplement: code?.supplement,
+    })
+  }
+
+  // Fisher-Yates 洗牌算法
+  for (let i = rootsData.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[rootsData[i], rootsData[j]] = [rootsData[j], rootsData[i]]
+  }
+
+  // 计算每个键位应该分配的字根数量（尽量均匀）
+  const baseCount = Math.floor(rootsData.length / keys.length)
+  const extraCount = rootsData.length % keys.length
+
+  // 随机选择哪些键位多分配一个字根
+  const extraKeys = [...keys]
+  for (let i = extraKeys.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[extraKeys[i], extraKeys[j]] = [extraKeys[j], extraKeys[i]]
+  }
+  const extraKeySet = new Set(extraKeys.slice(0, extraCount))
+
+  // 分配字根到键位
+  let rootIndex = 0
+  for (const key of keys) {
+    const count = baseCount + (extraKeySet.has(key) ? 1 : 0)
+    for (let i = 0; i < count && rootIndex < rootsData.length; i++) {
+      const data = rootsData[rootIndex]
+      engine.rootCodes.set(data.root, {
+        root: data.root,
+        main: key,
+        sub: data.sub,
+        supplement: data.supplement,
+      })
+      rootIndex++
+    }
+  }
+
+  refreshStats()
+  showShuffleModal.value = false
+  toast(`已将 ${rootsData.length} 个字根随机分配到 ${keys.length} 个键位`)
+}
+
+const modalTitle = computed(() => ({
+  set: '手动设置字根',
+  add: '追加字根',
+  remove: '移除字根',
+}[modalMode.value!] || ''))
 </script>
+
 <template>
-  <div class="panel">
-    <div class="panel-head">⚙️ 设置字根</div>
-    <div class="panel-body">
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
-        <button class="btn btn-success" @click="initAtomic">🧩 原子字根</button>
-        <button class="btn btn-outline" @click="openModal('set')">✏️ 手动输入</button>
-        <button class="btn btn-purple" @click="openModal('add')">➕ 追加字根</button>
-        <button class="btn btn-danger" @click="openModal('remove')">➖ 移除字根</button>
+  <div class="roots-page">
+    <!-- 顶部工具栏 -->
+    <div class="toolbar">
+      <div class="toolbar-left">
+        <span class="title">设置字根</span>
+        <span class="count">{{ rootsCount }} 个字根</span>
       </div>
-      <div style="margin-bottom:12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-        <button class="btn btn-outline btn-sm" @click="exportRoots">💾 导出字根</button>
-        <button class="btn btn-sm" @click="showCodeEditor = true">🔤 编码管理</button>
-        <button class="btn btn-sm" @click="showNamedRootEditor = true">🏷️ 命名字根</button>
-        <span style="color:var(--text2);font-size:12px">当前 {{ engine.roots.size }} 个</span>
-      </div>
-      <div class="rg">
-        <template v-for="item in rootsWithCode" :key="item.root">
-          <span class="rc" title="点击移除" @click="removeRoot(item.root)">
-            {{ item.root }}
-            <span v-if="item.code" class="code">
-              <span class="main">{{ renderCode(item.code).main }}</span>
-              <span v-if="renderCode(item.code).sub" class="sub">{{ renderCode(item.code).sub }}</span>
-              <span v-if="renderCode(item.code).supplement" class="supplement">{{ renderCode(item.code).supplement }}</span>
-            </span>
-            <span class="x">✕</span>
-          </span>
-        </template>
+      <div class="toolbar-actions">
+        <button class="btn btn-success btn-sm" @click="initAtomic">原子字根</button>
+        <button class="btn btn-purple btn-sm" @click="showAddRoot = true">+ 添加</button>
+        <button class="btn btn-outline btn-sm" @click="openModal('add')">批量追加</button>
+        <button class="btn btn-outline btn-sm" @click="openModal('remove')">批量移除</button>
+        <button class="btn btn-outline btn-sm" @click="showShuffleModal = true">随机打乱</button>
+        <button class="btn btn-outline btn-sm" @click="exportRoots">导出</button>
+        <button
+          v-if="unencodedRoots.length > 0"
+          class="btn btn-sm"
+          @click="setDefaultCodes"
+        >
+          设默认 ({{ unencodedRoots.length }})
+        </button>
       </div>
     </div>
+
+    <!-- 设置字根 -->
+    <KeyboardLayout />
   </div>
 
+  <!-- 批量操作弹窗 -->
   <ModalDialog :visible="modalMode !== null" :title="modalTitle" @close="modalMode = null">
-    <p style="font-size:13px;color:var(--text2);margin-bottom:8px">{{ modalMode === 'set' ? '输入字根（替换全部）：' : modalMode === 'add' ? '输入要追加的字根：' : '输入要移除的字根：' }}</p>
-    <textarea v-model="modalInput" style="width:100%" />
+    <p style="font-size: 13px; color: var(--text2); margin-bottom: 8px">
+      {{ modalMode === 'set' ? '输入字根（替换全部）：' : modalMode === 'add' ? '输入要追加的字根：' : '输入要移除的字根：' }}
+    </p>
+    <textarea v-model="modalInput" style="width: 100%" />
     <template #actions>
       <button class="btn btn-outline" @click="modalMode = null">取消</button>
-      <button class="btn" :class="modalMode === 'remove' ? 'btn-danger' : modalMode === 'add' ? 'btn-purple' : ''" @click="confirmModal">
+      <button
+        class="btn"
+        :class="modalMode === 'remove' ? 'btn-danger' : modalMode === 'add' ? 'btn-purple' : ''"
+        @click="confirmModal"
+      >
         {{ modalMode === 'set' ? '确定' : modalMode === 'add' ? '追加' : '移除' }}
       </button>
     </template>
   </ModalDialog>
 
-  <!-- 字根编码编辑器 -->
-  <ModalDialog :visible="showCodeEditor" title="🔤 字根编码管理" @close="showCodeEditor = false">
-    <RootCodeEditor />
+  <!-- 随机打乱弹窗 -->
+  <ModalDialog :visible="showShuffleModal" title="随机打乱字根" @close="showShuffleModal = false">
+    <div class="shuffle-form">
+      <p style="font-size: 13px; color: var(--text2); margin-bottom: 12px">
+        将所有字根随机分配到指定键位上，尽量均匀分布：
+      </p>
+      <input
+        v-model="shufflePattern"
+        type="text"
+        placeholder="如: [a-z]、[a-y]、[a-z;,./_]"
+        style="width: 100%; font-family: monospace"
+      />
+      <div style="margin-top: 12px; font-size: 12px; color: var(--text2)">
+        <p>示例：</p>
+        <ul style="margin: 4px 0; padding-left: 20px">
+          <li><code>[a-z]</code> - 所有字母键（26键）</li>
+          <li><code>[asdfjkl;]</code> - 左右手基准键（8键）</li>
+          <li><code>[a-z;,./_]</code> - 全部31键</li>
+        </ul>
+        <p style="margin-top: 8px">
+          目标键位: <strong>{{ parseKeyPattern(shufflePattern).join(' ').toUpperCase() || '无' }}</strong>
+          （{{ parseKeyPattern(shufflePattern).length }} 个）
+        </p>
+        <p style="margin-top: 4px">
+          当前字根: <strong>{{ rootsCount }}</strong> 个
+        </p>
+      </div>
+    </div>
+    <template #actions>
+      <button class="btn btn-outline" @click="showShuffleModal = false">取消</button>
+      <button class="btn btn-purple" @click="shuffleRoots">打乱</button>
+    </template>
   </ModalDialog>
 
-  <!-- 命名字根编辑器 -->
-  <ModalDialog :visible="showNamedRootEditor" title="🏷️ 命名字根" @close="showNamedRootEditor = false">
-    <NamedRootEditor />
+  <!-- 添加字根弹窗 -->
+  <ModalDialog :visible="showAddRoot" title="添加字根" @close="showAddRoot = false">
+    <div class="add-form">
+      <div class="form-row">
+        <label>字根</label>
+        <input v-model="addForm.root" type="text" placeholder="输入字根字符" />
+      </div>
+      <div class="form-row">
+        <label>编码</label>
+        <input v-model="addForm.code" type="text" maxlength="10" placeholder="默认: d" />
+      </div>
+      <div v-if="addForm.code" class="code-preview">
+        预览：
+        <span class="main">{{ addForm.code[0]?.toUpperCase() || 'D' }}</span>
+        <span v-if="addForm.code.length > 1" class="sub">{{ addForm.code[1] }}</span>
+        <span v-if="addForm.code.length > 2" class="supplement">{{ addForm.code.slice(2) }}</span>
+      </div>
+    </div>
+    <template #actions>
+      <button class="btn btn-outline" @click="showAddRoot = false">取消</button>
+      <button class="btn btn-success" @click="addRoot">添加</button>
+    </template>
   </ModalDialog>
 </template>
+
 <style scoped>
-.rg { display: flex; flex-wrap: wrap; gap: 4px; max-height: 400px; overflow-y: auto; padding: 8px; }
-.rc { display: inline-flex; align-items: center; gap: 4px; background: var(--bg3); border: 1px solid var(--border); padding: 4px 8px; border-radius: 6px; font-size: 16px; cursor: pointer; transition: all 0.15s; user-select: none; }
-.rc:hover { border-color: var(--red); background: #b71c1c22; }
-.rc .code { font-family: monospace; font-size: 12px; margin-left: 4px; }
-.rc .code .sub { color: #2196F3; }
-.rc .code .supplement { color: #4CAF50; }
-.x { font-size: 10px; color: var(--red); opacity: 0; transition: opacity 0.15s; }
-.rc:hover .x { opacity: 1; }
+.roots-page {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 64px - 40px);
+  gap: 12px;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.title {
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.count {
+  font-size: 13px;
+  color: var(--text2);
+}
+
+.toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.add-form {
+  min-width: 260px;
+}
+
+.form-row {
+  margin-bottom: 12px;
+}
+
+.form-row label {
+  display: block;
+  font-size: 12px;
+  color: var(--text2);
+  margin-bottom: 4px;
+}
+
+.form-row input {
+  width: 100%;
+  padding: 8px;
+  font-size: 16px;
+}
+
+.code-preview {
+  margin-bottom: 12px;
+  font-family: monospace;
+  font-size: 16px;
+}
+
+.code-preview .main { font-weight: bold; }
+.code-preview .sub { color: #2196F3; }
+.code-preview .supplement { color: #4CAF50; }
+
+.shuffle-form {
+  min-width: 320px;
+}
+
+.shuffle-form code {
+  background: var(--bg3);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: monospace;
+}
 </style>

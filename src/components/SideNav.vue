@@ -23,8 +23,8 @@ const sections: NavSection[] = [
     { page: 'batch', icon: '📝', label: '批量拆分', kbd: '7' },
   ]},
   { title: '字根', items: [
-    { page: 'roots', icon: '⚙️', label: '设置字根', kbd: '4' },
-    { page: 'viewroots', icon: '👁️', label: '查看字根', kbd: '9' },
+    { page: 'roots', icon: '⌨️', label: '设置字根', kbd: '4' },
+    { page: 'keyboard', icon: '🗺️', label: '查看布局', kbd: '9' },
     { page: 'suggest', icon: '💡', label: '推荐字根', kbd: '5' },
   ]},
   { title: '分析', items: [

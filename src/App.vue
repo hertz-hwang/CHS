@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, computed } from 'vue'
 import HeaderBar from './components/HeaderBar.vue'
 import SideNav from './components/SideNav.vue'
 import DetailPanel from './components/DetailPanel.vue'
@@ -10,7 +10,7 @@ import TreePage from './components/pages/TreePage.vue'
 import StepsPage from './components/pages/StepsPage.vue'
 import BatchPage from './components/pages/BatchPage.vue'
 import RootsPage from './components/pages/RootsPage.vue'
-import ViewRootsPage from './components/pages/ViewRootsPage.vue'
+import KeyboardPage from './components/pages/KeyboardPage.vue'
 import SuggestPage from './components/pages/SuggestPage.vue'
 import CoveragePage from './components/pages/CoveragePage.vue'
 import FindPage from './components/pages/FindPage.vue'
@@ -20,6 +20,10 @@ import { useEngine } from './composables/useEngine'
 const { engine, currentPage, refreshStats, toast, switchPage, loadDefaultData } = useEngine()
 
 const isLoading = ref(true)
+
+// 不显示右侧详情栏的页面
+const hideDetailPages = ['load', 'roots', 'keyboard', 'suggest', 'export']
+const showDetailPanel = computed(() => !hideDetailPages.includes(currentPage.value))
 
 onMounted(async () => {
   // 自动加载默认数据
@@ -44,7 +48,8 @@ function onKeyDown(e: KeyboardEvent) {
   const map: Record<string, string> = {
     '1': 'decompose', '2': 'tree', '3': 'steps', '4': 'roots',
     '5': 'suggest', '6': 'coverage', '7': 'batch', '8': 'export',
-    '9': 'viewroots', 'f': 'find', 'F': 'find',
+    '9': 'keyboard',
+    'f': 'find', 'F': 'find',
   }
   if (map[e.key]) switchPage(map[e.key])
 }
@@ -53,7 +58,7 @@ function onKeyDown(e: KeyboardEvent) {
 <template>
   <div @keydown="onKeyDown" tabindex="-1" style="outline:none">
     <HeaderBar />
-    <div class="main-layout">
+    <div class="main-layout" :class="{ 'no-detail': !showDetailPanel }">
       <SideNav />
       <main class="center">
         <LoadDataPage v-if="currentPage === 'load'" />
@@ -62,13 +67,13 @@ function onKeyDown(e: KeyboardEvent) {
         <StepsPage v-else-if="currentPage === 'steps'" />
         <BatchPage v-else-if="currentPage === 'batch'" />
         <RootsPage v-else-if="currentPage === 'roots'" />
-        <ViewRootsPage v-else-if="currentPage === 'viewroots'" />
+        <KeyboardPage v-else-if="currentPage === 'keyboard'" />
         <SuggestPage v-else-if="currentPage === 'suggest'" />
         <CoveragePage v-else-if="currentPage === 'coverage'" />
         <FindPage v-else-if="currentPage === 'find'" />
         <ExportPage v-else-if="currentPage === 'export'" />
       </main>
-      <DetailPanel />
+      <DetailPanel v-if="showDetailPanel" />
     </div>
     <ToastNotify />
   </div>
@@ -80,6 +85,9 @@ function onKeyDown(e: KeyboardEvent) {
   grid-template-columns: 260px 1fr 320px;
   gap: 0;
   height: calc(100vh - 64px);
+}
+.main-layout.no-detail {
+  grid-template-columns: 260px 1fr;
 }
 .center {
   overflow-y: auto;
