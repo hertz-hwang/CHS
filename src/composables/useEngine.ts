@@ -1,4 +1,4 @@
-import { reactive, ref, readonly } from 'vue'
+import { reactive, ref, readonly, computed } from 'vue'
 import { CharsHijack } from '@/engine/engine'
 
 const engine = new CharsHijack()
@@ -10,11 +10,15 @@ const toastMsg = ref('')
 const toastVisible = ref(false)
 let toastTimer: ReturnType<typeof setTimeout> | null = null
 
+// 响应式版本号，用于触发计算属性更新
+const rootsVersion = ref(0)
+
 function refreshStats() {
   stats.decomp = engine.decomp.size
   stats.roots = engine.roots.size
   stats.strokes = engine.strokes.size
   stats.freq = engine.freq.size
+  rootsVersion.value++ // 触发依赖 roots 的计算属性更新
 }
 
 function toast(msg: string, duration = 2500) {
@@ -71,7 +75,7 @@ async function loadDefaultData(): Promise<{ loaded: string[]; failed: string[] }
 
 export function useEngine() {
   return {
-    engine, stats: readonly(stats), refreshStats,
+    engine, stats: readonly(stats), refreshStats, rootsVersion,
     currentPage, switchPage,
     selectedChar, selectChar,
     toastMsg: readonly(toastMsg), toastVisible: readonly(toastVisible), toast,

@@ -2,10 +2,12 @@
 import { ref, computed } from 'vue'
 import ModalDialog from '../ModalDialog.vue'
 import { useEngine } from '../../composables/useEngine'
-const { engine, refreshStats, toast } = useEngine()
+const { engine, refreshStats, toast, rootsVersion } = useEngine()
 const modalMode = ref<'set' | 'add' | 'remove' | null>(null); const modalInput = ref('')
 
 const rootsByStroke = computed(() => {
+  // 依赖 rootsVersion 确保在 roots 变化时重新计算
+  rootsVersion.value
   const bySC = new Map<number, string[]>()
   for (const r of [...engine.roots].sort()) { const sc = engine.strokeCount(r); if (!bySC.has(sc)) bySC.set(sc, []); bySC.get(sc)!.push(r) }
   return [...bySC.entries()].sort(([a], [b]) => a - b)
