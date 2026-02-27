@@ -28,22 +28,84 @@ const grouped = computed(() => {
         <select v-model="mode"><option value="d">直接包含</option><option value="r">递归包含</option></select>
         <button class="btn" @click="run">检索</button>
       </div>
-      <div v-if="loading" style="text-align:center;padding:40px;color:var(--text2)"><div class="spinner" />搜索中...</div>
+      <div v-if="loading" class="loading-state">
+        <div class="spinner" />
+        <span>搜索中...</span>
+      </div>
       <template v-if="results.length > 0 && !loading">
-        <p style="color:var(--text2);margin-bottom:8px">包含 <b style="color:var(--accent)">{{ comp }}</b> ({{ results.length }}个)</p>
+        <p class="result-info">
+          包含 <b class="highlight">{{ comp }}</b> ({{ results.length }}个)
+        </p>
         <template v-if="grouped">
-          <div v-for="g in grouped" :key="g.name" style="margin-bottom:8px">
-            <span class="tag tag-blue">{{ g.name }}</span> <span style="color:var(--text2);font-size:12px">({{ g.chars.length }})</span>
-            <div class="fr"><span v-for="ch in g.chars" :key="ch" class="fc" @click="selectChar(ch)">{{ ch }}</span></div>
+          <div v-for="g in grouped" :key="g.name" class="result-group">
+            <div class="group-header">
+              <span class="tag tag-primary">{{ g.name }}</span>
+              <span class="group-count">({{ g.chars.length }})</span>
+            </div>
+            <div class="char-list">
+              <span v-for="ch in g.chars" :key="ch" class="char-item" @click="selectChar(ch)">{{ ch }}</span>
+            </div>
           </div>
         </template>
-        <div v-else class="fr"><span v-for="ch in results.slice(0, 200)" :key="ch" class="fc" @click="selectChar(ch)">{{ ch }}</span></div>
+        <div v-else class="char-list">
+          <span v-for="ch in results.slice(0, 200)" :key="ch" class="char-item" @click="selectChar(ch)">{{ ch }}</span>
+        </div>
       </template>
     </div>
   </div>
 </template>
 <style scoped>
-.fr { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
-.fc { display: inline-block; padding: 4px 8px; background: var(--bg3); border: 1px solid var(--border); border-radius: 4px; font-size: 18px; cursor: pointer; transition: all 0.15s; }
-.fc:hover { border-color: var(--accent); transform: scale(1.1); }
+.loading-state {
+  text-align: center;
+  padding: 40px;
+  color: var(--text2);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+.result-info {
+  color: var(--text2);
+  margin-bottom: 12px;
+  font-size: 14px;
+}
+.result-info .highlight {
+  color: var(--primary);
+  font-size: 16px;
+}
+.result-group {
+  margin-bottom: 16px;
+}
+.group-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.group-count {
+  color: var(--text2);
+  font-size: 12px;
+}
+.char-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.char-item {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 18px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.char-item:hover {
+  border-color: var(--primary);
+  background: var(--primary-bg);
+}
 </style>

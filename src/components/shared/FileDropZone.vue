@@ -9,18 +9,43 @@ function onClick() { fileInput.value?.click() }
 function onFileChange() { if (fileInput.value?.files?.length) emit('files', fileInput.value.files) }
 </script>
 <template>
-  <div class="drop" :class="{ dragover }" @click="onClick" @dragover.prevent="dragover = true" @dragleave="dragover = false" @drop="onDrop">
-    <div class="ic">{{ icon }}</div>
-    <div><b>{{ title }}</b></div>
+  <div class="drop-zone" :class="{ dragover }" @click="onClick" @dragover.prevent="dragover = true" @dragleave="dragover = false" @drop="onDrop">
+    <div class="icon">{{ icon }}</div>
+    <div class="title">{{ title }}</div>
     <div class="desc">{{ desc }}</div>
-    <div v-if="status" class="st" v-html="status" />
+    <div v-if="status" class="status" v-html="status" />
     <input ref="fileInput" type="file" accept=".txt" :multiple="multiple" style="display:none" @change="onFileChange" />
   </div>
 </template>
 <style scoped>
-.drop { border: 2px dashed var(--border); border-radius: 12px; padding: 24px; text-align: center; color: var(--text2); cursor: pointer; transition: all 0.2s; }
-.drop:hover, .drop.dragover { border-color: var(--accent); background: var(--bg3); }
-.ic { font-size: 36px; margin-bottom: 8px; }
-.desc { font-size: 12px; }
-.st { margin-top: 8px; }
+.drop-zone {
+  border: 2px dashed var(--border);
+  border-radius: 8px;
+  padding: 24px;
+  text-align: center;
+  color: var(--text2);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  background: var(--bg2);
+}
+.drop-zone:hover,
+.drop-zone.dragover {
+  border-color: var(--primary);
+  background: var(--primary-bg);
+}
+.icon {
+  font-size: 32px;
+  margin-bottom: 8px;
+}
+.title {
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+.desc {
+  font-size: 12px;
+}
+.status {
+  margin-top: 10px;
+}
 </style>

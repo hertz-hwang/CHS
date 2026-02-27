@@ -198,17 +198,18 @@ function updateRootCode(root: string, newCode: string) {
 .keyboard-container {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 20px;
   height: 100%;
 }
 
 .keyboard {
   background: var(--bg2);
-  border-radius: 12px;
-  padding: 16px;
+  border-radius: 8px;
+  padding: 20px;
   display: flex;
   flex-direction: column;
   gap: 8px;
+  border: 1px solid var(--border);
 }
 
 .keyboard-row {
@@ -218,34 +219,34 @@ function updateRootCode(root: string, newCode: string) {
 
 .key {
   flex: 1;
-  height: 64px;
+  height: 56px;
   background: var(--bg3);
-  border: 2px solid var(--border);
-  border-radius: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 4px;
+  gap: 2px;
   cursor: pointer;
-  transition: all 0.15s;
+  transition: all 0.15s ease;
   user-select: none;
 }
 
 .key:hover {
-  border-color: var(--accent);
+  border-color: var(--primary);
   background: var(--bg);
 }
 
 .key-populated {
-  background: var(--bg);
-  border-color: var(--accent);
+  background: var(--primary-bg);
+  border-color: var(--primary);
 }
 
 .key-selected {
-  background: var(--accent);
+  background: var(--primary);
   color: white;
-  border-color: var(--accent);
+  border-color: var(--primary);
 }
 
 .key-selected .key-count {
@@ -254,15 +255,15 @@ function updateRootCode(root: string, newCode: string) {
 }
 
 .key-label {
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 600;
 }
 
 .key-count {
-  font-size: 12px;
-  background: var(--accent);
+  font-size: 11px;
+  background: var(--primary);
   color: white;
-  padding: 2px 8px;
+  padding: 1px 6px;
   border-radius: 10px;
 }
 
@@ -274,7 +275,7 @@ function updateRootCode(root: string, newCode: string) {
 .key-space {
   max-width: none;
   width: 100%;
-  height: 48px;
+  height: 44px;
   flex: none;
 }
 
@@ -282,10 +283,11 @@ function updateRootCode(root: string, newCode: string) {
 .roots-panel {
   flex: 1;
   background: var(--bg2);
-  border-radius: 12px;
+  border-radius: 8px;
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  border: 1px solid var(--border);
 }
 
 .roots-panel-header {
@@ -299,12 +301,12 @@ function updateRootCode(root: string, newCode: string) {
 
 .roots-panel-header h3 {
   margin: 0;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 500;
 }
 
 .roots-panel-header strong {
-  color: var(--accent);
+  color: var(--primary);
 }
 
 .roots-count {
@@ -328,13 +330,13 @@ function updateRootCode(root: string, newCode: string) {
   gap: 8px;
   background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 6px;
   padding: 8px 12px;
-  transition: all 0.15s;
+  transition: all 0.15s ease;
 }
 
 .root-item.editing {
-  border-color: var(--accent);
+  border-color: var(--primary);
   background: var(--bg2);
 }
 
@@ -346,28 +348,30 @@ function updateRootCode(root: string, newCode: string) {
 
 .root-code {
   font-family: monospace;
-  font-size: 14px;
+  font-size: 13px;
   cursor: pointer;
   padding: 4px 8px;
   background: var(--bg3);
   border-radius: 4px;
   min-width: 40px;
   text-align: center;
+  transition: background 0.15s ease;
 }
 
 .root-code:hover {
-  background: var(--bg4);
+  background: var(--primary-bg);
 }
 
-.root-code .sub { color: #2196F3; }
-.root-code .supplement { color: #4CAF50; }
+.root-code .main { color: var(--primary); font-weight: 600; }
+.root-code .sub { color: var(--primary); opacity: 0.7; }
+.root-code .supplement { color: var(--success); }
 
 .code-input {
   width: 80px;
   padding: 4px 8px;
   font-family: monospace;
-  font-size: 14px;
-  border: 1px solid var(--accent);
+  font-size: 13px;
+  border: 1px solid var(--primary);
   border-radius: 4px;
   background: var(--bg);
 }

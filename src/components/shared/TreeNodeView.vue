@@ -5,12 +5,20 @@ defineProps<{ node: IDSNode }>()
 const { engine, selectChar } = useEngine()
 </script>
 <template>
-  <div class="tn">
+  <div class="tree-node">
     <template v-if="node.isLeaf()">
-      <span class="item leaf" :class="engine.roots.has(node.char!) ? 'is-root' : 'not-root'" @click="selectChar(node.char!)">
-        <span style="font-size:18px">{{ node.char }}</span>
-        <span class="mark" :class="engine.roots.has(node.char!) ? 'ok' : 'no'">{{ engine.roots.has(node.char!) ? '✓' : '✗' }}</span>
-        <span v-if="engine.strokeCount(node.char!)" class="sc">{{ engine.strokeCount(node.char!) }}画</span>
+      <span 
+        class="item leaf" 
+        :class="engine.roots.has(node.char!) ? 'is-root' : 'not-root'" 
+        @click="selectChar(node.char!)"
+      >
+        <span class="char">{{ node.char }}</span>
+        <span class="mark" :class="engine.roots.has(node.char!) ? 'ok' : 'no'">
+          {{ engine.roots.has(node.char!) ? '✓' : '✗' }}
+        </span>
+        <span v-if="engine.strokeCount(node.char!)" class="sc">
+          {{ engine.strokeCount(node.char!) }}画
+        </span>
       </span>
     </template>
     <template v-else>
@@ -20,18 +28,76 @@ const { engine, selectChar } = useEngine()
   </div>
 </template>
 <style scoped>
-.tn { margin-left: 24px; position: relative; }
-.tn::before { content: ''; position: absolute; left: -16px; top: 0; height: 100%; border-left: 1px dashed var(--border); }
-.tn:last-child::before { height: 14px; }
-.tn::after { content: ''; position: absolute; left: -16px; top: 14px; width: 12px; border-top: 1px dashed var(--border); }
-.item { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 6px; margin: 2px 0; font-size: 14px; transition: background 0.15s; }
-.item:hover { background: var(--bg4); }
-.leaf { background: var(--bg3); border: 1px solid var(--border); cursor: pointer; }
-.leaf.is-root { border-color: var(--green); }
-.leaf.not-root { border-color: var(--red); }
-.op { color: var(--orange); font-weight: 600; }
-.mark { font-size: 12px; padding: 1px 5px; border-radius: 4px; }
-.mark.ok { background: #1b5e20; color: var(--green); }
-.mark.no { background: #b71c1c33; color: var(--red); }
-.sc { font-size: 11px; color: var(--text2); }
+.tree-node {
+  margin-left: 24px;
+  position: relative;
+}
+.tree-node::before {
+  content: '';
+  position: absolute;
+  left: -16px;
+  top: 0;
+  height: 100%;
+  border-left: 1px dashed var(--border);
+}
+.tree-node:last-child::before {
+  height: 14px;
+}
+.tree-node::after {
+  content: '';
+  position: absolute;
+  left: -16px;
+  top: 14px;
+  width: 12px;
+  border-top: 1px dashed var(--border);
+}
+.item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  margin: 2px 0;
+  font-size: 14px;
+  transition: all 0.15s ease;
+}
+.item:hover {
+  background: var(--bg3);
+}
+.leaf {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  cursor: pointer;
+}
+.leaf.is-root {
+  border-color: var(--success);
+}
+.leaf.not-root {
+  border-color: var(--danger);
+}
+.char {
+  font-size: 18px;
+}
+.op {
+  color: var(--warning);
+  font-weight: 600;
+}
+.mark {
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: 500;
+}
+.mark.ok {
+  background: #E8FFEA;
+  color: var(--success);
+}
+.mark.no {
+  background: #FFECE8;
+  color: var(--danger);
+}
+.sc {
+  font-size: 11px;
+  color: var(--text2);
+}
 </style>

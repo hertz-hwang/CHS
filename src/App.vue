@@ -82,16 +82,16 @@ function onKeyDown(e: KeyboardEvent) {
 <style scoped>
 .main-layout {
   display: grid;
-  grid-template-columns: 260px 1fr 320px;
+  grid-template-columns: 220px 1fr 300px;
   gap: 0;
-  height: calc(100vh - 64px);
+  height: calc(100vh - 56px);
 }
 .main-layout.no-detail {
-  grid-template-columns: 260px 1fr;
+  grid-template-columns: 220px 1fr;
 }
 .center {
   overflow-y: auto;
-  padding: 20px 24px;
+  padding: 24px;
   background: var(--bg);
 }
 @media (max-width: 900px) {

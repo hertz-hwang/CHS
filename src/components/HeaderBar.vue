@@ -5,74 +5,84 @@ const { stats } = useEngine();
 <template>
     <header class="header">
         <div class="title">
-            <h1>字 劫</h1>
+            <h1>字劫</h1>
             <span class="ver">v1.3</span>
             <span class="sub">拆分系统</span>
         </div>
         <div class="stats">
-            <span
-                >拆分 <b>{{ stats.decomp }}</b></span
-            >
-            <span
-                >字根 <b>{{ stats.roots }}</b></span
-            >
-            <span
-                >笔画 <b>{{ stats.strokes }}</b></span
-            >
-            <span
-                >字频 <b>{{ stats.freq }}</b></span
-            >
+            <div class="stat-item">
+                <span class="stat-label">拆分</span>
+                <span class="stat-value">{{ stats.decomp }}</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-label">字根</span>
+                <span class="stat-value">{{ stats.roots }}</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-label">笔画</span>
+                <span class="stat-value">{{ stats.strokes }}</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-label">字频</span>
+                <span class="stat-value">{{ stats.freq }}</span>
+            </div>
         </div>
     </header>
 </template>
 <style scoped>
 .header {
-    background: linear-gradient(135deg, #0d1b2a 0%, #1b2838 50%, #0d1b2a 100%);
+    background: var(--bg2);
     border-bottom: 1px solid var(--border);
-    padding: 16px 24px;
+    padding: 0 24px;
+    height: 56px;
     display: flex;
     align-items: center;
     justify-content: space-between;
     position: sticky;
     top: 0;
     z-index: 100;
-    backdrop-filter: blur(10px);
 }
 .title {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 10px;
 }
 h1 {
-    font-size: 24px;
-    background: linear-gradient(135deg, var(--accent), var(--cyan));
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--primary);
+    letter-spacing: 2px;
 }
 .ver {
-    font-size: 12px;
+    font-size: 11px;
     color: var(--text2);
     background: var(--bg3);
-    padding: 2px 8px;
-    border-radius: 10px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-weight: 500;
 }
 .sub {
     color: var(--text2);
     font-size: 13px;
+    margin-left: 4px;
 }
 .stats {
     display: flex;
-    gap: 20px;
-    font-size: 13px;
+    gap: 24px;
+}
+.stat-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+}
+.stat-label {
+    font-size: 11px;
     color: var(--text2);
 }
-.stats span {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-}
-.stats b {
-    color: var(--accent);
+.stat-value {
+    font-size: 15px;
     font-weight: 600;
+    color: var(--primary);
 }
 </style>

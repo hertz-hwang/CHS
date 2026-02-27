@@ -319,8 +319,8 @@ const modalTitle = computed(() => ({
 .roots-page {
   display: flex;
   flex-direction: column;
-  height: calc(100vh - 64px - 40px);
-  gap: 12px;
+  height: calc(100vh - 56px - 48px);
+  gap: 16px;
 }
 
 .toolbar {
@@ -328,7 +328,11 @@ const modalTitle = computed(() => ({
   align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
-  gap: 12px;
+  gap: 16px;
+  padding: 16px 20px;
+  background: var(--bg2);
+  border-radius: 8px;
+  border: 1px solid var(--border);
 }
 
 .toolbar-left {
@@ -338,60 +342,77 @@ const modalTitle = computed(() => ({
 }
 
 .title {
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 600;
 }
 
 .count {
   font-size: 13px;
   color: var(--text2);
+  background: var(--bg3);
+  padding: 4px 10px;
+  border-radius: 4px;
 }
 
 .toolbar-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 8px;
 }
 
 .add-form {
-  min-width: 260px;
+  min-width: 280px;
 }
 
 .form-row {
-  margin-bottom: 12px;
+  margin-bottom: 16px;
 }
 
 .form-row label {
   display: block;
   font-size: 12px;
   color: var(--text2);
-  margin-bottom: 4px;
+  margin-bottom: 6px;
+  font-weight: 500;
 }
 
 .form-row input {
   width: 100%;
-  padding: 8px;
-  font-size: 16px;
+  padding: 10px 12px;
+  font-size: 15px;
 }
 
 .code-preview {
-  margin-bottom: 12px;
+  margin-bottom: 16px;
   font-family: monospace;
   font-size: 16px;
+  padding: 12px;
+  background: var(--bg3);
+  border-radius: 6px;
 }
 
-.code-preview .main { font-weight: bold; }
-.code-preview .sub { color: #2196F3; }
-.code-preview .supplement { color: #4CAF50; }
+.code-preview .main { 
+  font-weight: 600; 
+  color: var(--primary);
+}
+.code-preview .sub { 
+  color: var(--primary); 
+  opacity: 0.7;
+}
+.code-preview .supplement { 
+  color: var(--success); 
+}
 
 .shuffle-form {
-  min-width: 320px;
+  min-width: 360px;
 }
 
 .shuffle-form code {
-  background: var(--bg3);
+  background: var(--primary-bg);
+  color: var(--primary);
   padding: 2px 6px;
   border-radius: 4px;
   font-family: monospace;
+  font-size: 13px;
 }
 </style>

@@ -7,11 +7,23 @@ const { toastMsg, toastVisible } = useEngine()
 </template>
 <style scoped>
 .toast {
-  position: fixed; bottom: 20px; right: 20px; background: var(--bg3);
-  border: 1px solid var(--border); border-radius: 8px; padding: 12px 20px;
-  color: var(--text); font-size: 14px; z-index: 1000;
-  transform: translateY(100px); opacity: 0; transition: all 0.3s ease;
-  box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px 20px;
+  color: var(--text);
+  font-size: 14px;
+  z-index: 1000;
+  transform: translateY(100px);
+  opacity: 0;
+  transition: all 0.3s ease;
+  box-shadow: var(--shadow2);
 }
-.toast.show { transform: translateY(0); opacity: 1; }
+.toast.show {
+  transform: translateY(0);
+  opacity: 1;
+}
 </style>
