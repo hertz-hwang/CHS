@@ -1,7 +1,20 @@
 <script setup lang="ts">
 import { useEngine } from '../composables/useEngine'
 const { currentPage, switchPage } = useEngine()
-const sections = [
+
+interface NavItem {
+  page: string
+  icon: string
+  label: string
+  kbd?: string
+}
+
+interface NavSection {
+  title: string
+  items: NavItem[]
+}
+
+const sections: NavSection[] = [
   { title: '数据', items: [{ page: 'load', icon: '📂', label: '加载数据' }] },
   { title: '拆分', items: [
     { page: 'decompose', icon: '🔍', label: '拆分汉字', kbd: '1' },

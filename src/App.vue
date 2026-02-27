@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { onMounted, ref } from 'vue'
 import HeaderBar from './components/HeaderBar.vue'
 import SideNav from './components/SideNav.vue'
 import DetailPanel from './components/DetailPanel.vue'
@@ -17,13 +17,25 @@ import FindPage from './components/pages/FindPage.vue'
 import ExportPage from './components/pages/ExportPage.vue'
 import { useEngine } from './composables/useEngine'
 
-const { engine, currentPage, refreshStats, toast, switchPage } = useEngine()
+const { engine, currentPage, refreshStats, toast, switchPage, loadDefaultData } = useEngine()
 
-onMounted(() => {
+const isLoading = ref(true)
+
+onMounted(async () => {
+  // 自动加载默认数据
+  const { loaded, failed } = await loadDefaultData()
+  if (loaded.length > 0) {
+    toast(`已加载: ${loaded.join(', ')}`)
+  }
+  if (failed.length > 0) {
+    toast(`加载失败: ${failed.join(', ')}`, 4000)
+  }
+
+  // 恢复保存的字根
   if (engine.loadSavedRoots()) {
     refreshStats()
-    toast(`恢复上次字根: ${engine.roots.size} 个`)
   }
+  isLoading.value = false
 })
 
 function onKeyDown(e: KeyboardEvent) {

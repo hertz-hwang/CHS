@@ -28,7 +28,7 @@ function restoreRoots() { if (engine.loadSavedRoots()) { refreshStats(); toast(`
     <div class="panel-body">
       <p style="color:var(--text2);margin-bottom:16px;font-size:13px">支持拖拽或点击上传。所有处理在本地完成。</p>
       <div class="grid">
-        <FileDropZone icon="📄" title="sky_ids.txt" desc="IDS 拆分数据 (必需)" :status="statusIds" @files="onIDS" />
+        <FileDropZone icon="📄" title="sky_ids.txt" desc="IDS 序列 (必需)" :status="statusIds" @files="onIDS" />
         <FileDropZone icon="📄" title="custom_ids.txt" desc="自定义 IDS (可选)" :status="statusCustom" @files="onCustom" />
         <FileDropZone icon="📄" title="stroke.txt" desc="笔画数据 (可选)" :status="statusStroke" @files="onStroke" />
         <FileDropZone icon="📄" title="dictionary.txt" desc="字频/拼音 (可选)" :status="statusDict" @files="onDict" />

@@ -1,3 +1,4 @@
 /node_modules
 /setup.sh
 /package-lock.json
+/dist

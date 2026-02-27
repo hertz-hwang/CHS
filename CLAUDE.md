@@ -36,7 +36,7 @@ npm run preview  # 预览生产构建
 
 ### 数据文件 (`data/`)
 
-- `sky_ids.txt` - IDS 拆分数据 (TSV: U+码点、汉字、IDS表达式)
+- `sky_ids.txt` - IDS 序列 (TSV: U+码点、汉字、IDS表达式)
 - `custom_ids.txt` - 自定义 IDS，会覆盖 sky_ids 中的条目
 - `stroke.txt` - 笔画数据
 - `dictionary.txt` - 拼音和字频
