@@ -1,11 +1,20 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, watch, onMounted } from 'vue'
 import TreeNodeView from '../shared/TreeNodeView.vue'
 import { useEngine } from '../../composables/useEngine'
 import type { IDSNode } from '../../engine/ids'
-const { engine, selectChar } = useEngine()
+const { engine, selectChar, searchChar, clearSearchChar } = useEngine()
 const input = ref(''); const tree = ref<IDSNode | null>(null); const char = ref('')
 function run() { const ch = [...input.value.trim()][0]; if (!ch) return; char.value = ch; tree.value = engine.buildTree(ch); selectChar(ch) }
+
+// 页面加载时检查是否有传递过来的查询字
+onMounted(() => {
+  if (searchChar.value) {
+    input.value = searchChar.value
+    run()
+    clearSearchChar()
+  }
+})
 </script>
 <template>
   <div class="panel">

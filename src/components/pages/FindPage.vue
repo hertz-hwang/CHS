@@ -1,12 +1,21 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useEngine } from '../../composables/useEngine'
-const { engine, selectChar } = useEngine()
+const { engine, selectChar, searchChar, clearSearchChar } = useEngine()
 const input = ref(''); const mode = ref('d'); const results = ref<string[]>([]); const loading = ref(false); const comp = ref('')
 function run() {
   const c = [...input.value.trim()][0]; if (!c) return; comp.value = c; loading.value = true
   setTimeout(() => { results.value = mode.value === 'r' ? engine.findCharsDeep(c) : engine.findCharsWith(c); loading.value = false }, 50)
 }
+
+// 页面加载时检查是否有传递过来的查询字
+onMounted(() => {
+  if (searchChar.value) {
+    input.value = searchChar.value
+    run()
+    clearSearchChar()
+  }
+})
 const grouped = computed(() => {
   if (!engine.charsets.size) return null
   const groups: { name: string; chars: string[] }[] = []; const shown = new Set<string>()

@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useEngine } from '../../composables/useEngine'
 import type { StepInfo } from '../../engine/engine'
-const { engine, selectChar } = useEngine()
+const { engine, selectChar, searchChar, clearSearchChar } = useEngine()
 const input = ref(''); const steps = ref<StepInfo[]>([]); const finalLeaves = ref<string[]>([]); const char = ref(''); const noData = ref(false)
 function run() {
   const ch = [...input.value.trim()][0]; if (!ch) return; char.value = ch
@@ -10,6 +10,15 @@ function run() {
   if (!noData.value) finalLeaves.value = engine.decompose(ch).leaves
   selectChar(ch)
 }
+
+// 页面加载时检查是否有传递过来的查询字
+onMounted(() => {
+  if (searchChar.value) {
+    input.value = searchChar.value
+    run()
+    clearSearchChar()
+  }
+})
 function cls(x: string) { if (engine.roots.has(x)) return 'is-root'; if (engine.decomp.has(x)) return 'has-decomp'; return 'no-data' }
 function mk(x: string) { if (engine.roots.has(x)) return '✓'; if (engine.decomp.has(x)) return '→'; return '■' }
 </script>

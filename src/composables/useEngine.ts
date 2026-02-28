@@ -7,6 +7,7 @@ const engine = new CharsHijack()
 const stats = reactive({ decomp: 0, roots: 0, strokes: 0, freq: 0 })
 const currentPage = ref('load')
 const selectedChar = ref<string | null>(null)
+const searchChar = ref<string | null>(null)  // 用于页面间传递查询字
 const toastMsg = ref('')
 const toastVisible = ref(false)
 let toastTimer: ReturnType<typeof setTimeout> | null = null
@@ -35,6 +36,8 @@ function toast(msg: string, duration = 2500) {
 
 function switchPage(name: string) { currentPage.value = name }
 function selectChar(ch: string) { selectedChar.value = ch }
+function setSearchChar(ch: string) { searchChar.value = ch }
+function clearSearchChar() { searchChar.value = null }
 
 async function fetchText(path: string): Promise<string | null> {
   try {
@@ -122,6 +125,7 @@ export function useEngine() {
     engine, stats: readonly(stats), refreshStats, rootsVersion, configVersion,
     currentPage, switchPage,
     selectedChar, selectChar,
+    searchChar: readonly(searchChar), setSearchChar, clearSearchChar,
     toastMsg: readonly(toastMsg), toastVisible: readonly(toastVisible), toast,
     loadDefaultData,
     // 配置管理

@@ -30,6 +30,11 @@ export interface SuggestItem {
   sc: number
 }
 
+export interface PinyinInfo {
+  py: string      // 拼音
+  freq: number    // 词频
+}
+
 const LS_KEY = 'chars_hijack_roots'
 
 function parseRootsFromText(text: string): Set<string> {
@@ -55,9 +60,10 @@ function parseRootsFromText(text: string): Set<string> {
 
 export class CharsHijack {
   decomp = new Map<string, string>()
-  strokes = new Map<string, string>()
+  strokes = new Map<string, string[]>()       // 支持多笔画（大陆/台湾标准）
   freq = new Map<string, number>()
-  pinyin = new Map<string, string>()
+  pinyinList = new Map<string, PinyinInfo[]>() // 支持多音字，按词频降序
+  pinyin = new Map<string, string>()          // 保留兼容，存储最高频拼音
   roots = new Set<string>()
   charsets = new Map<string, string[]>()
   private _cache = new Map<string, DecompResult>()
@@ -125,7 +131,16 @@ export class CharsHijack {
       const line = raw.trim()
       if (!line || line.startsWith('#')) continue
       const cols = line.split('\t')
-      if (cols.length >= 2) { this.strokes.set(cols[0], cols[1]); n++ }
+      if (cols.length >= 2) {
+        const ch = cols[0]
+        const stroke = cols[1]
+        // 收集所有笔画编码（保持顺序，大陆标准在前）
+        if (!this.strokes.has(ch)) {
+          this.strokes.set(ch, [])
+        }
+        this.strokes.get(ch)!.push(stroke)
+        n++
+      }
     }
     return n
   }
@@ -138,12 +153,34 @@ export class CharsHijack {
       const cols = line.split('\t')
       if (cols.length >= 3 && [...cols[0]].length === 1) {
         const ch = cols[0]
-        this.pinyin.set(ch, cols[1])
-        const fq = parseInt(cols[2])
-        if (!isNaN(fq)) this.freq.set(ch, fq)
+        const py = cols[1]
+        const fq = parseInt(cols[2]) || 0
+        
+        // 收集所有拼音信息
+        if (!this.pinyinList.has(ch)) {
+          this.pinyinList.set(ch, [])
+        }
+        this.pinyinList.get(ch)!.push({ py, freq: fq })
+        
+        // 更新词频（取最大值）
+        if (fq > 0) {
+          const existingFq = this.freq.get(ch) || 0
+          if (fq > existingFq) {
+            this.freq.set(ch, fq)
+          }
+        }
         n++
       }
     }
+    
+    // 对每个字的拼音按词频降序排列，并设置最高频拼音到 pinyin（兼容）
+    for (const [ch, list] of this.pinyinList) {
+      list.sort((a, b) => b.freq - a.freq)
+      if (list.length > 0) {
+        this.pinyin.set(ch, list[0].py)
+      }
+    }
+    
     return n
   }
 
@@ -381,7 +418,19 @@ export class CharsHijack {
   }
 
   strokeCount(ch: string): number {
-    return (this.strokes.get(ch) || '').length
+    // 取第一个笔画编码的长度（大陆标准）
+    const arr = this.strokes.get(ch)
+    return arr && arr.length > 0 ? arr[0].length : 0
+  }
+
+  // 获取所有拼音（按词频降序）
+  getPinyinList(ch: string): PinyinInfo[] {
+    return this.pinyinList.get(ch) || []
+  }
+
+  // 获取所有笔画编码
+  getStrokes(ch: string): string[] {
+    return this.strokes.get(ch) || []
   }
 
   findCharsWith(comp: string): string[] {

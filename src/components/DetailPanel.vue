@@ -2,25 +2,46 @@
 import { computed } from 'vue'
 import { useEngine } from '../composables/useEngine'
 import { unicodeBlock, unicodeHex } from '../engine/unicode'
+import type { PinyinInfo } from '../engine/engine'
 
-const { engine, selectedChar, refreshStats, toast, switchPage } = useEngine()
+const { engine, selectedChar, refreshStats, toast, switchPage, setSearchChar } = useEngine()
 
 const detail = computed(() => {
   const ch = selectedChar.value
   if (!ch) return null
   const { leaves, ids } = engine.decompose(ch)
+  
+  // 获取所有拼音（已按词频降序）
+  const pinyinList = engine.getPinyinList(ch)
+  
+  // 获取所有笔画编码
+  const strokeList = engine.getStrokes(ch)
+  
   return {
     char: ch, leaves, ids,
     origIDS: engine.decomp.get(ch) || '—',
     sc: engine.strokeCount(ch),
-    strokeData: engine.strokes.get(ch) || '—',
-    py: engine.pinyin.get(ch) || '—',
+    strokeList,         // 所有笔画编码
+    pinyinList,         // 所有拼音信息
     fq: engine.freq.has(ch) ? engine.freq.get(ch) : '—',
     isRoot: engine.roots.has(ch),
     block: unicodeBlock(ch),
     code: unicodeHex(ch),
   }
 })
+
+// 格式化拼音显示
+function formatPinyin(list: PinyinInfo[]): string {
+  if (list.length === 0) return '—'
+  return list.map(p => p.py).join(', ')
+}
+
+// 格式化词频显示
+function formatFreq(freq: number): string {
+  if (freq >= 100000000) return (freq / 100000000).toFixed(1) + '亿'
+  if (freq >= 10000) return (freq / 10000).toFixed(1) + '万'
+  return freq.toLocaleString()
+}
 
 function toggleRoot() {
   if (!detail.value) return
@@ -30,6 +51,13 @@ function toggleRoot() {
   refreshStats()
   selectedChar.value = null
   setTimeout(() => { selectedChar.value = ch }, 0)
+}
+
+// 跳转到指定页面并带上当前字
+function goToPage(page: string) {
+  if (!detail.value) return
+  setSearchChar(detail.value.char)
+  switchPage(page)
 }
 </script>
 <template>
@@ -60,14 +88,6 @@ function toggleRoot() {
           <div class="value">{{ detail.sc || '—' }}</div>
         </div>
         <div class="info-item">
-          <div class="label">笔画编码</div>
-          <div class="value mono small">{{ detail.strokeData }}</div>
-        </div>
-        <div class="info-item">
-          <div class="label">拼音</div>
-          <div class="value">{{ detail.py }}</div>
-        </div>
-        <div class="info-item">
           <div class="label">词频</div>
           <div class="value">{{ detail.fq }}</div>
         </div>
@@ -84,6 +104,32 @@ function toggleRoot() {
       </div>
       
       <div class="info-row">
+        <div class="label">拼音</div>
+        <div class="value">
+          <template v-if="detail.pinyinList.length > 0">
+            <span v-for="(p, i) in detail.pinyinList" :key="i" class="pinyin-item">
+              <span class="pinyin-text">{{ p.py }}</span>
+              <span v-if="p.freq > 0" class="pinyin-freq">({{ formatFreq(p.freq) }})</span>
+            </span>
+          </template>
+          <span v-else>—</span>
+        </div>
+      </div>
+      
+      <div class="info-row">
+        <div class="label">笔画编码</div>
+        <div class="value">
+          <template v-if="detail.strokeList.length > 0">
+            <div v-for="(s, i) in detail.strokeList" :key="i" class="stroke-item">
+              <span class="mono small">{{ s }}</span>
+              <span class="stroke-label">{{ i === 0 ? '(大陆)' : '(台湾)' }}</span>
+            </div>
+          </template>
+          <span v-else>—</span>
+        </div>
+      </div>
+      
+      <div class="info-row">
         <div class="label">状态</div>
         <div class="value">
           <span v-if="detail.isRoot" class="tag tag-success">是字根</span>
@@ -95,9 +141,9 @@ function toggleRoot() {
         <button class="btn btn-sm" :class="detail.isRoot ? 'btn-danger' : 'btn-success'" @click="toggleRoot">
           {{ detail.isRoot ? '移除字根' : '设为字根' }}
         </button>
-        <button class="btn btn-sm btn-outline" @click="switchPage('tree')">查看树</button>
-        <button class="btn btn-sm btn-outline" @click="switchPage('steps')">逐步拆</button>
-        <button class="btn btn-sm btn-outline" @click="switchPage('find')">检索</button>
+        <button class="btn btn-sm btn-outline" @click="goToPage('tree')">查看树</button>
+        <button class="btn btn-sm btn-outline" @click="goToPage('steps')">逐步拆</button>
+        <button class="btn btn-sm btn-outline" @click="goToPage('find')">检索</button>
       </div>
     </template>
   </aside>
@@ -172,5 +218,35 @@ h3 {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+}
+.pinyin-item {
+  display: inline-block;
+  margin-right: 8px;
+  margin-bottom: 4px;
+}
+.pinyin-text {
+  color: var(--text);
+}
+.pinyin-freq {
+  font-size: 11px;
+  color: var(--text2);
+  margin-left: 2px;
+}
+.pinyin-item:not(:last-child)::after {
+  content: ',';
+  color: var(--text2);
+}
+.stroke-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+.stroke-label {
+  font-size: 11px;
+  color: var(--text2);
+  background: var(--bg3);
+  padding: 1px 4px;
+  border-radius: 3px;
 }
 </style>
