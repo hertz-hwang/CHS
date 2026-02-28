@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-defineProps<{ icon: string; title: string; desc: string; status?: string; multiple?: boolean }>()
+defineProps<{ icon: string; title: string; desc: string; status?: string; multiple?: boolean; accept?: string }>()
 const emit = defineEmits<{ files: [FileList] }>()
 const dragover = ref(false)
 const fileInput = ref<HTMLInputElement>()
@@ -14,7 +14,7 @@ function onFileChange() { if (fileInput.value?.files?.length) emit('files', file
     <div class="title">{{ title }}</div>
     <div class="desc">{{ desc }}</div>
     <div v-if="status" class="status" v-html="status" />
-    <input ref="fileInput" type="file" accept=".txt" :multiple="multiple" style="display:none" @change="onFileChange" />
+    <input ref="fileInput" type="file" :accept="accept || '.txt'" :multiple="multiple" style="display:none" @change="onFileChange" />
   </div>
 </template>
 <style scoped>

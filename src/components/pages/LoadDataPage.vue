@@ -3,7 +3,6 @@ import { ref } from 'vue'
 import FileDropZone from '../shared/FileDropZone.vue'
 import IdsTransformer from '../shared/IdsTransformer.vue'
 import { useEngine } from '../../composables/useEngine'
-import { parseConfig, exportConfig, saveConfigToStorage, loadConfigFromStorage } from '../../engine/config'
 
 const { engine, refreshStats, toast } = useEngine()
 const statusIds = ref(''); const statusCustom = ref(''); const statusStroke = ref('')
@@ -24,48 +23,6 @@ async function onCharsets(files: FileList) {
 async function onRoots(files: FileList) { const t = await readFile(files[0]); const n = engine.loadRootsFromText(t); statusRoots.value = `<span class="tag tag-success">✔ ${n} 个</span>`; refreshStats(); toast(`字根: ${n} 个`) }
 function initAtomic() { if (!engine.decomp.size) { toast('请先加载 IDS 数据！'); return }; const a = engine.useAtomicRoots(); refreshStats(); toast(`原子字根: ${a.size} 个`) }
 function restoreRoots() { if (engine.loadSavedRoots()) { refreshStats(); toast(`恢复: ${engine.roots.size} 个`) } else toast('未找到保存的字根') }
-
-// 配置导入导出
-async function importConfig(files: FileList) {
-  try {
-    const t = await readFile(files[0])
-    const config = parseConfig(t)
-    engine.applyConfig(config)
-    refreshStats()
-    toast(`配置已加载: ${Object.keys(config.roots).length} 字根, ${config.rules.length} 规则`)
-  } catch (e) {
-    toast('配置文件解析失败')
-    console.error(e)
-  }
-}
-
-function exportConfigFile() {
-  const config = engine.getConfig()
-  const toml = exportConfig(config)
-  const blob = new Blob([toml], { type: 'text/plain;charset=utf-8' })
-  const a = document.createElement('a')
-  a.href = URL.createObjectURL(blob)
-  a.download = 'chars_hijack_config.toml'
-  a.click()
-  toast('配置已导出')
-}
-
-function saveConfig() {
-  const config = engine.getConfig()
-  saveConfigToStorage(config)
-  toast('配置已保存')
-}
-
-function loadSavedConfig() {
-  const config = loadConfigFromStorage()
-  if (config) {
-    engine.applyConfig(config)
-    refreshStats()
-    toast('配置已恢复')
-  } else {
-    toast('未找到保存的配置')
-  }
-}
 </script>
 <template>
   <div class="panel">
@@ -85,19 +42,6 @@ function loadSavedConfig() {
       <div class="action-row">
         <button class="btn btn-success" @click="initAtomic">🧩 使用原子字根</button>
         <button class="btn btn-outline" @click="restoreRoots">📥 恢复保存的字根</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- 配置管理 -->
-  <div class="panel config-panel">
-    <div class="panel-head">⚙️ 配置管理</div>
-    <div class="panel-body">
-      <FileDropZone icon="📋" title="导入配置 (.toml)" desc="字根编码、命名字根、转换规则" @files="importConfig" />
-      <div class="action-row">
-        <button class="btn btn-success" @click="exportConfigFile">📤 导出配置</button>
-        <button class="btn" @click="saveConfig">💾 保存配置</button>
-        <button class="btn btn-outline" @click="loadSavedConfig">📥 恢复配置</button>
       </div>
     </div>
   </div>
