@@ -29,15 +29,34 @@ export type TransformRuleConfig = (VisualRuleConfig | RegexRuleConfig) & {
   enabled?: boolean
 }
 
+// 取码规则节点类型
+export interface CodeRuleNode {
+  id: string
+  type: 'start' | 'end' | 'pick' | 'condition'
+  label: string
+  rootIndex?: number
+  codeIndex?: number
+  nextNode?: string       // 取码节点的下一节点
+  conditionType?: 'root_exists' | 'root_has_code' | 'root_count'
+  conditionValue?: number
+  conditionCodeIndex?: number  // 用于 root_has_code 条件
+  trueBranch?: string
+  falseBranch?: string
+  position?: { x: number; y: number }  // 节点位置
+}
+
 export interface UserConfig {
   meta: {
     version: string
+    name?: string
+    author?: string
     created?: string
     description?: string
   }
   roots: Record<string, string>      // 字根 -> 编码字符串
   named_roots: Record<string, string> // 命名字根名 -> IDS
-  rules: TransformRuleConfig[]
+  rules: TransformRuleConfig[]        // IDS 转换规则
+  code_rules: CodeRuleNode[]          // 取码规则
 }
 
 // ============ 编码解析 ============
@@ -84,6 +103,7 @@ export function parseConfig(toml: string): UserConfig {
       roots: parsed.roots || {},
       named_roots: parsed.named_roots || {},
       rules: parsed.rules || [],
+      code_rules: parsed.code_rules || [],
     }
   } catch (e) {
     console.error('TOML parse error:', e)
@@ -92,6 +112,7 @@ export function parseConfig(toml: string): UserConfig {
       roots: {},
       named_roots: {},
       rules: [],
+      code_rules: [],
     }
   }
 }
@@ -102,6 +123,8 @@ export function exportConfig(config: UserConfig): string {
   // meta
   lines.push('[meta]')
   lines.push(`version = "${config.meta.version}"`)
+  if (config.meta.name) lines.push(`name = "${config.meta.name}"`)
+  if (config.meta.author) lines.push(`author = "${config.meta.author}"`)
   if (config.meta.created) lines.push(`created = "${config.meta.created}"`)
   if (config.meta.description) lines.push(`description = "${config.meta.description}"`)
   lines.push('')
@@ -124,7 +147,7 @@ export function exportConfig(config: UserConfig): string {
     lines.push('')
   }
 
-  // rules
+  // rules (IDS 转换规则)
   for (const rule of config.rules) {
     lines.push('[[rules]]')
     lines.push(`name = "${rule.name}"`)
@@ -139,6 +162,26 @@ export function exportConfig(config: UserConfig): string {
     } else {
       lines.push(`pattern = "${rule.pattern}"`)
       lines.push(`replacement = "${rule.replacement}"`)
+    }
+    lines.push('')
+  }
+
+  // code_rules (取码规则)
+  for (const codeRule of config.code_rules) {
+    lines.push('[[code_rules]]')
+    lines.push(`id = "${codeRule.id}"`)
+    lines.push(`type = "${codeRule.type}"`)
+    lines.push(`label = "${codeRule.label}"`)
+    if (codeRule.rootIndex !== undefined) lines.push(`rootIndex = ${codeRule.rootIndex}`)
+    if (codeRule.codeIndex !== undefined) lines.push(`codeIndex = ${codeRule.codeIndex}`)
+    if (codeRule.nextNode !== undefined) lines.push(`nextNode = "${codeRule.nextNode}"`)
+    if (codeRule.conditionType !== undefined) lines.push(`conditionType = "${codeRule.conditionType}"`)
+    if (codeRule.conditionValue !== undefined) lines.push(`conditionValue = ${codeRule.conditionValue}`)
+    if (codeRule.conditionCodeIndex !== undefined) lines.push(`conditionCodeIndex = ${codeRule.conditionCodeIndex}`)
+    if (codeRule.trueBranch !== undefined) lines.push(`trueBranch = "${codeRule.trueBranch}"`)
+    if (codeRule.falseBranch !== undefined) lines.push(`falseBranch = "${codeRule.falseBranch}"`)
+    if (codeRule.position !== undefined) {
+      lines.push(`position = { x = ${codeRule.position.x}, y = ${codeRule.position.y} }`)
     }
     lines.push('')
   }
@@ -168,15 +211,27 @@ export function saveConfigToStorage(config: UserConfig): void {
 
 // ============ 默认配置 ============
 
-export function createDefaultConfig(): UserConfig {
+export function createDefaultConfig(name?: string, author?: string): UserConfig {
   return {
     meta: {
       version: '1.0',
+      name: name || '',
+      author: author || '',
       created: new Date().toISOString().split('T')[0],
       description: '字劫用户配置',
     },
     roots: {},
     named_roots: {},
     rules: [],
+    code_rules: [],
   }
+}
+
+// ============ 默认取码规则 ============
+
+export function createDefaultCodeRules(): CodeRuleNode[] {
+  return [
+    { id: 'start', type: 'start', label: '开始' },
+    { id: 'end', type: 'end', label: '结束' },
+  ]
 }

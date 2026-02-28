@@ -66,12 +66,6 @@ function initAtomic() {
     return
   }
   engine.useAtomicRoots()
-  // 初始化所有原子字根的默认编码为 "d"
-  for (const root of engine.roots) {
-    if (!engine.rootCodes.has(root)) {
-      engine.rootCodes.set(root, { root, main: 'd' })
-    }
-  }
   refreshStats()
   toast(`原子字根: ${engine.roots.size} 个`)
 }

@@ -4,6 +4,12 @@ import { UserConfig, parseConfig, exportConfig, saveConfigToStorage, loadConfigF
 
 const engine = new CharsHijack()
 
+// 在模块初始化时立即加载保存的配置
+const savedConfig = loadConfigFromStorage()
+if (savedConfig) {
+  engine.applyConfig(savedConfig)
+}
+
 const stats = reactive({ decomp: 0, roots: 0, strokes: 0, freq: 0 })
 const currentPage = ref('load')
 const selectedChar = ref<string | null>(null)
@@ -23,6 +29,7 @@ function refreshStats() {
   stats.roots = engine.roots.size
   stats.strokes = engine.strokes.size
   stats.freq = engine.freq.size
+  engine.clearCache() // 清除拆分缓存，确保重新计算
   rootsVersion.value++ // 触发依赖 roots 的计算属性更新
   configVersion.value++ // 触发配置相关的更新
 }

@@ -4,26 +4,27 @@ import HeaderBar from './components/HeaderBar.vue'
 import SideNav from './components/SideNav.vue'
 import DetailPanel from './components/DetailPanel.vue'
 import ToastNotify from './components/ToastNotify.vue'
-import LoadDataPage from './components/pages/LoadDataPage.vue'
-import DecomposePage from './components/pages/DecomposePage.vue'
-import TreePage from './components/pages/TreePage.vue'
-import StepsPage from './components/pages/StepsPage.vue'
-import BatchPage from './components/pages/BatchPage.vue'
-import RootsPage from './components/pages/RootsPage.vue'
-import KeyboardPage from './components/pages/KeyboardPage.vue'
-import SuggestPage from './components/pages/SuggestPage.vue'
+
+// 新页面
+import DataPage from './components/pages/DataPage.vue'
+import ElementPage from './components/pages/ElementPage.vue'
+import SplitPage from './components/pages/SplitPage.vue'
+import RulePage from './components/pages/RulePage.vue'
+import CodePage from './components/pages/CodePage.vue'
+
+// 保留的页面
 import CoveragePage from './components/pages/CoveragePage.vue'
-import FindPage from './components/pages/FindPage.vue'
-import ExportPage from './components/pages/ExportPage.vue'
+import SuggestPage from './components/pages/SuggestPage.vue'
+
 import { useEngine } from './composables/useEngine'
 
-const { engine, currentPage, refreshStats, toast, switchPage, loadDefaultData } = useEngine()
+const { engine, currentPage, refreshStats, toast, loadDefaultData } = useEngine()
 
 const isLoading = ref(true)
 
-// 不显示右侧详情栏的页面
-const hideDetailPages = ['load', 'roots', 'keyboard', 'suggest', 'export']
-const showDetailPanel = computed(() => !hideDetailPages.includes(currentPage.value))
+// 显示右侧详情栏的页面（保留旧页面的兼容）
+const showDetailPages = ['data', 'split', 'code', 'coverage', 'suggest']
+const showDetailPanel = computed(() => showDetailPages.includes(currentPage.value))
 
 onMounted(async () => {
   // 自动加载默认数据
@@ -42,36 +43,29 @@ onMounted(async () => {
   isLoading.value = false
 })
 
-function onKeyDown(e: KeyboardEvent) {
-  const tag = (e.target as HTMLElement).tagName
-  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
-  const map: Record<string, string> = {
-    '1': 'decompose', '2': 'tree', '3': 'steps', '4': 'roots',
-    '5': 'suggest', '6': 'coverage', '7': 'batch', '8': 'export',
-    '9': 'keyboard',
-    'f': 'find', 'F': 'find',
-  }
-  if (map[e.key]) switchPage(map[e.key])
-}
 </script>
 
 <template>
-  <div @keydown="onKeyDown" tabindex="-1" style="outline:none">
+  <div>
     <HeaderBar />
     <div class="main-layout" :class="{ 'no-detail': !showDetailPanel }">
       <SideNav />
       <main class="center">
-        <LoadDataPage v-if="currentPage === 'load'" />
-        <DecomposePage v-else-if="currentPage === 'decompose'" />
-        <TreePage v-else-if="currentPage === 'tree'" />
-        <StepsPage v-else-if="currentPage === 'steps'" />
-        <BatchPage v-else-if="currentPage === 'batch'" />
-        <RootsPage v-else-if="currentPage === 'roots'" />
-        <KeyboardPage v-else-if="currentPage === 'keyboard'" />
-        <SuggestPage v-else-if="currentPage === 'suggest'" />
+        <!-- 新页面 -->
+        <DataPage v-if="currentPage === 'data'" />
+        <ElementPage v-else-if="currentPage === 'element'" />
+        <SplitPage v-else-if="currentPage === 'split'" />
+        <RulePage v-else-if="currentPage === 'rule'" />
+        <CodePage v-else-if="currentPage === 'code'" />
+        
+        <!-- 保留页面 -->
         <CoveragePage v-else-if="currentPage === 'coverage'" />
-        <FindPage v-else-if="currentPage === 'find'" />
-        <ExportPage v-else-if="currentPage === 'export'" />
+        <SuggestPage v-else-if="currentPage === 'suggest'" />
+        
+        <!-- 占位 -->
+        <div v-else class="placeholder-page">
+          <p>页面开发中...</p>
+        </div>
       </main>
       <DetailPanel v-if="showDetailPanel" />
     </div>
@@ -82,19 +76,34 @@ function onKeyDown(e: KeyboardEvent) {
 <style scoped>
 .main-layout {
   display: grid;
-  grid-template-columns: 220px 1fr 300px;
+  grid-template-columns: var(--nav-width) 1fr 300px;
   gap: 0;
   height: calc(100vh - 56px);
+  transition: grid-template-columns 0.3s ease;
 }
 .main-layout.no-detail {
-  grid-template-columns: 220px 1fr;
+  grid-template-columns: var(--nav-width) 1fr;
 }
 .center {
   overflow-y: auto;
   padding: 24px;
   background: var(--bg);
+  transition: background-color 0.3s ease;
 }
+
+.placeholder-page {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--text2);
+  font-size: 16px;
+}
+
 @media (max-width: 900px) {
-  .main-layout { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+  .main-layout { 
+    grid-template-columns: 1fr; 
+    grid-template-rows: auto 1fr; 
+  }
 }
 </style>

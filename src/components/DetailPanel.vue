@@ -141,9 +141,6 @@ function goToPage(page: string) {
         <button class="btn btn-sm" :class="detail.isRoot ? 'btn-danger' : 'btn-success'" @click="toggleRoot">
           {{ detail.isRoot ? '移除字根' : '设为字根' }}
         </button>
-        <button class="btn btn-sm btn-outline" @click="goToPage('tree')">查看树</button>
-        <button class="btn btn-sm btn-outline" @click="goToPage('steps')">逐步拆</button>
-        <button class="btn btn-sm btn-outline" @click="goToPage('find')">检索</button>
       </div>
     </template>
   </aside>

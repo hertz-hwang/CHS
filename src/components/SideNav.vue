@@ -1,127 +1,246 @@
 <script setup lang="ts">
+import { ref, computed } from 'vue'
 import { useEngine } from '../composables/useEngine'
+import { useTheme } from '../composables/useTheme'
+
 const { currentPage, switchPage } = useEngine()
+const { toggleTheme, isDark } = useTheme()
 
-interface NavItem {
-  page: string
-  icon: string
-  label: string
-  kbd?: string
-}
+// 折叠状态
+const isCollapsed = ref(false)
 
-interface NavSection {
-  title: string
-  items: NavItem[]
-}
-
-const sections: NavSection[] = [
-  { title: '数据', items: [{ page: 'load', icon: '📂', label: '加载数据' }] },
-  { title: '拆分', items: [
-    { page: 'decompose', icon: '🔍', label: '拆分汉字', kbd: '1' },
-    { page: 'tree', icon: '🌳', label: '拆分树', kbd: '2' },
-    { page: 'steps', icon: '📋', label: '逐步拆分', kbd: '3' },
-    { page: 'batch', icon: '📝', label: '批量拆分', kbd: '7' },
-  ]},
-  { title: '字根', items: [
-    { page: 'roots', icon: '⌨️', label: '设置字根', kbd: '4' },
-    { page: 'keyboard', icon: '🗺️', label: '查看布局', kbd: '9' },
-    { page: 'suggest', icon: '💡', label: '推荐字根', kbd: '5' },
-  ]},
-  { title: '分析', items: [
-    { page: 'coverage', icon: '📊', label: '覆盖率', kbd: '6' },
-    { page: 'find', icon: '🔎', label: '部件检索', kbd: 'F' },
-    { page: 'export', icon: '💾', label: '导出结果', kbd: '8' },
-  ]},
+// 主导航项（一级菜单，无二级）
+const navItems = [
+  { page: 'data', icon: '📊', label: '数据' },
+  { page: 'element', icon: '⌨️', label: '元素' },
+  { page: 'split', icon: '🔧', label: '拆分' },
+  { page: 'rule', icon: '🔀', label: '取码' },
+  { page: 'code', icon: '🔢', label: '编码' },
 ]
+
+// 辅助功能
+const auxItems = [
+  { page: 'coverage', icon: '📈', label: '覆盖率' },
+  { page: 'suggest', icon: '💡', label: '推荐' },
+]
+
+function toggleCollapse() {
+  isCollapsed.value = !isCollapsed.value
+}
 </script>
+
 <template>
-  <nav class="sidebar">
-    <div v-for="s in sections" :key="s.title" class="section">
-      <h3>{{ s.title }}</h3>
+  <nav class="sidebar" :class="{ 'sidebar-collapsed': isCollapsed }">
+    <!-- 折叠按钮 -->
+    <button class="collapse-btn" @click="toggleCollapse" :title="isCollapsed ? '展开' : '折叠'">
+      <span v-if="isCollapsed">»</span>
+      <span v-else>«</span>
+    </button>
+
+    <!-- 主导航 -->
+    <div class="nav-main">
       <button 
-        v-for="it in s.items" 
-        :key="it.page" 
-        class="nav-btn" 
-        :class="{ active: currentPage === it.page }" 
-        @click="switchPage(it.page)"
+        v-for="item in navItems" 
+        :key="item.page" 
+        class="nav-item"
+        :class="{ 'active': currentPage === item.page }"
+        @click="switchPage(item.page)"
+        :title="isCollapsed ? item.label : ''"
       >
-        <span class="icon">{{ it.icon }}</span>
-        <span class="label">{{ it.label }}</span>
-        <span v-if="it.kbd" class="kbd">{{ it.kbd }}</span>
+        <span class="nav-icon">{{ item.icon }}</span>
+        <span v-if="!isCollapsed" class="nav-label">{{ item.label }}</span>
+      </button>
+    </div>
+
+    <!-- 分隔线 -->
+    <div class="nav-divider"></div>
+
+    <!-- 辅助功能 -->
+    <div class="nav-aux">
+      <button 
+        v-for="item in auxItems" 
+        :key="item.page"
+        class="nav-item nav-item-sm"
+        :class="{ 'active': currentPage === item.page }"
+        @click="switchPage(item.page)"
+        :title="isCollapsed ? item.label : ''"
+      >
+        <span class="nav-icon">{{ item.icon }}</span>
+        <span v-if="!isCollapsed" class="nav-label">{{ item.label }}</span>
+      </button>
+    </div>
+
+    <!-- 底部主题切换 -->
+    <div class="nav-footer">
+      <button class="theme-btn" @click="toggleTheme" :title="isDark() ? '切换亮色' : '切换暗色'">
+        <span v-if="isDark()">☀️</span>
+        <span v-else>🌙</span>
+        <span v-if="!isCollapsed" class="theme-label">{{ isDark() ? '亮色' : '暗色' }}</span>
       </button>
     </div>
   </nav>
 </template>
+
 <style scoped>
 .sidebar {
+  width: var(--nav-width);
   background: var(--bg2);
   border-right: 1px solid var(--border);
-  overflow-y: auto;
-  padding: 16px 0;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  transition: width 0.3s ease;
 }
-.section {
-  padding: 0 12px;
-  margin-bottom: 16px;
+
+.sidebar-collapsed {
+  width: var(--nav-collapsed-width);
 }
-.section:last-child {
-  margin-bottom: 0;
-}
-.section h3 {
-  font-size: 11px;
-  text-transform: uppercase;
-  color: var(--text2);
-  letter-spacing: 1px;
-  margin-bottom: 8px;
-  padding: 0 8px;
-  font-weight: 600;
-}
-.nav-btn {
-  width: 100%;
-  padding: 10px 12px;
-  background: transparent;
-  border: none;
-  color: var(--text);
-  font-size: 14px;
-  text-align: left;
-  cursor: pointer;
-  border-radius: 6px;
+
+.collapse-btn {
   display: flex;
   align-items: center;
-  gap: 10px;
-  transition: all 0.15s ease;
-  margin-bottom: 2px;
-  font-family: inherit;
-}
-.nav-btn:hover {
+  justify-content: center;
+  height: 36px;
+  margin: 8px;
   background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text2);
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: bold;
+  transition: all 0.2s ease;
 }
-.nav-btn.active {
+
+.collapse-btn:hover {
   background: var(--primary-bg);
   color: var(--primary);
+  border-color: var(--primary);
+  transform: scale(1.02);
 }
-.nav-btn.active .icon {
-  opacity: 1;
-}
-.icon {
-  font-size: 16px;
-  width: 20px;
-  text-align: center;
-  opacity: 0.8;
-}
-.label {
+
+.nav-main {
   flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
-.kbd {
-  font-size: 11px;
-  color: var(--text3);
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 14px;
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  color: var(--text2);
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-align: left;
+  font-family: inherit;
+}
+
+.sidebar-collapsed .nav-item {
+  justify-content: center;
+  padding: 12px 8px;
+}
+
+.nav-item:hover {
   background: var(--bg3);
-  padding: 2px 6px;
-  border-radius: 4px;
-  font-family: monospace;
+  color: var(--text);
+  transform: scale(1.02);
+}
+
+.nav-item.active {
+  background: var(--primary);
+  color: white;
+}
+
+.nav-item.active:hover {
+  background: var(--primary-light);
+}
+
+.nav-icon {
+  font-size: 18px;
+  width: 24px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.nav-label {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-weight: 500;
 }
-.nav-btn.active .kbd {
-  background: var(--primary);
-  color: #fff;
+
+.nav-item-sm {
+  padding: 10px 14px;
+  font-size: 13px;
+}
+
+.nav-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 16px;
+}
+
+.nav-aux {
+  padding: 4px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.nav-footer {
+  padding: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.theme-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 12px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-family: inherit;
+}
+
+.theme-btn:hover {
+  background: var(--primary-bg);
+  border-color: var(--primary);
+  color: var(--primary);
+  transform: scale(1.02);
+}
+
+.theme-label {
+  flex: 1;
+  text-align: left;
+}
+
+/* 折叠状态下的样式 */
+.sidebar-collapsed .nav-label,
+.sidebar-collapsed .theme-label {
+  display: none;
+}
+
+.sidebar-collapsed .theme-btn {
+  justify-content: center;
+  padding: 10px 8px;
 }
 </style>

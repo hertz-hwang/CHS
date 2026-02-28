@@ -1,7 +1,7 @@
 import { IDSNode, parseIDS } from './ids'
 import { unicodeBlock, unicodeHex } from './unicode'
 import { IDSTransformer, TransformResult } from './transformer'
-import { UserConfig, RootCode, parseRootCodes, rootCodesToRecord } from './config'
+import { UserConfig, RootCode, CodeRuleNode, parseRootCodes, rootCodesToRecord, createDefaultCodeRules } from './config'
 
 export interface DecompResult {
   leaves: string[]
@@ -76,6 +76,12 @@ export class CharsHijack {
 
   // 字根编码 { "一" => { main: "f", sub: "k", supplement: "i" } }
   rootCodes = new Map<string, RootCode>()
+
+  // 取码规则
+  codeRules: CodeRuleNode[] = createDefaultCodeRules()
+
+  // 配置元信息
+  private _meta: UserConfig['meta'] = { version: '1.0' }
 
   private _pickG(variants: string[]): string | null {
     let universal: string | null = null
@@ -198,8 +204,25 @@ export class CharsHijack {
   }
 
   getCharset(name?: string | null): string[] {
-    if (name && this.charsets.has(name)) return this.charsets.get(name)!
-    return [...this.decomp.keys()].sort()
+    let chars: string[]
+    if (name && this.charsets.has(name)) {
+      chars = [...this.charsets.get(name)!]
+    } else {
+      chars = [...this.decomp.keys()]
+    }
+    // 确保所有字根也在列表中
+    for (const root of this.roots) {
+      if (!chars.includes(root)) {
+        chars.push(root)
+      }
+    }
+    // 确保所有有编码的字根也在列表中
+    for (const root of this.rootCodes.keys()) {
+      if (!chars.includes(root)) {
+        chars.push(root)
+      }
+    }
+    return chars.sort()
   }
 
   setRoots(input: string | Iterable<string>): number {
@@ -288,6 +311,11 @@ export class CharsHijack {
   }
 
   applyConfig(config: UserConfig): void {
+    // 保存 meta 信息
+    if (config.meta) {
+      this._meta = { ...config.meta }
+    }
+
     // 设置命名字根
     if (config.named_roots) {
       this.setNamedRoots(config.named_roots)
@@ -306,8 +334,20 @@ export class CharsHijack {
     if (config.rules && config.rules.length > 0) {
       const t = new IDSTransformer(config.rules)
       this.setTransformer(t)
+      // 将规则中的命名字根自动加入 roots
+      const namedRoots = t.getNamedRoots()
+      for (const root of namedRoots) {
+        this.roots.add(root)
+      }
     } else {
       this.setTransformer(null)
+    }
+
+    // 设置取码规则
+    if (config.code_rules && config.code_rules.length > 0) {
+      this.codeRules = config.code_rules
+    } else {
+      this.codeRules = createDefaultCodeRules()
     }
 
     this._cache.clear()
@@ -320,11 +360,27 @@ export class CharsHijack {
       namedRootsObj[k] = v
     }
     return {
-      meta: { version: '1.0' },
+      meta: this._meta,
       roots: rootCodesToRecord(this.rootCodes),
       named_roots: namedRootsObj,
       rules,
+      code_rules: this.codeRules,
     }
+  }
+
+  // 设置取码规则
+  setCodeRules(rules: CodeRuleNode[]): void {
+    this.codeRules = rules
+  }
+
+  // 获取取码规则
+  getCodeRules(): CodeRuleNode[] {
+    return this.codeRules
+  }
+
+  // 清除缓存（当字根或规则变更时调用）
+  clearCache(): void {
+    this._cache.clear()
   }
 
   // 获取字的根编码

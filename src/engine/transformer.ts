@@ -279,4 +279,43 @@ export class IDSTransformer {
     }
     return matched
   }
+
+  /**
+   * 从文本中提取所有命名字根 {xxx}
+   */
+  static extractNamedRoots(text: string): string[] {
+    const roots: string[] = []
+    const regex = /\{[^}]+\}/g
+    let match
+    while ((match = regex.exec(text)) !== null) {
+      roots.push(match[0])
+    }
+    return roots
+  }
+
+  /**
+   * 获取所有规则中涉及的命名字根
+   * 包括 pattern 和 replacement 中的字根
+   */
+  getNamedRoots(): string[] {
+    const roots = new Set<string>()
+    for (const rule of this.rules) {
+      if (rule.enabled === false) continue
+      
+      // 从正则模式的 pattern 和 replacement 中提取
+      if (rule.mode === 'regex') {
+        const patternRoots = IDSTransformer.extractNamedRoots(rule.pattern)
+        const replacementRoots = IDSTransformer.extractNamedRoots(rule.replacement)
+        patternRoots.forEach(r => roots.add(r))
+        replacementRoots.forEach(r => roots.add(r))
+      } else {
+        // 从可视化模式的字段中提取
+        const componentRoots = rule.component ? IDSTransformer.extractNamedRoots(rule.component) : []
+        const replaceWithRoots = rule.replace_with ? IDSTransformer.extractNamedRoots(rule.replace_with) : []
+        componentRoots.forEach(r => roots.add(r))
+        replaceWithRoots.forEach(r => roots.add(r))
+      }
+    }
+    return [...roots]
+  }
 }
