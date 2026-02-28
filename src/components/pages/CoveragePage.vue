@@ -2,8 +2,14 @@
 import { ref, computed } from 'vue'
 import { useEngine } from '../../composables/useEngine'
 import type { CoverageResult } from '../../engine/engine'
-const { engine, refreshStats, selectChar, toast } = useEngine()
+const { engine, refreshStats, selectChar, toast, saveCurrentConfig } = useEngine()
 const charsetName = ref(''); const result = ref<CoverageResult | null>(null); const loading = ref(false)
+
+// 字根编码对话框状态
+const showRootCodeDialog = ref(false)
+const rootCodeInput = ref('')
+const pendingRoot = ref('')
+
 const opts = computed(() => {
   const o = [{ value: '', label: `全部 (${engine.decomp.size} 字)` }]
   for (const [name, chars] of engine.charsets) o.push({ value: name, label: `${name} (${chars.length} 字)` })
@@ -13,7 +19,30 @@ function run() {
   if (!engine.decomp.size) { toast('请先加载数据'); return }
   loading.value = true; setTimeout(() => { result.value = engine.coverage(charsetName.value || null); loading.value = false }, 50)
 }
-function addRoot(comp: string) { engine.addRoots(comp); refreshStats(); toast(`已添加: ${comp}`); run() }
+
+function addRoot(comp: string) {
+  pendingRoot.value = comp
+  rootCodeInput.value = engine.getRootCodeString(comp) || ''
+  showRootCodeDialog.value = true
+}
+
+function confirmAddRoot() {
+  const comp = pendingRoot.value
+  const code = rootCodeInput.value.trim()
+  
+  if (code) {
+    engine.setRootCode(comp, code)
+    toast(`已添加字根: ${comp}，编码: ${code}`)
+  } else {
+    engine.addRoots(comp)
+    toast(`已添加字根: ${comp}`)
+  }
+  
+  saveCurrentConfig()
+  refreshStats()
+  showRootCodeDialog.value = false
+  run()
+}
 </script>
 <template>
   <div class="panel">
@@ -66,6 +95,30 @@ function addRoot(comp: string) { engine.addRoots(comp); refreshStats(); toast(`�
         </template>
       </template>
     </div>
+
+    <!-- 字根编码输入对话框 -->
+    <Teleport to="body">
+      <div class="overlay" :class="{ show: showRootCodeDialog }" @click.self="showRootCodeDialog = false">
+        <div class="modal">
+          <h2>加入字根</h2>
+          <div class="form-group">
+            <label>字根编码</label>
+            <input
+              v-model="rootCodeInput"
+              type="text"
+              class="input"
+              placeholder="输入字根编码（如：a、ab、abc）"
+              @keyup.enter="confirmAddRoot"
+            />
+            <div class="hint">编码由字母组成，第一个字母为主码，第二个为小码（可选），其余为补码（可选）</div>
+          </div>
+          <div class="modal-actions">
+            <button class="btn" @click="showRootCodeDialog = false">取消</button>
+            <button class="btn btn-primary" @click="confirmAddRoot">确定</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 <style scoped>
@@ -136,5 +189,73 @@ function addRoot(comp: string) { engine.addRoots(comp); refreshStats(); toast(`�
 .uncovered-char:hover {
   border-color: var(--primary);
   background: var(--primary-bg);
+}
+
+/* 对话框样式 */
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}
+.overlay.show {
+  opacity: 1;
+  pointer-events: auto;
+}
+.modal {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 24px;
+  min-width: 320px;
+  max-width: 400px;
+  box-shadow: var(--shadow2);
+}
+.modal h2 {
+  margin-bottom: 16px;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
+}
+.form-group {
+  margin-bottom: 16px;
+}
+.form-group label {
+  display: block;
+  font-size: 12px;
+  color: var(--text2);
+  margin-bottom: 6px;
+  font-weight: 500;
+}
+.form-group .input {
+  width: 100%;
+  padding: 8px 12px;
+  font-size: 14px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  outline: none;
+  transition: border-color 0.2s;
+}
+.form-group .input:focus {
+  border-color: var(--primary);
+}
+.form-group .hint {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--text2);
+  line-height: 1.4;
+}
+.modal-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
 }
 </style>

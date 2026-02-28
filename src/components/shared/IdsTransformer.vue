@@ -91,11 +91,13 @@ function applyRules() {
   const t = new IDSTransformer(rules.value)
   engine.setTransformer(t)
   
+  // 收集要添加和删除的字根
+  const rootsToAdd: string[] = []
+  const rootsToRemove: string[] = []
+  
   // 自动将转换器中的命名字根加入 roots
   const namedRoots = t.getNamedRoots()
-  for (const root of namedRoots) {
-    engine.roots.add(root)
-  }
+  rootsToAdd.push(...namedRoots)
   
   // 处理每条转换器对字根集的影响
   for (const rule of rules.value) {
@@ -118,13 +120,13 @@ function applyRules() {
         const simplified = pattern.replace(/[.*+?^${}()|[\]\\]/g, '')
         for (const char of simplified) {
           if (/\p{Script=Han}/u.test(char)) {
-            engine.roots.delete(char)
+            rootsToRemove.push(char)
           }
         }
       } else {
         for (const char of pattern) {
           if (/\p{Script=Han}/u.test(char) && !isStructureChar(char)) {
-            engine.roots.delete(char)
+            rootsToRemove.push(char)
           }
         }
       }
@@ -133,7 +135,7 @@ function applyRules() {
       const components = extractComponents(replacement)
       for (const comp of components) {
         if (!comp.startsWith('{') && !comp.endsWith('}')) {
-          engine.roots.add(comp)
+          rootsToAdd.push(comp)
         }
       }
     }
@@ -144,6 +146,14 @@ function applyRules() {
     
     // 情况3：无结构符 → 无结构符（简单替换）
     // 例如：「A」→「B」，不需要特殊处理
+  }
+  
+  // 批量更新字根集（会自动保存到 localStorage）
+  if (rootsToRemove.length > 0) {
+    engine.removeRoots(rootsToRemove)
+  }
+  if (rootsToAdd.length > 0) {
+    engine.addRoots(rootsToAdd)
   }
   
   refreshStats()

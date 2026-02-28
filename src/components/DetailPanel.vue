@@ -1,10 +1,14 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useEngine } from '../composables/useEngine'
 import { unicodeBlock, unicodeHex } from '../engine/unicode'
 import type { PinyinInfo } from '../engine/engine'
 
-const { engine, selectedChar, refreshStats, toast, switchPage, setSearchChar } = useEngine()
+const { engine, selectedChar, refreshStats, toast, switchPage, setSearchChar, saveCurrentConfig } = useEngine()
+
+// 字根编码对话框状态
+const showRootCodeDialog = ref(false)
+const rootCodeInput = ref('')
 
 const detail = computed(() => {
   const ch = selectedChar.value
@@ -46,9 +50,36 @@ function formatFreq(freq: number): string {
 function toggleRoot() {
   if (!detail.value) return
   const ch = detail.value.char
-  if (detail.value.isRoot) { engine.removeRoots(ch); toast(`已移除字根: ${ch}`) }
-  else { engine.addRoots(ch); toast(`已添加字根: ${ch}`) }
+  if (detail.value.isRoot) {
+    engine.removeRoots(ch)
+    toast(`已移除字根: ${ch}`)
+    refreshStats()
+    selectedChar.value = null
+    setTimeout(() => { selectedChar.value = ch }, 0)
+  } else {
+    // 打开对话框让用户输入字根编码
+    rootCodeInput.value = engine.getRootCodeString(ch) || ''
+    showRootCodeDialog.value = true
+  }
+}
+
+// 确认设置字根编码
+function confirmSetRoot() {
+  if (!detail.value) return
+  const ch = detail.value.char
+  const code = rootCodeInput.value.trim()
+  
+  if (code) {
+    engine.setRootCode(ch, code)
+    toast(`已设为字根: ${ch}，编码: ${code}`)
+  } else {
+    engine.addRoots(ch)
+    toast(`已设为字根: ${ch}`)
+  }
+  
+  saveCurrentConfig()
   refreshStats()
+  showRootCodeDialog.value = false
   selectedChar.value = null
   setTimeout(() => { selectedChar.value = ch }, 0)
 }
@@ -143,6 +174,30 @@ function goToPage(page: string) {
         </button>
       </div>
     </template>
+
+    <!-- 字根编码输入对话框 -->
+    <Teleport to="body">
+      <div class="overlay" :class="{ show: showRootCodeDialog }" @click.self="showRootCodeDialog = false">
+        <div class="modal">
+          <h2>设为字根</h2>
+          <div class="form-group">
+            <label>字根编码</label>
+            <input
+              v-model="rootCodeInput"
+              type="text"
+              class="input"
+              placeholder="输入字根编码（如：a、ab、abc）"
+              @keyup.enter="confirmSetRoot"
+            />
+            <div class="hint">编码由字母组成，第一个字母为主码，第二个为小码（可选），其余为补码（可选）</div>
+          </div>
+          <div class="modal-actions">
+            <button class="btn" @click="showRootCodeDialog = false">取消</button>
+            <button class="btn btn-primary" @click="confirmSetRoot">确定</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </aside>
 </template>
 <style scoped>
@@ -245,5 +300,73 @@ h3 {
   background: var(--bg3);
   padding: 1px 4px;
   border-radius: 3px;
+}
+
+/* 对话框样式 */
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}
+.overlay.show {
+  opacity: 1;
+  pointer-events: auto;
+}
+.modal {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 24px;
+  min-width: 320px;
+  max-width: 400px;
+  box-shadow: var(--shadow2);
+}
+.modal h2 {
+  margin-bottom: 16px;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
+}
+.form-group {
+  margin-bottom: 16px;
+}
+.form-group label {
+  display: block;
+  font-size: 12px;
+  color: var(--text2);
+  margin-bottom: 6px;
+  font-weight: 500;
+}
+.form-group .input {
+  width: 100%;
+  padding: 8px 12px;
+  font-size: 14px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  outline: none;
+  transition: border-color 0.2s;
+}
+.form-group .input:focus {
+  border-color: var(--primary);
+}
+.form-group .hint {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--text2);
+  line-height: 1.4;
+}
+.modal-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
 }
 </style>

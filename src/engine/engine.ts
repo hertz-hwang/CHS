@@ -1,7 +1,7 @@
 import { IDSNode, parseIDS } from './ids'
 import { unicodeBlock, unicodeHex } from './unicode'
 import { IDSTransformer, TransformResult } from './transformer'
-import { UserConfig, RootCode, CodeRuleNode, parseRootCodes, rootCodesToRecord, createDefaultCodeRules } from './config'
+import { UserConfig, RootCode, CodeRuleNode, parseRootCodes, rootCodesToRecord, createDefaultCodeRules, parseCode } from './config'
 
 export interface DecompResult {
   leaves: string[]
@@ -350,6 +350,8 @@ export class CharsHijack {
       this.codeRules = createDefaultCodeRules()
     }
 
+    // 保存字根到 localStorage（包括转换器生成的命名字根）
+    this._saveRoots()
     this._cache.clear()
   }
 
@@ -386,6 +388,16 @@ export class CharsHijack {
   // 获取字的根编码
   getRootCode(root: string): RootCode | undefined {
     return this.rootCodes.get(root)
+  }
+
+  // 设置单个字根编码
+  setRootCode(root: string, code: string): void {
+    const parsed = parseCode(code)
+    this.rootCodes.set(root, { root, ...parsed })
+    // 同时将字根加入 roots
+    this.roots.add(root)
+    this._cache.clear()
+    this._saveRoots()
   }
 
   // 获取字的根编码字符串（用于显示）

@@ -186,24 +186,61 @@ function isStrokeCodeQuery(query: string): boolean {
   return /^[1-5]+$/.test(query)
 }
 
+// 字符类型枚举
+type CharType = 'ids' | 'named' | 'atomic'
+
 // 搜索汉字（智能识别：汉字或笔画编码）
+// 支持三种类型：IDS所有汉字、IDS转换器字根（命名字根）、原子字根
 const searchResults = computed(() => {
   rootsVersion.value  // 触发响应式更新
   const query = searchQuery.value.trim()
   if (!query) return []
 
-  const results: { root: string; code: RootCode; isAdded: boolean; strokeCount: number; strokeCode: string }[] = []
+  const results: { root: string; code: RootCode; isAdded: boolean; strokeCount: number; strokeCode: string; charType: CharType }[] = []
   
   // 判断是笔画编码搜索还是汉字搜索
   const strokeCodeSearch = isStrokeCodeQuery(query)
   
-  // 收集所有待搜索的字符：包括 charset 和 roots（命名字根）
-  const allChars = new Set<string>()
-  for (const char of engine.getCharset()) allChars.add(char)
-  for (const root of engine.roots) allChars.add(root)  // 确保命名字根也在搜索范围内
+  // 收集所有待搜索的字符及其类型
+  const allChars = new Map<string, CharType>()
+  
+  // 1. IDS 所有汉字
+  for (const char of engine.getCharset()) {
+    if (!allChars.has(char)) {
+      allChars.set(char, 'ids')
+    }
+  }
+  
+  // 2. IDS 转换器字根（命名字根）
+  for (const root of engine.roots) {
+    if (!allChars.has(root)) {
+      allChars.set(root, 'named')
+    }
+  }
+  // 命名字根定义中的字根
+  for (const root of engine.namedRoots.keys()) {
+    if (!allChars.has(root)) {
+      allChars.set(root, 'named')
+    }
+  }
+  // 转换器规则中的命名字根
+  if (engine.transformer) {
+    for (const root of engine.transformer.getNamedRoots()) {
+      if (!allChars.has(root)) {
+        allChars.set(root, 'named')
+      }
+    }
+  }
+  
+  // 3. 原子字根
+  for (const root of engine.atomicComponents()) {
+    if (!allChars.has(root)) {
+      allChars.set(root, 'atomic')
+    }
+  }
   
   // 搜索所有字符
-  for (const char of allChars) {
+  for (const [char, charType] of allChars) {
     let match = false
     
     if (strokeCodeSearch) {
@@ -233,21 +270,22 @@ const searchResults = computed(() => {
         code: code || { root: char, main: '' },
         isAdded: engine.roots.has(char),
         strokeCount: engine.strokeCount(char),
-        strokeCode: strokes.length > 0 ? strokes[0] : ''
+        strokeCode: strokes.length > 0 ? strokes[0] : '',
+        charType
       })
     }
   }
 
-  // 排序：完全匹配优先，然后按字频降序，命名字根优先
+  // 排序：完全匹配优先，然后按类型（命名字根 > 原子字根 > IDS汉字），再按字频降序
   results.sort((a, b) => {
     // 完全匹配排最前
     const aExact = strokeCodeSearch ? a.strokeCode === query : a.root === query || a.root === `{${query}}`
     const bExact = strokeCodeSearch ? b.strokeCode === query : b.root === query || b.root === `{${query}}`
     if (aExact !== bExact) return aExact ? -1 : 1
-    // 命名字根优先
-    const aNamed = a.root.startsWith('{')
-    const bNamed = b.root.startsWith('{')
-    if (aNamed !== bNamed) return aNamed ? -1 : 1
+    // 按类型排序：命名字根 > 原子字根 > IDS汉字
+    const typeOrder: Record<CharType, number> = { named: 0, atomic: 1, ids: 2 }
+    const typeCmp = typeOrder[a.charType] - typeOrder[b.charType]
+    if (typeCmp !== 0) return typeCmp
     // 按字频降序
     const freqA = engine.freq.get(a.root) || 0
     const freqB = engine.freq.get(b.root) || 0
@@ -413,6 +451,9 @@ function removeRootFromSearch(root: string) {
         >
           <span class="result-root">{{ item.root }}</span>
           <span class="result-info">
+            <span class="char-type-tag" :class="'type-' + item.charType">
+              {{ item.charType === 'named' ? '命名' : item.charType === 'atomic' ? '原子' : 'IDS' }}
+            </span>
             <span v-if="item.strokeCount" class="stroke">{{ item.strokeCount }}画</span>
             <span v-if="item.code.main" class="result-code">
               <span class="main">{{ item.code.main?.toUpperCase() }}</span>
@@ -777,6 +818,29 @@ function removeRootFromSearch(root: string) {
 .no-code-hint {
   font-size: 12px;
   color: var(--text3);
+}
+
+/* 字符类型标签样式 */
+.char-type-tag {
+  font-size: 10px;
+  padding: 2px 5px;
+  border-radius: 3px;
+  font-weight: 500;
+}
+
+.char-type-tag.type-named {
+  background: rgba(114, 46, 209, 0.15);
+  color: #722ed1;
+}
+
+.char-type-tag.type-atomic {
+  background: rgba(19, 194, 194, 0.15);
+  color: #13c2c2;
+}
+
+.char-type-tag.type-ids {
+  background: rgba(245, 166, 35, 0.15);
+  color: #f5a623;
 }
 
 .result-action {

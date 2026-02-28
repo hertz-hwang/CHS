@@ -36,10 +36,8 @@ onMounted(async () => {
     toast(`加载失败: ${failed.join(', ')}`, 4000)
   }
 
-  // 恢复保存的字根
-  if (engine.loadSavedRoots()) {
-    refreshStats()
-  }
+  // 字根已在 useEngine 初始化时通过 applyConfig 加载，无需再次加载
+  refreshStats()
   isLoading.value = false
 })
 
