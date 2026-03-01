@@ -1,6 +1,21 @@
-import { reactive, ref, readonly } from 'vue'
+import { reactive, ref, readonly, computed } from 'vue'
 import { CharsHijack } from '@/engine/engine'
 import { UserConfig, parseConfig, exportConfig, saveConfigToStorage, loadConfigFromStorage } from '@/engine/config'
+
+// 字集选项定义
+export interface CharsetOption {
+  id: string        // 文件名（不含扩展名）
+  name: string      // 显示名称
+  file: string      // 文件路径
+}
+
+export const CHARSET_OPTIONS: CharsetOption[] = [
+  { id: 'gb2312', name: 'GB2312', file: '/data/gb2312.txt' },
+  { id: 'kc6000', name: '科测6000', file: '/data/kc6000.txt' },
+  { id: 'tg8105', name: '通规8105', file: '/data/tg8105.txt' },
+  { id: 'cjk', name: '基本区', file: '/data/cjk.txt' },
+  { id: 'all', name: '全部', file: '/data/all.txt' },
+]
 
 const engine = new CharsHijack()
 
@@ -49,6 +64,12 @@ const rootsVersion = ref(0)
 
 // 配置版本号，用于触发配置相关的更新
 const configVersion = ref(0)
+
+// 当前选中的字集ID
+const currentCharsetId = ref<string>('all')
+
+// 字集版本号，用于触发字集相关的更新
+const charsetVersion = ref(0)
 
 function refreshStats() {
   stats.decomp = engine.decomp.size
@@ -109,15 +130,41 @@ async function loadDefaultData(): Promise<{ loaded: string[]; failed: string[] }
   const dict = await fetchText('/data/dictionary.txt')
   if (dict) { engine.loadDict(dict); loaded.push('字典') }
 
-  // 加载字集文件
-  const cjk = await fetchText('/data/cjk.txt')
-  if (cjk) { engine.loadCharset('cjk', cjk); loaded.push('CJK字集') }
-
-  const tg8105 = await fetchText('/data/tg8105.txt')
-  if (tg8105) { engine.loadCharset('tg8105', tg8105); loaded.push('tg8105字集') }
+  // 加载所有字集文件
+  for (const option of CHARSET_OPTIONS) {
+    const content = await fetchText(option.file)
+    if (content) {
+      engine.loadCharset(option.id, content)
+      loaded.push(`${option.name}字集`)
+    } else {
+      failed.push(`${option.name}字集`)
+    }
+  }
 
   refreshStats()
   return { loaded, failed }
+}
+
+// 切换字集
+function setCharset(charsetId: string): boolean {
+  const option = CHARSET_OPTIONS.find(o => o.id === charsetId)
+  if (!option) return false
+  
+  currentCharsetId.value = charsetId
+  charsetVersion.value++ // 触发字集相关更新
+  return true
+}
+
+// 获取当前字集名称
+function getCurrentCharsetName(): string {
+  const option = CHARSET_OPTIONS.find(o => o.id === currentCharsetId.value)
+  return option?.name || '全部'
+}
+
+// 获取当前字集的汉字列表
+function getCurrentCharset(): string[] {
+  charsetVersion.value // 依赖触发
+  return engine.getCharset(currentCharsetId.value)
 }
 
 // ============ 配置管理方法 ============
@@ -174,5 +221,11 @@ export function useEngine() {
     loadDefaultData,
     // 配置管理
     applyConfig, getConfig, importConfigFromToml, exportConfigToToml, saveCurrentConfig, loadSavedConfig,
+    // 字集管理
+    currentCharsetId: readonly(currentCharsetId),
+    charsetVersion,
+    setCharset,
+    getCurrentCharsetName,
+    getCurrentCharset,
   }
 }

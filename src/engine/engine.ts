@@ -223,20 +223,22 @@ export class CharsHijack {
   getCharset(name?: string | null): string[] {
     let chars: string[]
     if (name && this.charsets.has(name)) {
+      // 指定字集时，只返回该字集的字符，不添加额外的字根
       chars = [...this.charsets.get(name)!]
     } else {
+      // 未指定字集时，返回所有有拆分的字符，并添加字根
       chars = [...this.decomp.keys()]
-    }
-    // 确保所有字根也在列表中
-    for (const root of this.roots) {
-      if (!chars.includes(root)) {
-        chars.push(root)
+      // 确保所有字根也在列表中
+      for (const root of this.roots) {
+        if (!chars.includes(root)) {
+          chars.push(root)
+        }
       }
-    }
-    // 确保所有有编码的字根也在列表中
-    for (const root of this.rootCodes.keys()) {
-      if (!chars.includes(root)) {
-        chars.push(root)
+      // 确保所有有编码的字根也在列表中
+      for (const root of this.rootCodes.keys()) {
+        if (!chars.includes(root)) {
+          chars.push(root)
+        }
       }
     }
     return chars.sort()

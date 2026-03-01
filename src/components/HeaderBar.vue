@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue'
-import { useEngine } from "../composables/useEngine"
+import { useEngine, CHARSET_OPTIONS, CharsetOption } from "../composables/useEngine"
 import { useTheme } from "../composables/useTheme"
 import { exportConfig, parseConfig, saveConfigToStorage, createDefaultConfig } from "../engine/config"
 
-const { engine, refreshStats, toast, stats, configVersion, getConfig, applyConfig } = useEngine()
+const { engine, refreshStats, toast, stats, configVersion, getConfig, applyConfig, currentCharsetId, setCharset, getCurrentCharsetName } = useEngine()
 const { theme, toggleTheme, isDark } = useTheme()
 
 const fileInput = ref<HTMLInputElement>()
@@ -119,6 +119,16 @@ function confirmEditMeta() {
 watch(configVersion, () => {
   saveConfigToStorage(engine.getConfig())
 })
+
+// 字集切换事件处理
+function onCharsetChange(event: Event) {
+  const target = event.target as HTMLSelectElement
+  const charsetId = target.value
+  if (setCharset(charsetId)) {
+    const option = CHARSET_OPTIONS.find(o => o.id === charsetId)
+    toast(`已切换到字集: ${option?.name || charsetId}`)
+  }
+}
 </script>
 
 <template>
@@ -206,6 +216,20 @@ watch(configVersion, () => {
           <span class="stat-label">字频</span>
           <span class="stat-value">{{ stats.freq.toLocaleString() }}</span>
         </div>
+      </div>
+      
+      <!-- 字集选择器 -->
+      <div class="charset-selector">
+        <select 
+          class="charset-select" 
+          :value="currentCharsetId" 
+          @change="onCharsetChange($event)"
+          title="选择字集"
+        >
+          <option v-for="option in CHARSET_OPTIONS" :key="option.id" :value="option.id">
+            {{ option.name }}
+          </option>
+        </select>
       </div>
     </div>
     
@@ -501,5 +525,46 @@ h1 {
   gap: 8px;
   justify-content: flex-end;
   margin-top: 20px;
+}
+
+/* 字集选择器样式 */
+.charset-selector {
+  display: flex;
+  align-items: center;
+}
+
+.charset-select {
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--primary);
+  background: var(--primary-bg);
+  border: 1px solid var(--primary);
+  border-radius: 6px;
+  cursor: pointer;
+  outline: none;
+  transition: all 0.2s ease;
+  min-width: 90px;
+}
+
+.charset-select:hover {
+  background: var(--primary);
+  color: white;
+}
+
+.charset-select:focus {
+  box-shadow: 0 0 0 2px rgba(0, 102, 180, 0.2);
+}
+
+@media (max-width: 900px) {
+  .charset-selector {
+    order: -1;
+  }
+  
+  .charset-select {
+    font-size: 12px;
+    padding: 4px 8px;
+    min-width: 70px;
+  }
 }
 </style>

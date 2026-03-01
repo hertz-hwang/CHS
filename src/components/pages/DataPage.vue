@@ -4,7 +4,7 @@ import { useEngine } from '../../composables/useEngine'
 import IdsTransformer from '../shared/IdsTransformer.vue'
 import { unicodeHex, unicodeBlock } from '../../engine/unicode'
 
-const { engine, stats, selectChar } = useEngine()
+const { engine, stats, selectChar, charsetVersion, getCurrentCharset } = useEngine()
 
 // 搜索相关
 const searchQuery = ref('')
@@ -15,9 +15,10 @@ const pageSize = 50
 // 显示模式
 const showTransformer = ref(false)
 
-// 获取所有汉字
+// 获取所有汉字（根据当前选择的字集）
 const allChars = computed(() => {
-  return engine.getCharset()
+  charsetVersion.value // 依赖字集版本，当字集切换时重新计算
+  return getCurrentCharset()
 })
 
 // 根据搜索条件过滤并排序

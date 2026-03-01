@@ -3,7 +3,7 @@ import { ref, computed, watch } from 'vue'
 import { useEngine } from '../../composables/useEngine'
 import { unicodeHex } from '../../engine/unicode'
 
-const { engine, rootsVersion, toast } = useEngine()
+const { engine, rootsVersion, toast, charsetVersion, getCurrentCharset } = useEngine()
 
 // 搜索相关
 const searchQuery = ref('')
@@ -14,10 +14,11 @@ const pageSize = 30
 // 展开状态
 const expandedChars = ref<Set<string>>(new Set())
 
-// 获取所有汉字，按字频降序排序
+// 获取所有汉字，按字频降序排序（根据当前选择的字集）
 const allChars = computed(() => {
   rootsVersion.value
-  const chars = engine.getCharset()
+  charsetVersion.value // 依赖字集版本，当字集切换时重新计算
+  const chars = getCurrentCharset()
   return [...chars].sort((a, b) => {
     const freqA = engine.freq.get(a) || 0
     const freqB = engine.freq.get(b) || 0

@@ -3,7 +3,7 @@ import { ref, computed, watch } from 'vue'
 import { useEngine } from '../../composables/useEngine'
 import { unicodeHex } from '../../engine/unicode'
 
-const { engine, toast, rootsVersion, configVersion, selectChar } = useEngine()
+const { engine, toast, rootsVersion, configVersion, selectChar, charsetVersion, getCurrentCharset } = useEngine()
 
 // 导出功能
 function downloadFile(content: string, filename: string) {
@@ -158,10 +158,11 @@ function calculateCharCode(char: string): string {
   return code
 }
 
-// 获取所有汉字并按字频降序排序
+// 获取所有汉字并按字频降序排序（根据当前选择的字集）
 const sortedChars = computed(() => {
   rootsVersion.value
-  const chars = engine.getCharset()
+  charsetVersion.value // 依赖字集版本，当字集切换时重新计算
+  const chars = getCurrentCharset()
   
   // 按字频降序排序
   return [...chars].sort((a, b) => {
@@ -425,13 +426,13 @@ function exportElementSequence() {
   }
   
   if (lines.length === 0) {
-    toast.show('没有可导出的数据', 'warning')
+    toast('没有可导出的数据')
     return
   }
   
   const content = lines.join('\n')
   downloadFile(content, 'input-division.txt')
-  toast.show(`已导出 ${lines.length} 条元素序列`, 'success')
+  toast(`已导出 ${lines.length} 条元素序列`)
 }
 
 // 导出码表
@@ -448,13 +449,13 @@ function exportCodeTable() {
   }
   
   if (lines.length === 0) {
-    toast.show('没有可导出的数据', 'warning')
+    toast('没有可导出的数据')
     return
   }
   
   const content = lines.join('\n')
   downloadFile(content, 'code.txt')
-  toast.show(`已导出 ${lines.length} 条编码`, 'success')
+  toast(`已导出 ${lines.length} 条编码`)
 }
 </script>
 
