@@ -1,13 +1,13 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { computed } from 'vue'
 import { useEngine } from '../composables/useEngine'
 import { useTheme } from '../composables/useTheme'
 
-const { currentPage, switchPage } = useEngine()
+const { currentPage, switchPage, navCollapsed, toggleNavCollapsed } = useEngine()
 const { toggleTheme, isDark } = useTheme()
 
-// 折叠状态
-const isCollapsed = ref(false)
+// 使用共享的折叠状态
+const isCollapsed = computed(() => navCollapsed.value)
 
 // 主导航项（一级菜单，无二级）
 const navItems = [
@@ -25,7 +25,7 @@ const auxItems = [
 ]
 
 function toggleCollapse() {
-  isCollapsed.value = !isCollapsed.value
+  toggleNavCollapsed()
 }
 </script>
 

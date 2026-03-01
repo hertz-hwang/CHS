@@ -18,7 +18,7 @@ import SuggestPage from './components/pages/SuggestPage.vue'
 
 import { useEngine } from './composables/useEngine'
 
-const { engine, currentPage, refreshStats, toast, loadDefaultData } = useEngine()
+const { engine, currentPage, navCollapsed, refreshStats, toast, loadDefaultData } = useEngine()
 
 const isLoading = ref(true)
 
@@ -46,7 +46,7 @@ onMounted(async () => {
 <template>
   <div>
     <HeaderBar />
-    <div class="main-layout" :class="{ 'no-detail': !showDetailPanel }">
+    <div class="main-layout" :class="{ 'no-detail': !showDetailPanel, 'nav-collapsed': navCollapsed }">
       <SideNav />
       <main class="center">
         <!-- 新页面 -->
@@ -81,6 +81,12 @@ onMounted(async () => {
 }
 .main-layout.no-detail {
   grid-template-columns: var(--nav-width) 1fr;
+}
+.main-layout.nav-collapsed {
+  grid-template-columns: var(--nav-collapsed-width) 1fr 300px;
+}
+.main-layout.nav-collapsed.no-detail {
+  grid-template-columns: var(--nav-collapsed-width) 1fr;
 }
 .center {
   overflow-y: auto;

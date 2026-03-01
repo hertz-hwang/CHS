@@ -22,6 +22,7 @@ function getInitialPage(): string {
 }
 
 const currentPage = ref(getInitialPage())
+const navCollapsed = ref(false)
 
 // 初始化时设置 URL hash（如果当前没有 hash 或 hash 无效）
 if (typeof window !== 'undefined' && !window.location.hash) {
@@ -158,10 +159,15 @@ function loadSavedConfig(): boolean {
   return false
 }
 
+function toggleNavCollapsed() {
+  navCollapsed.value = !navCollapsed.value
+}
+
 export function useEngine() {
   return {
     engine, stats: readonly(stats), refreshStats, rootsVersion, configVersion,
     currentPage, switchPage,
+    navCollapsed: readonly(navCollapsed), toggleNavCollapsed,
     selectedChar, selectChar,
     searchChar: readonly(searchChar), setSearchChar, clearSearchChar,
     toastMsg: readonly(toastMsg), toastVisible: readonly(toastVisible), toast,
