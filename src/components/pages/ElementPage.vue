@@ -69,7 +69,7 @@ const allRootsList = computed(() => {
   const query = rootListQuery.value.trim()
   const strokeSearch = isStrokeCodeQueryForRoot(query)
   
-  const list: { root: string; code: RootCode; codeStr: string; strokeCode: string }[] = []
+  const list: { root: string; code: RootCode; codeStr: string; strokeCode: string; isEquiv: boolean; isMerged: boolean; mainRoot?: string; mergedFrom?: string }[] = []
   
   for (const root of engine.roots) {
     // 如果有检索词，进行过滤
@@ -90,11 +90,22 @@ const allRootsList = computed(() => {
     
     const code = engine.rootCodes.get(root)
     const strokes = engine.getStrokes(root)
+    
+    // 检查是否是等效字根或归并字根
+    const mainRoot = engine.getMainRoot(root)
+    const isEquiv = !!mainRoot
+    const isMerged = engine.isMergedRoot(root)
+    const mergedFrom = isMerged ? engine.mergedRoots.get(root) : undefined
+    
     list.push({
       root,
       code: code || { root, main: '' },
       codeStr: code ? codeToString(code) : '',
-      strokeCode: strokes.length > 0 ? strokes[0] : ''
+      strokeCode: strokes.length > 0 ? strokes[0] : '',
+      isEquiv,
+      isMerged,
+      mainRoot,
+      mergedFrom
     })
   }
   
@@ -237,7 +248,7 @@ const searchResults = computed(() => {
   const query = searchQuery.value.trim()
   if (!query) return []
 
-  const results: { root: string; code: RootCode; isAdded: boolean; strokeCount: number; strokeCode: string; charType: CharType }[] = []
+  const results: { root: string; code: RootCode; isAdded: boolean; strokeCount: number; strokeCode: string; charType: CharType; isEquiv: boolean; isMerged: boolean; mainRoot?: string; mergedFrom?: string }[] = []
   
   // 判断是笔画编码搜索还是汉字搜索
   const strokeCodeSearch = isStrokeCodeQuery(query)
@@ -306,13 +317,24 @@ const searchResults = computed(() => {
     if (match) {
       const code = engine.rootCodes.get(char)
       const strokes = engine.getStrokes(char)
+      
+      // 检查是否是等效字根或归并字根
+      const mainRoot = engine.getMainRoot(char)
+      const isEquiv = !!mainRoot
+      const isMerged = engine.isMergedRoot(char)
+      const mergedFrom = isMerged ? engine.mergedRoots.get(char) : undefined
+      
       results.push({ 
         root: char, 
         code: code || { root: char, main: '' },
         isAdded: engine.roots.has(char),
         strokeCount: engine.strokeCount(char),
         strokeCode: strokes.length > 0 ? strokes[0] : '',
-        charType
+        charType,
+        isEquiv,
+        isMerged,
+        mainRoot,
+        mergedFrom
       })
     }
   }
@@ -1006,6 +1028,8 @@ function removeCodeEquiv(targetRef: string) {
             <span class="char-type-tag" :class="'type-' + item.charType">
               {{ item.charType === 'named' ? '命名' : item.charType === 'atomic' ? '原子' : 'IDS' }}
             </span>
+            <span v-if="item.isEquiv" class="result-tag tag-equiv" :title="`等效于 ${item.mainRoot}`">等效</span>
+            <span v-if="item.isMerged" class="result-tag tag-merged" :title="`归并于 ${item.mergedFrom}`">归并</span>
             <span v-if="item.strokeCount" class="stroke">{{ item.strokeCount }}画</span>
             <span v-if="item.code.main" class="result-code">
               <span class="main">{{ item.code.main?.toUpperCase() }}</span>
@@ -1138,6 +1162,8 @@ function removeCodeEquiv(targetRef: string) {
                 class="checkbox"
               />
               <span class="root-char" @click="clickRootToEdit(item.root)">{{ item.root }}</span>
+              <span v-if="item.isEquiv" class="root-tag tag-equiv" :title="`等效于 ${item.mainRoot}`">等效</span>
+              <span v-if="item.isMerged" class="root-tag tag-merged" :title="`归并于 ${item.mergedFrom}`">归并</span>
               <template v-if="editingRoot === item.root">
                 <input 
                   v-model="editCode"
@@ -1682,6 +1708,25 @@ function removeCodeEquiv(targetRef: string) {
   color: #f5a623;
 }
 
+/* 搜索结果中的等效/归并标签样式 */
+.result-tag {
+  font-size: 10px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-weight: 500;
+  cursor: default;
+}
+
+.result-tag.tag-equiv {
+  background: rgba(19, 194, 194, 0.15);
+  color: #13c2c2;
+}
+
+.result-tag.tag-merged {
+  background: rgba(114, 46, 209, 0.15);
+  color: #722ed1;
+}
+
 .result-action {
   font-size: 12px;
 }
@@ -2123,6 +2168,25 @@ function removeCodeEquiv(targetRef: string) {
 
 .root-grid-item .root-code:hover {
   background: var(--primary-bg);
+}
+
+/* 字根标签样式 */
+.root-tag {
+  font-size: 10px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-weight: 500;
+  cursor: default;
+}
+
+.root-tag.tag-equiv {
+  background: rgba(19, 194, 194, 0.15);
+  color: #13c2c2;
+}
+
+.root-tag.tag-merged {
+  background: rgba(114, 46, 209, 0.15);
+  color: #722ed1;
 }
 
 .edit-code-input {

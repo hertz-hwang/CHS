@@ -9,9 +9,13 @@ function run() {
   if (!engine.decomp.size) { toast('请先加载数据'); return }
   loading.value = true
   setTimeout(() => {
-    // 过滤掉已存在的字根，只显示当前不存在的字根
+    // 获取所有等效字根（扁平列表）
+    const allEquivRoots = engine.getAllEquivalentRoots()
+    // 过滤掉已存在的字根、等效字根、归并字根
     const filtered = engine.suggestRoots(minUse.value, maxStroke.value ?? null)
       .filter(s => !engine.roots.has(s.comp))
+      .filter(s => !allEquivRoots.includes(s.comp))  // 排除等效字根
+      .filter(s => !engine.isMergedRoot(s.comp))      // 排除归并字根
       .slice(0, 100)
       .map(s => ({ ...s, checked: false })); // 默认不选中
     results.value = filtered;

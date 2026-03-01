@@ -5,6 +5,15 @@ import type { CoverageResult } from '../../engine/engine'
 const { engine, refreshStats, selectChar, toast, saveCurrentConfig } = useEngine()
 const charsetName = ref(''); const result = ref<CoverageResult | null>(null); const loading = ref(false)
 
+// 过滤后的缺失部件（排除等效字根和归并字根）
+const filteredMissing = computed(() => {
+  if (!result.value) return []
+  const allEquivRoots = engine.getAllEquivalentRoots()
+  return result.value.missing.filter(([comp]) => 
+    !allEquivRoots.includes(comp) && !engine.isMergedRoot(comp)
+  )
+})
+
 // 字根编码对话框状态
 const showRootCodeDialog = ref(false)
 const rootCodeInput = ref('')
@@ -76,11 +85,11 @@ function confirmAddRoot() {
           </div>
         </div>
         <div class="progress-bar"><div class="progress-fill" :style="{ width: (result.rate * 100) + '%' }" /></div>
-        <template v-if="result.missing.length > 0">
-          <h4 class="section-title">缺失部件 Top-20 (共{{ result.missing.length }}个)</h4>
+        <template v-if="filteredMissing.length > 0">
+          <h4 class="section-title">缺失部件 Top-20 (共{{ filteredMissing.length }}个)</h4>
           <table class="data-table">
             <thead><tr><th>部件</th><th>影响</th><th>笔画</th><th>操作</th></tr></thead>
-            <tbody><tr v-for="([comp, cnt], i) in result.missing.slice(0, 20)" :key="i">
+            <tbody><tr v-for="([comp, cnt], i) in filteredMissing.slice(0, 20)" :key="i">
               <td class="char-col" style="cursor:pointer" @click="selectChar(comp)">{{ comp }}</td>
               <td>{{ cnt }} 字</td><td>{{ engine.strokeCount(comp) || '?' }}</td>
               <td><button class="btn btn-sm btn-outline" @click="addRoot(comp)">加入字根</button></td>
