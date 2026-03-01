@@ -1,127 +1,357 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
-import { VueFlow, useVueFlow, Position, MarkerType, type EdgeMarker, type NodeDragEvent } from '@vue-flow/core'
+import { ref, computed, onMounted } from 'vue'
+import { VueFlow, useVueFlow, Position, MarkerType, Handle, type NodeMouseEvent, type NodeDragEvent } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
 import '@vue-flow/core/dist/style.css'
 import '@vue-flow/core/dist/theme-default.css'
 import { useEngine } from '../../composables/useEngine'
-import { CodeRuleNode, createDefaultCodeRules } from '../../engine/config'
+import type { CodeRuleNode } from '../../engine/config'
 
-const { engine, toast, refreshStats, rootsVersion, configVersion, saveCurrentConfig } = useEngine()
+const { engine, toast, saveCurrentConfig } = useEngine()
 
-// 规则节点类型
-type RuleType = 'start' | 'end' | 'pick' | 'condition'
+// ============ 类型定义 ============
 
-// 条件类型
-type ConditionType = 'root_exists' | 'root_has_code' | 'root_count'
-
-// Vue Flow 节点
-interface FlowNode {
-  id: string
-  type: string
-  position: { x: number; y: number }
-  data: Record<string, unknown>
-  sourcePosition?: Position
-  targetPosition?: Position
+interface SourceData {
+  label: string
+  ruleType: 'start' | 'end' | 'pick'
+  rule: CodeRuleNode
 }
 
-// Vue Flow 边
-interface FlowEdge {
+interface ConditionData {
+  label: string
+  ruleType: 'condition'
+  rule: CodeRuleNode
+}
+
+type FlowNode = {
+  id: string
+  type: 'source' | 'condition'
+  position: { x: number; y: number }
+  data: SourceData | ConditionData
+}
+
+type FlowEdge = {
   id: string
   source: string
   target: string
+  sourceHandle?: string
+  targetHandle?: string
   animated?: boolean
   label?: string
   style?: Record<string, string>
   markerEnd?: { type: MarkerType; color?: string }
 }
 
-// 从 engine 加载取码规则
-function loadRulesFromEngine(): CodeRuleNode[] {
-  const rules = engine.getCodeRules()
-  return rules.length > 0 ? rules : createDefaultCodeRules()
+// ============ 节点面板类型 ============
+
+interface NodeTemplate {
+  type: 'start' | 'end' | 'pick' | 'condition'
+  label: string
+  icon: string
+  description: string
+  color: string
 }
 
+const nodeTemplates: NodeTemplate[] = [
+  { type: 'start', label: '开始节点', icon: '▶', description: '流程起点（仅一个）', color: 'var(--success)' },
+  { type: 'end', label: '结束节点', icon: '⏹', description: '流程终点（仅一个）', color: 'var(--danger)' },
+  { type: 'pick', label: '取码节点', icon: '📝', description: '取指定字根的码', color: 'var(--primary)' },
+  { type: 'condition', label: '条件节点', icon: '❓', description: '条件判断分支', color: 'var(--purple)' },
+]
+
+// ============ 规则数据 ============
+
 const codeRules = ref<CodeRuleNode[]>([])
+const selectedRule = ref<CodeRuleNode | null>(null)
 
-// 监听配置版本变化，重新加载规则
-watch(configVersion, () => {
-  const rules = loadRulesFromEngine()
-  // 只在有规则时更新，避免覆盖已有位置信息
-  if (rules.length > 0) {
-    codeRules.value = rules
+const { fitView, addNodes, addEdges, onConnect } = useVueFlow()
+
+// ============ 规则加载 ============
+
+function loadRulesFromEngine(): CodeRuleNode[] {
+  const rules = engine.getCodeRules()
+  if (rules.length > 0) return rules
+  return [
+    { id: 's0', type: 'start', label: '开始' },
+    { id: 's1', type: 'end', label: '结束' },
+  ]
+}
+
+function createDefaultRules(): CodeRuleNode[] {
+  return [
+    { id: 's0', type: 'start', label: '开始' },
+    { id: 's1', type: 'end', label: '结束' },
+  ]
+}
+
+// ============ 检查节点数量 ============
+
+function getNodeCount(type: 'start' | 'end' | 'pick' | 'condition'): number {
+  return codeRules.value.filter(r => r.type === type).length
+}
+
+function canAddNode(type: 'start' | 'end' | 'pick' | 'condition'): boolean {
+  if (type === 'start') return getNodeCount('start') === 0
+  if (type === 'end') return getNodeCount('end') === 0
+  return true
+}
+
+// ============ 获取新节点 ID ============
+
+function getNewId(type: 's' | 'c'): string {
+  let newId = 0
+  const prefix = type
+  const existingIds = codeRules.value
+    .filter(r => r.id.startsWith(prefix))
+    .map(r => parseInt(r.id.slice(1), 10))
+    .filter(n => !isNaN(n))
+  
+  while (existingIds.includes(newId)) {
+    newId++
   }
-}, { immediate: true })
+  return `${prefix}${newId}`
+}
 
-// 编辑相关
-const showEditModal = ref(false)
-const editingNode = ref<CodeRuleNode | null>(null)
-const isNewRule = ref(false)
-const editForm = ref({
-  type: 'pick' as RuleType,
-  rootIndex: 1,
-  codeIndex: 1,
-  nextNode: '',  // 取码节点的下一节点
-  conditionType: 'root_exists' as ConditionType,
-  conditionValue: 1,
-  conditionCodeIndex: 1, // 用于 root_has_code 条件
-  trueBranch: '',
-  falseBranch: '',
-})
+// ============ 添加节点 ============
 
-// Vue Flow 实例
-const { fitView, addNodes, addEdges, removeNodes, getNodes, getEdges } = useVueFlow()
+function addNodeFromTemplate(template: NodeTemplate) {
+  if (!canAddNode(template.type)) {
+    if (template.type === 'start') {
+      toast('已存在开始节点，不可重复添加')
+    } else if (template.type === 'end') {
+      toast('已存在结束节点，不可重复添加')
+    }
+    return
+  }
 
-// 转换为 Vue Flow 节点
+  const id = template.type === 'condition' ? getNewId('c') : getNewId('s')
+  let newRule: CodeRuleNode
+
+  if (template.type === 'start') {
+    newRule = { id: 's0', type: 'start', label: '开始' }
+  } else if (template.type === 'end') {
+    newRule = { id: 's1', type: 'end', label: '结束' }
+  } else if (template.type === 'pick') {
+    newRule = {
+      id,
+      type: 'pick',
+      label: '取第1根首码',
+      rootIndex: 1,
+      codeIndex: 1,
+    }
+  } else {
+    newRule = {
+      id,
+      type: 'condition',
+      label: '存在第1根？',
+      conditionType: 'root_exists',
+      conditionValue: 1,
+    }
+  }
+
+  codeRules.value = [...codeRules.value, newRule]
+  saveRules()
+  toast(`已添加${template.label}`)
+}
+
+// ============ 拖拽支持 ============
+
+let draggedType: 'start' | 'end' | 'pick' | 'condition' | null = null
+
+function onDragStart(event: DragEvent, template: NodeTemplate) {
+  draggedType = template.type
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = 'move'
+    event.dataTransfer.setData('text/plain', template.type)
+  }
+}
+
+function onDragEnd() {
+  draggedType = null
+}
+
+function onDrop(event: DragEvent) {
+  event.preventDefault()
+  if (!draggedType) return
+  
+  const type = draggedType
+  draggedType = null
+
+  if (!canAddNode(type)) {
+    if (type === 'start') {
+      toast('已存在开始节点，不可重复添加')
+    } else if (type === 'end') {
+      toast('已存在结束节点，不可重复添加')
+    }
+    return
+  }
+
+  addNodeFromTemplate(nodeTemplates.find(t => t.type === type)!)
+}
+
+function onDragOver(event: DragEvent) {
+  event.preventDefault()
+  if (event.dataTransfer) {
+    event.dataTransfer.dropEffect = 'move'
+  }
+}
+
+// ============ 布局计算 ============
+
+// 检查是否所有节点都有保存的位置
+function allNodesHavePositions(): boolean {
+  return codeRules.value.every(rule => rule.position !== undefined)
+}
+
+function layoutNodes(): Map<string, { x: number; y: number }> {
+  const positions = new Map<string, { x: number; y: number }>()
+  
+  // 如果所有节点都已有位置，直接使用保存的位置
+  if (allNodesHavePositions()) {
+    for (const rule of codeRules.value) {
+      if (rule.position) {
+        positions.set(rule.id, rule.position)
+      }
+    }
+    return positions
+  }
+  
+  // 否则进行自动布局
+  const visited = new Set<string>()
+  
+  // 构建邻接表
+  const adj = new Map<string, string[]>()
+  const reverseAdj = new Map<string, string[]>()
+  
+  for (const rule of codeRules.value) {
+    adj.set(rule.id, [])
+    reverseAdj.set(rule.id, [])
+  }
+  
+  for (const rule of codeRules.value) {
+    if (rule.nextNode) {
+      adj.get(rule.id)?.push(rule.nextNode)
+      reverseAdj.get(rule.nextNode)?.push(rule.id)
+    }
+    if (rule.trueBranch) {
+      adj.get(rule.id)?.push(rule.trueBranch)
+      reverseAdj.get(rule.trueBranch)?.push(rule.id)
+    }
+    if (rule.falseBranch) {
+      adj.get(rule.id)?.push(rule.falseBranch)
+      reverseAdj.get(rule.falseBranch)?.push(rule.id)
+    }
+  }
+  
+  // 找到开始节点
+  const startRule = codeRules.value.find(r => r.type === 'start')
+  if (!startRule) {
+    // 没有开始节点，按 ID 顺序排列
+    let y = 50
+    for (const rule of codeRules.value) {
+      // 优先使用保存的位置
+      if (rule.position) {
+        positions.set(rule.id, rule.position)
+      } else {
+        positions.set(rule.id, { x: 300, y })
+      }
+      y += 100
+    }
+    return positions
+  }
+  
+  // BFS 布局
+  const queue: { id: string; level: number }[] = [{ id: startRule.id, level: 0 }]
+  visited.add(startRule.id)
+  const levels = new Map<number, string[]>()
+  
+  while (queue.length > 0) {
+    const { id, level } = queue.shift()!
+    if (!levels.has(level)) levels.set(level, [])
+    levels.get(level)?.push(id)
+    
+    const children = adj.get(id) || []
+    for (const childId of children) {
+      if (!visited.has(childId)) {
+        visited.add(childId)
+        queue.push({ id: childId, level: level + 1 })
+      }
+    }
+  }
+  
+  // 设置位置
+  const nodeWidth = 120
+  const nodeHeight = 100
+  let y = 50
+  
+  for (const [level, nodes] of levels) {
+    const totalWidth = nodes.length * nodeWidth + (nodes.length - 1) * 50
+    let x = 300 - totalWidth / 2
+    
+    for (const nodeId of nodes) {
+      const rule = codeRules.value.find(r => r.id === nodeId)
+      // 优先使用保存的位置
+      if (rule?.position) {
+        positions.set(nodeId, rule.position)
+      } else {
+        positions.set(nodeId, { x, y })
+      }
+      x += nodeWidth + 50
+    }
+    y += nodeHeight
+  }
+  
+  // 处理未访问的节点（孤立节点）
+  let orphanY = y + 50
+  for (const rule of codeRules.value) {
+    if (!visited.has(rule.id)) {
+      // 优先使用保存的位置
+      if (rule.position) {
+        positions.set(rule.id, rule.position)
+      } else {
+        positions.set(rule.id, { x: 300, y: orphanY })
+      }
+      orphanY += 100
+    }
+  }
+  
+  return positions
+}
+
+// ============ 转换为 Vue Flow 数据 ============
+
 const flowNodes = computed<FlowNode[]>(() => {
-  let defaultY = 0
-  return codeRules.value.map((rule, index) => {
-    const node: FlowNode = {
+  const positions = layoutNodes()
+  
+  return codeRules.value.map((rule) => {
+    const pos = positions.get(rule.id) || rule.position || { x: 0, y: 0 }
+    const nodeType = rule.type === 'condition' ? 'condition' : 'source'
+    
+    return {
       id: rule.id,
-      type: 'default',
-      position: rule.position || { x: 300, y: defaultY },
+      type: nodeType,
+      position: pos,
       data: {
         label: rule.label,
         ruleType: rule.type,
-        rule,
+        rule: rule,
       },
-      sourcePosition: Position.Bottom,
-      targetPosition: Position.Top,
     }
-    defaultY += 100
-    return node
   })
 })
 
-// 节点拖动结束事件 - 保存位置
-function onNodeDragEnd(event: NodeDragEvent) {
-  // 直接从事件参数获取节点的新位置
-  const nodeId = event.node.id
-  const newPosition = event.node.position
-  
-  const rule = codeRules.value.find(r => r.id === nodeId)
-  if (rule) {
-    // 更新规则中的位置信息
-    rule.position = { x: newPosition.x, y: newPosition.y }
-    // 保存到 engine 和 localStorage
-    engine.setCodeRules(codeRules.value)
-    saveCurrentConfig()
-  }
-}
-
-// 转换为 Vue Flow 边
 const flowEdges = computed<FlowEdge[]>(() => {
   const edges: FlowEdge[] = []
   
-  codeRules.value.forEach((rule, index) => {
-    // 条件节点的分支
+  for (const rule of codeRules.value) {
     if (rule.type === 'condition') {
       if (rule.trueBranch) {
         edges.push({
-          id: `e-${rule.id}-${rule.trueBranch}`,
+          id: `e-${rule.id}-${rule.trueBranch}-positive`,
           source: rule.id,
           target: rule.trueBranch,
+          sourceHandle: 'positive',
           animated: true,
           label: '是',
           style: { stroke: 'var(--success)' },
@@ -130,198 +360,210 @@ const flowEdges = computed<FlowEdge[]>(() => {
       }
       if (rule.falseBranch) {
         edges.push({
-          id: `e-${rule.id}-${rule.falseBranch}`,
+          id: `e-${rule.id}-${rule.falseBranch}-negative`,
           source: rule.id,
           target: rule.falseBranch,
+          sourceHandle: 'negative',
           animated: true,
           label: '否',
           style: { stroke: 'var(--danger)' },
           markerEnd: { type: MarkerType.ArrowClosed, color: 'var(--danger)' },
         })
       }
-      // 没有配置分支时，连接到下一个节点
-      if (!rule.trueBranch && !rule.falseBranch && index < codeRules.value.length - 1) {
-        const nextRule = codeRules.value[index + 1]
-        edges.push({
-          id: `e-${rule.id}-${nextRule.id}`,
-          source: rule.id,
-          target: nextRule.id,
-          animated: true,
-        })
-      }
-    } else if (rule.type === 'pick' && rule.nextNode) {
-      // 取码节点有指定下一节点
+    } else if (rule.nextNode) {
       edges.push({
         id: `e-${rule.id}-${rule.nextNode}`,
         source: rule.id,
         target: rule.nextNode,
         animated: true,
       })
-    } else {
-      // 普通节点连接到下一个
-      if (index < codeRules.value.length - 1) {
-        const nextRule = codeRules.value[index + 1]
-        // 检查上一个节点是否是条件节点且已配置分支
-        const prevRule = index > 0 ? codeRules.value[index - 1] : null
-        if (prevRule?.type === 'condition' && (prevRule.trueBranch === rule.id || prevRule.falseBranch === rule.id)) {
-          // 已经由条件节点处理
-        } else {
-          edges.push({
-            id: `e-${rule.id}-${nextRule.id}`,
-            source: rule.id,
-            target: nextRule.id,
-            animated: true,
-          })
-        }
-      }
     }
-  })
+  }
   
   return edges
 })
 
-// 获取可用分支选项
-const branchOptions = computed(() => {
-  return codeRules.value
-    .filter(r => r.type !== 'start')
-    .map(r => ({ id: r.id, label: r.label }))
+// ============ 节点交互 ============
+
+function onNodeClick(event: NodeMouseEvent) {
+  const nodeId = event.node.id
+  const rule = codeRules.value.find(r => r.id === nodeId)
+  if (rule && rule.type !== 'start' && rule.type !== 'end') {
+    selectedRule.value = { ...rule }
+  } else {
+    selectedRule.value = null
+  }
+}
+
+function onPaneClick() {
+  selectedRule.value = null
+}
+
+// ============ 连接处理 ============
+
+onConnect((params) => {
+  const { source, target, sourceHandle } = params
+  
+  const sourceRule = codeRules.value.find(r => r.id === source)
+  if (!sourceRule) return
+  
+  if (sourceRule.type === 'condition') {
+    // 条件节点：根据 sourceHandle 决定分支
+    if (sourceHandle === 'positive') {
+      sourceRule.trueBranch = target
+    } else if (sourceHandle === 'negative') {
+      sourceRule.falseBranch = target
+    }
+  } else {
+    // 普通节点
+    sourceRule.nextNode = target
+  }
+  
+  saveRules()
 })
 
-// 编辑规则
-function editRule(rule: CodeRuleNode) {
-  editingNode.value = rule
-  editForm.value = {
-    type: rule.type,
-    rootIndex: rule.rootIndex || 1,
-    codeIndex: rule.codeIndex || 1,
-    nextNode: rule.nextNode || '',
-    conditionType: rule.conditionType || 'root_exists',
-    conditionValue: rule.conditionValue || 1,
-    conditionCodeIndex: rule.conditionCodeIndex || 1,
-    trueBranch: rule.trueBranch || '',
-    falseBranch: rule.falseBranch || '',
+// ============ 右键菜单 ============
+
+const contextMenu = ref<{
+  visible: boolean
+  x: number
+  y: number
+  nodeId: string
+}>({
+  visible: false,
+  x: 0,
+  y: 0,
+  nodeId: '',
+})
+
+function showContextMenu(event: MouseEvent, nodeId: string) {
+  event.preventDefault()
+  const rule = codeRules.value.find(r => r.id === nodeId)
+  if (!rule) return
+  
+  // 开始和结束节点不能删除
+  if (rule.type === 'start' || rule.type === 'end') return
+  
+  contextMenu.value = {
+    visible: true,
+    x: event.clientX,
+    y: event.clientY,
+    nodeId,
   }
-  isNewRule.value = false
-  showEditModal.value = true
 }
 
-// 添加规则
-function addRule() {
-  const newId = `r${Date.now()}`
-  editingNode.value = {
-    id: newId,
-    type: 'pick',
-    label: '',
-    rootIndex: 1,
-    codeIndex: 1,
-  }
-  editForm.value = {
-    type: 'pick',
-    rootIndex: 1,
-    codeIndex: 1,
-    nextNode: '',
-    conditionType: 'root_exists',
-    conditionValue: 1,
-    conditionCodeIndex: 1,
-    trueBranch: '',
-    falseBranch: '',
-  }
-  isNewRule.value = true
-  showEditModal.value = true
+function hideContextMenu() {
+  contextMenu.value.visible = false
 }
 
-// 保存规则
-function saveRule() {
-  if (!editingNode.value) return
+function deleteNode(nodeId: string) {
+  const rule = codeRules.value.find(r => r.id === nodeId)
+  if (!rule) return
   
-  editingNode.value.type = editForm.value.type
+  // 清除指向该节点的引用
+  for (const r of codeRules.value) {
+    if (r.nextNode === nodeId) r.nextNode = undefined
+    if (r.trueBranch === nodeId) r.trueBranch = undefined
+    if (r.falseBranch === nodeId) r.falseBranch = undefined
+  }
   
-  if (editForm.value.type === 'pick') {
-    editingNode.value.rootIndex = editForm.value.rootIndex
-    editingNode.value.codeIndex = editForm.value.codeIndex
-    editingNode.value.nextNode = editForm.value.nextNode
-    const rootLabel = editForm.value.rootIndex === -1 ? '末根' : `第${editForm.value.rootIndex}根`
-    const codeLabel = editForm.value.codeIndex === -1 ? '末码' : `第${editForm.value.codeIndex}码`
-    editingNode.value.label = `取${rootLabel}${codeLabel}`
-  } else if (editForm.value.type === 'condition') {
-    editingNode.value.conditionType = editForm.value.conditionType
-    editingNode.value.conditionValue = editForm.value.conditionValue
-    editingNode.value.trueBranch = editForm.value.trueBranch
-    editingNode.value.falseBranch = editForm.value.falseBranch
-    
-    if (editForm.value.conditionType === 'root_exists') {
-      editingNode.value.label = `存在第${editForm.value.conditionValue}根？`
-    } else if (editForm.value.conditionType === 'root_has_code') {
-      editingNode.value.conditionCodeIndex = editForm.value.conditionCodeIndex
-      editingNode.value.label = `第${editForm.value.conditionValue}根有第${editForm.value.conditionCodeIndex}码？`
-    } else if (editForm.value.conditionType === 'root_count') {
-      editingNode.value.label = `字根数≥${editForm.value.conditionValue}？`
+  codeRules.value = codeRules.value.filter(r => r.id !== nodeId)
+  selectedRule.value = null
+  saveRules()
+  toast('已删除节点')
+}
+
+// ============ 编辑规则 ============
+
+function getCodeLabel(codeIndex: number | undefined): string {
+  if (codeIndex === undefined || codeIndex === null) return '首码'
+  if (codeIndex === -1) return '末码'
+  if (codeIndex === 1) return '首码'
+  if (codeIndex === 2) return '次码'
+  if (codeIndex === 3) return '三码'
+  return `第${codeIndex}码`
+}
+
+function getRootLabel(rootIndex: number | undefined): string {
+  if (rootIndex === undefined || rootIndex === null) return '第1根'
+  if (rootIndex === -1) return '末根'
+  return `第${rootIndex}根`
+}
+
+function onRuleChange() {
+  if (!selectedRule.value) return
+  
+  // 更新标签
+  if (selectedRule.value.type === 'pick') {
+    const rootLabel = getRootLabel(selectedRule.value.rootIndex)
+    const codeLabel = getCodeLabel(selectedRule.value.codeIndex)
+    selectedRule.value.label = `取${rootLabel}${codeLabel}`
+  } else if (selectedRule.value.type === 'condition') {
+    if (selectedRule.value.conditionType === 'root_exists') {
+      selectedRule.value.label = `存在第${selectedRule.value.conditionValue}根？`
+    } else if (selectedRule.value.conditionType === 'root_has_code') {
+      selectedRule.value.label = `第${selectedRule.value.conditionValue}根有第${selectedRule.value.conditionCodeIndex}码？`
+    } else if (selectedRule.value.conditionType === 'root_count') {
+      selectedRule.value.label = `字根数≥${selectedRule.value.conditionValue}？`
     }
   }
   
-  if (isNewRule.value) {
-    const endIdx = codeRules.value.findIndex(r => r.type === 'end')
-    if (endIdx > 0) {
-      codeRules.value.splice(endIdx, 0, editingNode.value)
-    } else {
-      codeRules.value.push(editingNode.value)
-    }
-    toast('已添加规则')
-  } else {
-    toast('规则已更新')
+  // 实时保存
+  const index = codeRules.value.findIndex(r => r.id === selectedRule.value!.id)
+  if (index >= 0) {
+    codeRules.value[index] = { ...selectedRule.value }
+    saveRules()
   }
-  
-  showEditModal.value = false
 }
 
-// 删除规则
-function deleteRule(rule: CodeRuleNode) {
-  if (rule.type === 'start' || rule.type === 'end') {
-    toast('不能删除开始/结束节点')
+// ============ 保存规则 ============
+
+function saveRules() {
+  console.log('保存规则，当前规则:', JSON.parse(JSON.stringify(codeRules.value)))
+  engine.setCodeRules(codeRules.value)
+  saveCurrentConfig()
+  console.log('配置已保存到 localStorage')
+}
+
+// ============ 节点拖动保存位置 ============
+
+function handleNodeDragEnd(event: NodeDragEvent) {
+  console.log('节点拖动结束事件触发:', event)
+  const node = event.node
+  if (!node) {
+    console.log('没有节点信息')
     return
   }
   
-  const index = codeRules.value.findIndex(r => r.id === rule.id)
-  if (index > 0) {
-    codeRules.value.splice(index, 1)
-    toast('已删除规则')
+  console.log('节点信息:', node.id, '位置:', node.position)
+  
+  const ruleIndex = codeRules.value.findIndex(r => r.id === node.id)
+  console.log('规则索引:', ruleIndex)
+  
+  if (ruleIndex >= 0) {
+    // 创建新的规则对象以触发 Vue 响应式更新
+    const updatedRule = {
+      ...codeRules.value[ruleIndex],
+      position: { x: Math.round(node.position.x), y: Math.round(node.position.y) }
+    }
+    // 替换数组中的元素
+    codeRules.value = [
+      ...codeRules.value.slice(0, ruleIndex),
+      updatedRule,
+      ...codeRules.value.slice(ruleIndex + 1)
+    ]
+    // 保存到 localStorage
+    saveRules()
+    console.log('节点位置已保存:', node.id, updatedRule.position)
   }
 }
 
-// 节点点击事件
-function onNodeClick(event: { node: FlowNode }) {
-  const rule = codeRules.value.find(r => r.id === event.node.id)
-  if (rule && rule.type !== 'start' && rule.type !== 'end') {
-    editRule(rule)
-  }
-}
+// ============ 初始化 ============
 
-// 重置规则
-function resetRules() {
-  codeRules.value = createDefaultCodeRules()
-  toast('已重置为默认规则')
-}
-
-// 首次加载标记
-const isFirstLoad = ref(true)
-
-// 自适应视图 - 只在首次加载且没有保存位置时调用
 onMounted(() => {
-  // 检查是否有保存的位置
-  const hasPositions = codeRules.value.some(r => r.position)
-  if (!hasPositions) {
-    setTimeout(() => fitView({ padding: 0.2 }), 100)
-  }
-  isFirstLoad.value = false
+  codeRules.value = loadRulesFromEngine()
+  setTimeout(() => fitView({ padding: 0.2 }), 100)
 })
-
-// 监听规则变化，自动保存到 engine 配置
-watch(codeRules, (newRules) => {
-  if (!isFirstLoad.value) {
-    engine.setCodeRules(newRules)
-    saveCurrentConfig()
-  }
-}, { deep: true })
 </script>
 
 <template>
@@ -330,129 +572,169 @@ watch(codeRules, (newRules) => {
     <div class="toolbar">
       <div class="toolbar-left">
         <span class="title">🔀 取码规则</span>
-        <span class="count">{{ codeRules.length }} 条规则</span>
+        <span class="count">{{ codeRules.length }} 个节点</span>
       </div>
       <div class="toolbar-right">
-        <button class="btn btn-sm btn-success" @click="addRule">+ 添加规则</button>
+        <button class="btn btn-sm" @click="() => fitView({ padding: 0.2 })">自适应</button>
       </div>
     </div>
 
-    <!-- Vue Flow 画布 -->
-    <div class="flow-wrapper">
-      <VueFlow
-        :nodes="flowNodes"
-        :edges="flowEdges"
-        :fit-view-on-init="false"
-        :min-zoom="0.5"
-        :max-zoom="2"
-        @node-click="onNodeClick"
-        @node-drag-end="onNodeDragEnd"
-        class="rule-flow"
+    <div class="main-content">
+      <!-- 左侧节点面板 -->
+      <div class="node-panel">
+        <div class="panel-title">节点类型</div>
+        <div class="node-list">
+          <div
+            v-for="template in nodeTemplates"
+            :key="template.type"
+            class="node-template"
+            :class="{ disabled: !canAddNode(template.type) }"
+            :style="{ borderColor: template.color }"
+            draggable="true"
+            @dragstart="onDragStart($event, template)"
+            @dragend="onDragEnd"
+            @click="addNodeFromTemplate(template)"
+          >
+            <div class="template-icon" :style="{ color: template.color }">{{ template.icon }}</div>
+            <div class="template-info">
+              <div class="template-label">{{ template.label }}</div>
+              <div class="template-desc">{{ template.description }}</div>
+            </div>
+            <div v-if="!canAddNode(template.type)" class="template-badge">已存在</div>
+          </div>
+        </div>
+        <div class="panel-hint">
+          <p>💡 点击或拖动节点到右侧画布</p>
+          <p>🔗 拖动节点连接点创建连线</p>
+        </div>
+      </div>
+
+      <!-- Vue Flow 画布 -->
+      <div class="flow-wrapper" @drop="onDrop" @dragover="onDragOver">
+        <VueFlow
+          :nodes="flowNodes"
+          :edges="flowEdges"
+          :fit-view-on-init="false"
+          :min-zoom="0.5"
+          :max-zoom="2"
+          @pane-click="onPaneClick"
+          @node-click="onNodeClick"
+          @node-drag-stop="handleNodeDragEnd"
+          class="rule-flow"
+        >
+          <Background />
+          <Controls />
+          
+          <!-- 源节点模板 -->
+          <template #node-source="{ id, data }">
+            <div
+              class="source-node"
+              :class="{ start: data.ruleType === 'start', end: data.ruleType === 'end', pick: data.ruleType === 'pick' }"
+              @contextmenu="showContextMenu($event, id)"
+            >
+              <div class="node-icon">
+                <template v-if="data.ruleType === 'start'">▶</template>
+                <template v-else-if="data.ruleType === 'end'">⏹</template>
+                <template v-else>📝</template>
+              </div>
+              <div class="node-label">{{ data.label }}</div>
+              
+              <Handle
+                v-if="data.ruleType !== 'start'"
+                type="target"
+                :position="Position.Top"
+                class="handle-target"
+              />
+              
+              <Handle
+                v-if="data.ruleType !== 'end'"
+                type="source"
+                :position="Position.Bottom"
+                class="handle-source"
+              />
+            </div>
+          </template>
+          
+          <!-- 条件节点模板 -->
+          <template #node-condition="{ id, data }">
+            <div class="condition-node" @contextmenu="showContextMenu($event, id)">
+              <div class="node-icon">❓</div>
+              <div class="node-label">{{ data.label }}</div>
+              
+              <Handle type="target" :position="Position.Top" class="handle-target" />
+              <Handle type="source" id="positive" :position="Position.Left" class="handle-positive" />
+              <Handle type="source" id="negative" :position="Position.Right" class="handle-negative" />
+            </div>
+          </template>
+        </VueFlow>
+        
+        <!-- 右上角编辑面板 -->
+        <div v-if="selectedRule" class="edit-panel">
+          <div class="edit-panel-header">
+            <h3>编辑 {{ selectedRule.type === 'pick' ? '取码节点' : '条件节点' }}</h3>
+          </div>
+          
+          <div class="edit-panel-body">
+            <!-- 取码节点编辑 -->
+            <template v-if="selectedRule.type === 'pick'">
+              <div class="form-row">
+                <label>字根位置</label>
+                <select v-model="selectedRule.rootIndex" @change="onRuleChange">
+                  <option :value="1">第1根</option>
+                  <option :value="2">第2根</option>
+                  <option :value="3">第3根</option>
+                  <option :value="4">第4根</option>
+                  <option :value="5">第5根</option>
+                  <option :value="-1">末根</option>
+                </select>
+              </div>
+              <div class="form-row">
+                <label>码位位置</label>
+                <select v-model="selectedRule.codeIndex" @change="onRuleChange">
+                  <option :value="1">首码</option>
+                  <option :value="2">次码</option>
+                  <option :value="3">三码</option>
+                  <option :value="-1">末码</option>
+                </select>
+              </div>
+            </template>
+            
+            <!-- 条件节点编辑 -->
+            <template v-if="selectedRule.type === 'condition'">
+              <div class="form-row">
+                <label>条件类型</label>
+                <select v-model="selectedRule.conditionType" @change="onRuleChange">
+                  <option value="root_exists">存在第N个根</option>
+                  <option value="root_has_code">第N个根存在第M码</option>
+                  <option value="root_count">字根数量≥N</option>
+                </select>
+              </div>
+              <div class="form-row">
+                <label>N值（字根位置）</label>
+                <input type="number" v-model.number="selectedRule.conditionValue" min="1" max="10" @change="onRuleChange" />
+              </div>
+              <div v-if="selectedRule.conditionType === 'root_has_code'" class="form-row">
+                <label>M值（码位位置）</label>
+                <input type="number" v-model.number="selectedRule.conditionCodeIndex" min="1" max="4" @change="onRuleChange" />
+              </div>
+            </template>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 右键菜单 -->
+    <Teleport to="body">
+      <div
+        v-if="contextMenu.visible"
+        class="context-menu"
+        :style="{ left: contextMenu.x + 'px', top: contextMenu.y + 'px' }"
       >
-        <Background />
-        <Controls />
-        
-        <!-- 自定义节点模板 -->
-        <template #node-default="{ data }">
-          <div class="rule-node" :class="data.ruleType">
-            <div class="node-icon">
-              <template v-if="data.ruleType === 'start'">▶</template>
-              <template v-else-if="data.ruleType === 'end'">⏹</template>
-              <template v-else-if="data.ruleType === 'pick'">📝</template>
-              <template v-else-if="data.ruleType === 'condition'">❓</template>
-            </div>
-            <div class="node-label">{{ data.label }}</div>
-            <div v-if="data.ruleType !== 'start' && data.ruleType !== 'end'" class="node-actions">
-              <button class="action-btn" @click.stop="editRule(data.rule)">✏️</button>
-              <button class="action-btn danger" @click.stop="deleteRule(data.rule)">🗑️</button>
-            </div>
-          </div>
-        </template>
-      </VueFlow>
-    </div>
-
-    <!-- 编辑弹窗 -->
-    <div v-if="showEditModal && editingNode" class="modal-overlay" @click="showEditModal = false">
-      <div class="modal-content" @click.stop>
-        <h3>{{ isNewRule ? '添加规则' : '编辑规则' }}</h3>
-        
-        <div class="form-row">
-          <label>规则类型</label>
-          <select v-model="editForm.type">
-            <option value="pick">取码</option>
-            <option value="condition">条件判断</option>
-          </select>
-        </div>
-        
-        <template v-if="editForm.type === 'pick'">
-          <div class="form-row">
-            <label>字根位置</label>
-            <select v-model="editForm.rootIndex">
-              <option :value="1">第1根</option>
-              <option :value="2">第2根</option>
-              <option :value="3">第3根</option>
-              <option :value="4">第4根</option>
-              <option :value="-1">末根 (-1)</option>
-            </select>
-          </div>
-          <div class="form-row">
-            <label>码位位置</label>
-            <select v-model="editForm.codeIndex">
-              <option :value="1">首码 (1)</option>
-              <option :value="2">次码 (2)</option>
-              <option :value="3">三码 (3)</option>
-              <option :value="4">末码 (4)</option>
-              <option :value="-1">末码 (-1)</option>
-            </select>
-          </div>
-          <div class="form-row">
-            <label>下一节点</label>
-            <select v-model="editForm.nextNode">
-              <option value="">继续执行下一规则</option>
-              <option v-for="opt in branchOptions" :key="opt.id" :value="opt.id">{{ opt.label }}</option>
-            </select>
-          </div>
-        </template>
-        
-        <template v-if="editForm.type === 'condition'">
-          <div class="form-row">
-            <label>条件类型</label>
-            <select v-model="editForm.conditionType">
-              <option value="root_exists">存在第N个根</option>
-              <option value="root_has_code">第N个根存在第M码</option>
-              <option value="root_count">字根数量≥N</option>
-            </select>
-          </div>
-          <div class="form-row">
-            <label>N值（字根位置）</label>
-            <input type="number" v-model.number="editForm.conditionValue" min="1" max="10" />
-          </div>
-          <div v-if="editForm.conditionType === 'root_has_code'" class="form-row">
-            <label>M值（码位位置）</label>
-            <input type="number" v-model.number="editForm.conditionCodeIndex" min="1" max="4" />
-          </div>
-          <div class="form-row">
-            <label>条件为真时跳转</label>
-            <select v-model="editForm.trueBranch">
-              <option value="">继续执行下一规则</option>
-              <option v-for="opt in branchOptions" :key="opt.id" :value="opt.id">{{ opt.label }}</option>
-            </select>
-          </div>
-          <div class="form-row">
-            <label>条件为假时跳转</label>
-            <select v-model="editForm.falseBranch">
-              <option value="">继续执行下一规则</option>
-              <option v-for="opt in branchOptions" :key="opt.id" :value="opt.id">{{ opt.label }}</option>
-            </select>
-          </div>
-        </template>
-        
-        <div class="modal-actions">
-          <button class="btn btn-ghost" @click="showEditModal = false">取消</button>
-          <button class="btn" @click="saveRule">保存</button>
+        <div class="context-menu-item danger" @click="deleteNode(contextMenu.nodeId); hideContextMenu()">
+          删除节点
         </div>
       </div>
-    </div>
+    </Teleport>
   </div>
 </template>
 
@@ -498,12 +780,114 @@ watch(codeRules, (newRules) => {
   gap: 8px;
 }
 
+.main-content {
+  flex: 1;
+  display: flex;
+  gap: 12px;
+  min-height: 0;
+}
+
+/* 左侧节点面板 */
+.node-panel {
+  width: 220px;
+  background: var(--bg2);
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+
+.panel-title {
+  padding: 12px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  border-bottom: 1px solid var(--border);
+}
+
+.node-list {
+  flex: 1;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+}
+
+.node-template {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--bg);
+  border: 2px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  position: relative;
+}
+
+.node-template:hover:not(.disabled) {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow);
+}
+
+.node-template.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.template-icon {
+  font-size: 20px;
+  width: 28px;
+  text-align: center;
+}
+
+.template-info {
+  flex: 1;
+}
+
+.template-label {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.template-desc {
+  font-size: 11px;
+  color: var(--text3);
+  margin-top: 2px;
+}
+
+.template-badge {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  font-size: 10px;
+  padding: 2px 6px;
+  background: var(--bg3);
+  border-radius: 4px;
+  color: var(--text3);
+}
+
+.panel-hint {
+  padding: 12px;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--text3);
+}
+
+.panel-hint p {
+  margin: 4px 0;
+}
+
+/* Flow 画布 */
 .flow-wrapper {
   flex: 1;
   background: var(--bg2);
   border-radius: 8px;
   border: 1px solid var(--border);
   overflow: hidden;
+  position: relative;
 }
 
 .rule-flow {
@@ -511,45 +895,61 @@ watch(codeRules, (newRules) => {
   height: 100%;
 }
 
-/* 自定义节点样式 */
-.rule-node {
-  padding: 12px 16px;
+/* 源节点样式 */
+.source-node {
+  padding: 10px 20px;
   border-radius: 8px;
-  min-width: 160px;
+  min-width: 80px;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 4px;
   cursor: pointer;
   transition: all 0.2s ease;
+  position: relative;
 }
 
-.rule-node:hover {
+.source-node:hover {
   transform: scale(1.02);
 }
 
-.rule-node.start {
+.source-node.start {
   background: rgba(0, 180, 42, 0.15);
   border: 2px solid var(--success);
   color: var(--success);
 }
 
-.rule-node.end {
+.source-node.end {
   background: rgba(245, 63, 63, 0.15);
   border: 2px solid var(--danger);
   color: var(--danger);
 }
 
-.rule-node.pick {
+.source-node.pick {
   background: var(--bg);
-  border: 1px solid var(--primary);
+  border: 2px solid var(--primary);
   color: var(--primary);
 }
 
-.rule-node.condition {
-  background: rgba(114, 46, 209, 0.15);
-  border: 2px solid var(--purple);
+/* 条件节点样式 */
+.condition-node {
+  padding: 10px 20px;
+  border-radius: 0;
+  min-width: 120px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  position: relative;
+  background: var(--bg);
+  border: 2px dashed var(--purple);
   color: var(--purple);
+}
+
+.condition-node:hover {
+  transform: scale(1.02);
 }
 
 .node-icon {
@@ -558,64 +958,59 @@ watch(codeRules, (newRules) => {
 
 .node-label {
   font-weight: 500;
-  font-size: 13px;
-}
-
-.node-actions {
-  display: flex;
-  gap: 4px;
-  margin-top: 4px;
-}
-
-.action-btn {
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--bg3);
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
   font-size: 12px;
-  transition: all 0.15s ease;
+  white-space: nowrap;
 }
 
-.action-btn:hover {
-  background: var(--primary-bg);
+/* Handle 样式 */
+.handle-target,
+.handle-source {
+  width: 12px !important;
+  height: 12px !important;
+  background: var(--primary) !important;
+  border: 2px solid var(--bg) !important;
 }
 
-.action-btn.danger:hover {
-  background: rgba(245, 63, 63, 0.2);
+.handle-positive {
+  width: 12px !important;
+  height: 12px !important;
+  background: var(--success) !important;
+  border: 2px solid var(--bg) !important;
 }
 
-/* 弹窗样式 */
-.modal-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
+.handle-negative {
+  width: 12px !important;
+  height: 12px !important;
+  background: var(--danger) !important;
+  border: 2px solid var(--bg) !important;
 }
 
-.modal-content {
+/* 编辑面板 */
+.edit-panel {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 280px;
   background: var(--bg2);
+  border: 1px solid var(--border);
   border-radius: 12px;
-  padding: 24px;
-  min-width: 360px;
-  max-width: 90vw;
-  max-height: 80vh;
-  overflow-y: auto;
   box-shadow: var(--shadow2);
+  z-index: 100;
 }
 
-.modal-content h3 {
-  margin: 0 0 16px;
-  font-size: 16px;
+.edit-panel-header {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.edit-panel-header h3 {
+  margin: 0;
+  font-size: 14px;
   font-weight: 600;
+}
+
+.edit-panel-body {
+  padding: 16px;
 }
 
 .form-row {
@@ -634,17 +1029,40 @@ watch(codeRules, (newRules) => {
   width: 100%;
 }
 
-.modal-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-top: 16px;
+/* 右键菜单 */
+.context-menu {
+  position: fixed;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow2);
+  padding: 4px 0;
+  min-width: 120px;
+  z-index: 10000;
+}
+
+.context-menu-item {
+  padding: 8px 16px;
+  cursor: pointer;
+  font-size: 13px;
+  transition: background-color 0.15s ease;
+}
+
+.context-menu-item:hover {
+  background: var(--primary-bg);
+}
+
+.context-menu-item.danger {
+  color: var(--danger);
+}
+
+.context-menu-item.danger:hover {
+  background: rgba(245, 63, 63, 0.1);
 }
 </style>
 
-<!-- 全局 Vue Flow 样式修复 -->
+<!-- 全局 Vue Flow 样式 -->
 <style>
-/* 控制器面板样式 */
 .vue-flow__controls {
   display: flex !important;
   flex-direction: column !important;
@@ -669,7 +1087,6 @@ watch(codeRules, (newRules) => {
   color: var(--text) !important;
   cursor: pointer !important;
   transition: all 0.15s ease !important;
-  flex-shrink: 0 !important;
 }
 
 .vue-flow__controls-button:hover {
@@ -682,27 +1099,15 @@ watch(codeRules, (newRules) => {
   fill: currentColor !important;
   width: 14px !important;
   height: 14px !important;
-  max-width: 14px !important;
-  max-height: 14px !important;
 }
 
-/* 节点基础样式 - 移除默认边框和选中样式 */
 .vue-flow__node {
   border: none !important;
   padding: 0 !important;
   background: transparent !important;
   box-shadow: none !important;
-  border-radius: 8px !important;
-  outline: none !important;
 }
 
-.vue-flow__node.selected,
-.vue-flow__node:focus {
-  outline: none !important;
-  box-shadow: none !important;
-}
-
-/* 边样式 */
 .vue-flow__edge-path {
   stroke-width: 2 !important;
 }
@@ -716,10 +1121,7 @@ watch(codeRules, (newRules) => {
   fill: var(--text2) !important;
 }
 
-/* MiniMap 样式 */
-.vue-flow__minimap {
-  background: var(--bg2) !important;
-  border: 1px solid var(--border) !important;
-  border-radius: 8px !important;
+.vue-flow__handle {
+  border-radius: 50% !important;
 }
 </style>

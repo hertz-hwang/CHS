@@ -70,10 +70,9 @@ function calculateCharCode(char: string): string {
     if (!node) break
     
     if (node.type === 'start') {
-      // 开始节点：跳转到下一个非开始节点
-      const startIdx = rules.findIndex(r => r.id === 'start')
-      if (startIdx >= 0 && startIdx < rules.length - 1) {
-        currentNodeId = rules[startIdx + 1].id
+      // 开始节点：跳转到 nextNode 指定的节点
+      if (node.nextNode) {
+        currentNodeId = node.nextNode
       } else {
         break
       }
@@ -320,10 +319,9 @@ function calculateElementSequence(char: string): string[] {
     if (!node) break
     
     if (node.type === 'start') {
-      // 开始节点：跳转到下一个非开始节点
-      const startIdx = rules.findIndex(r => r.id === 'start')
-      if (startIdx >= 0 && startIdx < rules.length - 1) {
-        currentNodeId = rules[startIdx + 1].id
+      // 开始节点：跳转到 nextNode 指定的节点
+      if (node.nextNode) {
+        currentNodeId = node.nextNode
       } else {
         break
       }
@@ -358,13 +356,7 @@ function calculateElementSequence(char: string): string[] {
       if (node.nextNode) {
         currentNodeId = node.nextNode
       } else {
-        // 找当前节点的下一个节点
-        const currentIdx = rules.findIndex(r => r.id === node.id)
-        if (currentIdx >= 0 && currentIdx < rules.length - 1) {
-          currentNodeId = rules[currentIdx + 1].id
-        } else {
-          break
-        }
+        break
       }
     } else if (node.type === 'condition') {
       // 条件判断节点

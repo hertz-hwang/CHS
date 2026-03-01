@@ -214,14 +214,15 @@ export class CharsHijack {
   }
 
   loadCharset(name: string, text: string): number {
-    const chars: string[] = []
+    const charSet = new Set<string>()
     for (const raw of text.split('\n')) {
       const line = raw.trim()
       if (!line || line.startsWith('#')) continue
       const cols = line.split('\t')
       const ch = cols[0]
-      if ([...ch].length === 1) chars.push(ch)
+      if ([...ch].length === 1) charSet.add(ch)
     }
+    const chars = [...charSet]
     this.charsets.set(name, chars)
     return chars.length
   }
