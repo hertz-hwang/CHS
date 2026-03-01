@@ -3,7 +3,7 @@ import { ref, computed, watch } from 'vue'
 import { useEngine } from '../../composables/useEngine'
 import { unicodeHex } from '../../engine/unicode'
 
-const { engine, rootsVersion } = useEngine()
+const { engine, rootsVersion, toast } = useEngine()
 
 // 搜索相关
 const searchQuery = ref('')
@@ -156,6 +156,33 @@ const stats = computed(() => {
     rate: allChars.value.length > 0 ? (complete / allChars.value.length * 100).toFixed(1) : '0'
   }
 })
+
+// 导出拆分表
+function exportSplitTable() {
+  rootsVersion.value // 确保数据最新
+  
+  const lines: string[] = []
+  
+  for (const char of allChars.value) {
+    const info = getSplitInfo(char)
+    const rootsStr = info.split.join(' ')
+    lines.push(`${char}\t${rootsStr}`)
+  }
+  
+  const content = lines.join('\n')
+  const blob = new Blob([content], { type: 'text/plain;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  
+  const a = document.createElement('a')
+  a.href = url
+  a.download = 'chs_div.txt'
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+  
+  toast(`已导出 ${lines.length} 条拆分记录`)
+}
 </script>
 
 <template>
@@ -168,11 +195,14 @@ const stats = computed(() => {
         <span class="complete-info">
           完整: {{ stats.complete }} ({{ stats.rate }}%)
         </span>
-      </div>
-      <div class="toolbar-right">
         <span class="incomplete-info">
           未完整: {{ stats.incomplete }}
         </span>
+      </div>
+      <div class="toolbar-right">
+        <button class="btn btn-sm btn-primary" @click="exportSplitTable">
+          📥 导出拆分表
+        </button>
       </div>
     </div>
 

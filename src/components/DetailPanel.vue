@@ -9,6 +9,7 @@ const { engine, selectedChar, refreshStats, toast, switchPage, setSearchChar, sa
 // 字根编码对话框状态
 const showRootCodeDialog = ref(false)
 const rootCodeInput = ref('')
+const editingRoot = ref<string | null>(null)  // 当前正在编辑的字根元素
 
 const detail = computed(() => {
   const ch = selectedChar.value
@@ -84,6 +85,60 @@ function confirmSetRoot() {
   setTimeout(() => { selectedChar.value = ch }, 0)
 }
 
+// 点击字根元素按钮，打开设置编码对话框
+function openLeafDialog(leaf: string) {
+  editingRoot.value = leaf
+  rootCodeInput.value = engine.getRootCodeString(leaf) || ''
+  showRootCodeDialog.value = true
+}
+
+// 确认设置字根元素编码
+function confirmSetLeafRoot() {
+  if (!editingRoot.value) return
+  const leaf = editingRoot.value
+  const code = rootCodeInput.value.trim()
+  
+  if (code) {
+    engine.setRootCode(leaf, code)
+    toast(`已添加字根: ${leaf}，编码: ${code}`)
+  } else {
+    engine.addRoots(leaf)
+    toast(`已添加字根: ${leaf}`)
+  }
+  
+  saveCurrentConfig()
+  refreshStats()
+  closeRootCodeDialog()
+}
+
+// 关闭对话框
+function closeRootCodeDialog() {
+  showRootCodeDialog.value = false
+  editingRoot.value = null
+}
+
+// 检查字根元素是否已存在于字根集
+function isLeafRoot(leaf: string): boolean {
+  return engine.roots.has(leaf)
+}
+
+// 对话框确认处理
+function handleDialogConfirm() {
+  if (editingRoot.value) {
+    confirmSetLeafRoot()
+  } else {
+    confirmSetRoot()
+  }
+}
+
+// 获取对话框标题
+const dialogTitle = computed(() => {
+  if (editingRoot.value) {
+    return `添加字根: ${editingRoot.value}`
+  }
+  return '设为字根'
+})
+
 // 跳转到指定页面并带上当前字
 function goToPage(page: string) {
   if (!detail.value) return
@@ -100,7 +155,20 @@ function goToPage(page: string) {
       
       <div class="info-row">
         <div class="label">拆分结果</div>
-        <div class="value primary">{{ detail.leaves.join(' + ') }}</div>
+        <div class="leaves-container">
+          <template v-for="(leaf, index) in detail.leaves" :key="index">
+            <button
+              class="leaf-btn"
+              :class="{ 'is-root': isLeafRoot(leaf) }"
+              @click="openLeafDialog(leaf)"
+              :title="isLeafRoot(leaf) ? '已是字根，点击修改编码' : '点击添加为字根'"
+            >
+              <span class="leaf-char">{{ leaf }}</span>
+              <span v-if="isLeafRoot(leaf)" class="leaf-badge">✓</span>
+            </button>
+            <span v-if="index < detail.leaves.length - 1" class="leaf-sep">+</span>
+          </template>
+        </div>
       </div>
       
       <div class="info-row">
@@ -177,9 +245,9 @@ function goToPage(page: string) {
 
     <!-- 字根编码输入对话框 -->
     <Teleport to="body">
-      <div class="overlay" :class="{ show: showRootCodeDialog }" @click.self="showRootCodeDialog = false">
+      <div class="overlay" :class="{ show: showRootCodeDialog }" @click.self="closeRootCodeDialog">
         <div class="modal">
-          <h2>设为字根</h2>
+          <h2>{{ dialogTitle }}</h2>
           <div class="form-group">
             <label>字根编码</label>
             <input
@@ -187,13 +255,13 @@ function goToPage(page: string) {
               type="text"
               class="input"
               placeholder="输入字根编码（如：a、ab、abc）"
-              @keyup.enter="confirmSetRoot"
+              @keyup.enter="handleDialogConfirm"
             />
             <div class="hint">编码由字母组成，第一个字母为主码，第二个为小码（可选），其余为补码（可选）</div>
           </div>
           <div class="modal-actions">
-            <button class="btn" @click="showRootCodeDialog = false">取消</button>
-            <button class="btn btn-primary" @click="confirmSetRoot">确定</button>
+            <button class="btn" @click="closeRootCodeDialog">取消</button>
+            <button class="btn btn-primary" @click="handleDialogConfirm">确定</button>
           </div>
         </div>
       </div>
@@ -300,6 +368,76 @@ h3 {
   background: var(--bg3);
   padding: 1px 4px;
   border-radius: 3px;
+}
+
+/* 拆分结果按钮样式 */
+.leaves-container {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.leaf-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  height: 32px;
+  padding: 4px 8px;
+  font-size: 16px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.leaf-btn:hover {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: white;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.leaf-btn.is-root {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: white;
+}
+
+.leaf-btn.is-root:hover {
+  background: var(--primary-dark, #0066cc);
+  border-color: var(--primary-dark, #0066cc);
+}
+
+.leaf-char {
+  font-weight: 500;
+}
+
+.leaf-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  width: 14px;
+  height: 14px;
+  font-size: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--success, #28a745);
+  color: white;
+  border-radius: 50%;
+}
+
+.leaf-sep {
+  color: var(--text2);
+  font-weight: 600;
+  font-size: 12px;
+  margin: 0 2px;
 }
 
 /* 对话框样式 */

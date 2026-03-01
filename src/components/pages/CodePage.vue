@@ -458,10 +458,10 @@ function exportCodeTable() {
         <span class="encoded-info">已编码: {{ statsInfo.encoded }} ({{ statsInfo.rate }}%)</span>
       </div>
       <div class="toolbar-right">
-        <button class="export-btn" @click="exportElementSequence" title="导出元素序列，可用于码灵优化器（Code Genie）优化布局。">
+        <button class="btn btn-sm btn-primary" @click="exportElementSequence" title="导出元素序列，可用于码灵优化器（Code Genie）优化布局。">
           📄 导出元素序列
         </button>
-        <button class="export-btn" @click="exportCodeTable" title="导出码表，可作为 Rime 等输入法码表使用。">
+        <button class="btn btn-sm btn-primary" @click="exportCodeTable" title="导出码表，可作为 Rime 等输入法码表使用。">
           📊 导出码表
         </button>
       </div>
@@ -630,26 +630,6 @@ function exportCodeTable() {
   display: flex;
   align-items: center;
   gap: 8px;
-}
-
-.export-btn {
-  font-size: 13px;
-  padding: 6px 12px;
-  border-radius: 6px;
-  border: 1px solid var(--border);
-  background: var(--bg3);
-  color: var(--text1);
-  cursor: pointer;
-  transition: all 0.15s ease;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.export-btn:hover {
-  background: var(--primary-bg);
-  color: var(--primary);
-  border-color: var(--primary);
 }
 
 .search-panel {

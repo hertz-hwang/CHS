@@ -162,11 +162,15 @@ export class CharsHijack {
         const py = cols[1]
         const fq = parseInt(cols[2]) || 0
         
-        // 收集所有拼音信息
+        // 收集所有拼音信息（避免重复）
         if (!this.pinyinList.has(ch)) {
           this.pinyinList.set(ch, [])
         }
-        this.pinyinList.get(ch)!.push({ py, freq: fq })
+        const list = this.pinyinList.get(ch)!
+        // 检查是否已存在相同的拼音
+        if (!list.some(p => p.py === py)) {
+          list.push({ py, freq: fq })
+        }
         
         // 更新词频（取最大值）
         if (fq > 0) {
