@@ -421,7 +421,8 @@ function exportElementSequence() {
   for (const char of chars) {
     const elements = calculateElementSequence(char)
     if (elements.length > 0) {
-      lines.push(`${char}\t${elements.join(' ')}`)
+      const freq = engine.freq.get(char) || 0
+      lines.push(`${char}\t${elements.join(' ')}\t${freq}`)
     }
   }
   

@@ -7,6 +7,8 @@ export interface RootCode {
   main: string           // 键位码（第1字符）
   sub?: string           // 小码（第2字符，可选）
   supplement?: string    // 补码（第3字符起，可选）
+  mergedFrom?: string    // 归并来源字根（表示此字根的编码与来源字根相同）
+  codeEquivFrom?: string // 码位等值来源，如 "日.1" 表示此字根的某码来自日.1
 }
 
 export interface VisualRuleConfig {
@@ -53,9 +55,12 @@ export interface UserConfig {
     created?: string
     description?: string
   }
+  charset?: string                    // 当前选中的字集ID
   roots: Record<string, string>      // 字根 -> 编码字符串
   named_roots: Record<string, string> // 命名字根名 -> IDS
   equivalent_roots: Record<string, string[]> // 主字根 -> 等效字根列表
+  merged_roots: Record<string, string>  // 归并字根 -> 来源字根（编码相同）
+  code_equivalences: Record<string, string>  // 码位等值: "目.1" = "日.1" 表示目的第2码等于日的第2码
   rules: TransformRuleConfig[]        // IDS 转换规则
   code_rules: CodeRuleNode[]          // 取码规则
 }
@@ -101,9 +106,12 @@ export function parseConfig(toml: string): UserConfig {
     const parsed = TOML.parse(toml) as Partial<UserConfig>
     return {
       meta: parsed.meta || { version: '1.0' },
+      charset: parsed.charset,  // 解析字集ID
       roots: parsed.roots || {},
       named_roots: parsed.named_roots || {},
       equivalent_roots: parsed.equivalent_roots || {},
+      merged_roots: parsed.merged_roots || {},
+      code_equivalences: parsed.code_equivalences || {},
       rules: parsed.rules || [],
       code_rules: parsed.code_rules || [],
     }
@@ -114,6 +122,8 @@ export function parseConfig(toml: string): UserConfig {
       roots: {},
       named_roots: {},
       equivalent_roots: {},
+      merged_roots: {},
+      code_equivalences: {},
       rules: [],
       code_rules: [],
     }
@@ -131,6 +141,12 @@ export function exportConfig(config: UserConfig): string {
   if (config.meta.created) lines.push(`created = "${config.meta.created}"`)
   if (config.meta.description) lines.push(`description = "${config.meta.description}"`)
   lines.push('')
+
+  // charset (字集ID)
+  if (config.charset) {
+    lines.push(`charset = "${config.charset}"`)
+    lines.push('')
+  }
 
   // roots
   if (Object.keys(config.roots).length > 0) {
@@ -156,6 +172,24 @@ export function exportConfig(config: UserConfig): string {
     for (const [main, equivs] of Object.entries(config.equivalent_roots)) {
       const equivsStr = equivs.map(e => `"${e}"`).join(', ')
       lines.push(`"${main}" = [${equivsStr}]`)
+    }
+    lines.push('')
+  }
+
+  // merged_roots (归并字根)
+  if (Object.keys(config.merged_roots).length > 0) {
+    lines.push('[merged_roots]')
+    for (const [target, source] of Object.entries(config.merged_roots)) {
+      lines.push(`"${target}" = "${source}"`)
+    }
+    lines.push('')
+  }
+
+  // code_equivalences (码位等值)
+  if (Object.keys(config.code_equivalences).length > 0) {
+    lines.push('[code_equivalences]')
+    for (const [target, source] of Object.entries(config.code_equivalences)) {
+      lines.push(`"${target}" = "${source}"`)
     }
     lines.push('')
   }
@@ -236,6 +270,8 @@ export function createDefaultConfig(name?: string, author?: string): UserConfig 
     roots: {},
     named_roots: {},
     equivalent_roots: {},
+    merged_roots: {},
+    code_equivalences: {},
     rules: [],
     code_rules: [],
   }

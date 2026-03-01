@@ -3,7 +3,7 @@ import { computed, ref } from 'vue'
 import { useEngine } from '../../composables/useEngine'
 import { RootCode, codeToString, parseCode } from '../../engine/config'
 
-const { engine, toast, refreshStats, rootsVersion } = useEngine()
+const { engine, toast, refreshStats, rootsVersion, saveCurrentConfig } = useEngine()
 
 // 31键布局
 const KEYBOARD_LAYOUT = [
@@ -111,6 +111,88 @@ function updateRootCode(root: string, newCode: string) {
   engine.rootCodes.set(root, { root, ...parsed })
   refreshStats()
 }
+
+// ============ 归并字根功能 ============
+
+// 归并设置弹窗
+const showMergeModal = ref(false)
+const mergeForm = ref({
+  targetRoot: '',    // 要归并的字根
+  sourceRoot: '',    // 来源字根
+})
+
+// 归并字根列表（用于显示）
+const mergedRootsList = computed(() => {
+  rootsVersion.value
+  const result: { target: string; source: string; sourceCode: string }[] = []
+  for (const [target, source] of engine.mergedRoots) {
+    const sourceCode = engine.rootCodes.get(source)
+    result.push({
+      target,
+      source,
+      sourceCode: sourceCode ? codeToString(sourceCode) : '',
+    })
+  }
+  return result.sort((a, b) => a.target.localeCompare(b.target))
+})
+
+// 打开归并设置弹窗
+function openMergeModal(targetRoot?: string) {
+  mergeForm.value = {
+    targetRoot: targetRoot || '',
+    sourceRoot: '',
+  }
+  showMergeModal.value = true
+}
+
+// 执行归并
+function applyMerge() {
+  const { targetRoot, sourceRoot } = mergeForm.value
+  
+  if (!targetRoot) {
+    toast('请输入要归并的字根')
+    return
+  }
+  if (!sourceRoot) {
+    toast('请输入来源字根')
+    return
+  }
+  if (targetRoot === sourceRoot) {
+    toast('目标字根和来源字根不能相同')
+    return
+  }
+  
+  // 检查来源字根是否有编码
+  const sourceCode = engine.rootCodes.get(sourceRoot)
+  if (!sourceCode) {
+    toast(`来源字根「${sourceRoot}」没有编码，请先为其设置编码`)
+    return
+  }
+  
+  // 执行归并
+  engine.setMergedRoot(targetRoot, sourceRoot)
+  
+  // 保存配置
+  saveCurrentConfig()
+  refreshStats()
+  
+  showMergeModal.value = false
+  toast(`已将「${targetRoot}」归并到「${sourceRoot}」`)
+}
+
+// 取消归并
+function removeMerge(targetRoot: string) {
+  engine.removeMergedRoot(targetRoot)
+  saveCurrentConfig()
+  refreshStats()
+  toast(`已取消「${targetRoot}」的归并`)
+}
+
+// 获取所有字根列表（用于选择来源字根）
+const allRootsList = computed(() => {
+  rootsVersion.value
+  return [...engine.roots].sort()
+})
 </script>
 
 <template>
@@ -156,8 +238,29 @@ function updateRootCode(root: string, newCode: string) {
     <div v-if="selectedKey" class="roots-panel">
       <div class="roots-panel-header">
         <h3>键位 <strong>{{ selectedKey === '_' ? '空格' : selectedKey.toUpperCase() }}</strong> 的字根</h3>
-        <span class="roots-count">{{ selectedRoots.length }} 个</span>
+        <div class="roots-panel-actions">
+          <button class="btn btn-sm btn-purple" @click="openMergeModal()">归并设置</button>
+          <span class="roots-count">{{ selectedRoots.length }} 个</span>
+        </div>
       </div>
+      
+      <!-- 归并字根列表 -->
+      <div v-if="mergedRootsList.length > 0" class="merged-roots-section">
+        <div class="merged-roots-header">
+          <span class="merged-label">归并字根</span>
+          <span class="merged-count">{{ mergedRootsList.length }} 个</span>
+        </div>
+        <div class="merged-roots-list">
+          <div v-for="item in mergedRootsList" :key="item.target" class="merged-item">
+            <span class="merged-target">{{ item.target }}</span>
+            <span class="merged-arrow">→</span>
+            <span class="merged-source">{{ item.source }}</span>
+            <span class="merged-code">({{ item.sourceCode.toUpperCase() }})</span>
+            <button class="btn btn-sm btn-outline merged-remove" @click="removeMerge(item.target)">取消</button>
+          </div>
+        </div>
+      </div>
+      
       <div class="roots-list">
         <div
           v-for="item in selectedRoots"
@@ -188,6 +291,54 @@ function updateRootCode(root: string, newCode: string) {
             <button class="btn btn-sm btn-outline" @click="openEditModal(item.root)">编辑</button>
             <button class="btn btn-sm btn-danger" @click="removeRoot(item.root)">删除</button>
           </div>
+        </div>
+      </div>
+    </div>
+    
+    <!-- 归并设置弹窗 -->
+    <div v-if="showMergeModal" class="modal-overlay" @click.self="showMergeModal = false">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3>归并字根设置</h3>
+          <button class="modal-close" @click="showMergeModal = false">&times;</button>
+        </div>
+        <div class="modal-body">
+          <p class="modal-desc">将一个字根的编码设置为与另一个字根相同。归并后，两个字根将拥有相同的编码。</p>
+          
+          <div class="form-group">
+            <label>要归并的字根</label>
+            <input
+              v-model="mergeForm.targetRoot"
+              type="text"
+              placeholder="输入要归并的字根"
+              class="form-input"
+            />
+            <span class="form-hint">此字根将获得与来源字根相同的编码</span>
+          </div>
+          
+          <div class="form-group">
+            <label>来源字根（已有编码）</label>
+            <input
+              v-model="mergeForm.sourceRoot"
+              type="text"
+              placeholder="输入来源字根"
+              class="form-input"
+              list="roots-datalist"
+            />
+            <datalist id="roots-datalist">
+              <option v-for="root in allRootsList" :key="root" :value="root" />
+            </datalist>
+            <span class="form-hint">此字根的编码将被复制到目标字根</span>
+          </div>
+          
+          <div v-if="mergeForm.sourceRoot && engine.rootCodes.get(mergeForm.sourceRoot)" class="source-code-preview">
+            <span class="preview-label">来源字根编码：</span>
+            <span class="preview-code">{{ codeToString(engine.rootCodes.get(mergeForm.sourceRoot)!).toUpperCase() }}</span>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-outline" @click="showMergeModal = false">取消</button>
+          <button class="btn btn-purple" @click="applyMerge">确认归并</button>
         </div>
       </div>
     </div>
@@ -379,5 +530,208 @@ function updateRootCode(root: string, newCode: string) {
 .root-actions {
   display: flex;
   gap: 4px;
+}
+
+/* 面板头部操作区 */
+.roots-panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* 归并字根区块 */
+.merged-roots-section {
+  background: var(--bg3);
+  border-bottom: 1px solid var(--border);
+  padding: 12px 16px;
+}
+
+.merged-roots-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.merged-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text2);
+}
+
+.merged-count {
+  font-size: 11px;
+  color: var(--text2);
+  background: var(--bg);
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.merged-roots-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.merged-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg);
+  border: 1px solid var(--purple);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 13px;
+}
+
+.merged-target {
+  font-weight: 600;
+  color: var(--purple);
+}
+
+.merged-arrow {
+  color: var(--text2);
+  font-size: 12px;
+}
+
+.merged-source {
+  color: var(--primary);
+}
+
+.merged-code {
+  font-family: monospace;
+  font-size: 12px;
+  color: var(--text2);
+  background: var(--bg3);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.merged-remove {
+  font-size: 11px;
+  padding: 2px 6px;
+  margin-left: 4px;
+}
+
+/* 弹窗样式 */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal-content {
+  background: var(--bg2);
+  border-radius: 12px;
+  width: 90%;
+  max-width: 480px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.modal-header h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.modal-close {
+  background: none;
+  border: none;
+  font-size: 24px;
+  color: var(--text2);
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+}
+
+.modal-close:hover {
+  color: var(--text);
+}
+
+.modal-body {
+  padding: 20px;
+}
+
+.modal-desc {
+  font-size: 13px;
+  color: var(--text2);
+  margin: 0 0 20px 0;
+  line-height: 1.5;
+}
+
+.form-group {
+  margin-bottom: 16px;
+}
+
+.form-group label {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  margin-bottom: 6px;
+}
+
+.form-input {
+  width: 100%;
+  padding: 10px 12px;
+  font-size: 15px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.form-input:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+.form-hint {
+  display: block;
+  font-size: 12px;
+  color: var(--text2);
+  margin-top: 4px;
+}
+
+.source-code-preview {
+  background: var(--primary-bg);
+  border-radius: 6px;
+  padding: 12px;
+  margin-top: 16px;
+}
+
+.preview-label {
+  font-size: 12px;
+  color: var(--text2);
+}
+
+.preview-code {
+  font-family: monospace;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--primary);
+  margin-left: 8px;
+}
+
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 16px 20px;
+  border-top: 1px solid var(--border);
 }
 </style>

@@ -43,7 +43,7 @@ function confirmNewConfig() {
   const config = createDefaultConfig(name, author)
   engine.applyConfig(config)
   refreshStats()
-  saveConfigToStorage(engine.getConfig())
+  saveConfigToStorage(getConfig())
   showNewConfigDialog.value = false
   toast(`已创建新配置: ${name}`)
 }
@@ -61,9 +61,8 @@ function importConfig(e: Event) {
   reader.onload = () => {
     try {
       const config = parseConfig(reader.result as string)
-      engine.applyConfig(config)
-      refreshStats()
-      saveConfigToStorage(engine.getConfig())
+      applyConfig(config)
+      saveConfigToStorage(getConfig())
       toast(`配置已加载: ${Object.keys(config.roots).length} 字根, ${config.rules.length} 规则`)
     } catch (err) {
       toast('配置文件解析失败')
@@ -76,7 +75,7 @@ function importConfig(e: Event) {
 
 // 导出配置
 function exportConfigFile() {
-  const config = engine.getConfig()
+  const config = getConfig()
   const toml = exportConfig(config)
   const blob = new Blob([toml], { type: 'application/toml;charset=utf-8' })
   const a = document.createElement('a')
@@ -117,7 +116,7 @@ function confirmEditMeta() {
 
 // 监听配置变化，自动保存到 localStorage
 watch(configVersion, () => {
-  saveConfigToStorage(engine.getConfig())
+  saveConfigToStorage(getConfig())
 })
 
 // 字集切换事件处理

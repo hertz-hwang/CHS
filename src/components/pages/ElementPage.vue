@@ -5,7 +5,21 @@ import { useEngine } from '../../composables/useEngine'
 import { parseCode, codeToString, RootCode } from '../../engine/config'
 import { GB_STROKE_EQUIVALENT_ROOTS } from '../../engine/engine'
 
-const { engine, toast, refreshStats, rootsVersion } = useEngine()
+const { engine, toast, refreshStats, rootsVersion, saveCurrentConfig } = useEngine()
+
+// 归并字根相关状态
+const showMergeModal = ref(false)
+const mergeForm = ref({
+  targetRoot: '',
+  sourceRoot: '',
+})
+
+// 码位等值相关状态
+const mergeModalTab = ref<'merge' | 'codeEquiv'>('merge')
+const codeEquivForm = ref({
+  targetRef: '',  // 如 "目.1"
+  sourceRef: '',  // 如 "日.1"
+})
 
 // 等效字根相关状态
 const showEquivModal = ref(false)
@@ -146,12 +160,27 @@ function deleteSelectedRoots() {
 
 // 点击字根编辑编码
 function clickRootToEdit(root: string) {
+  // 检查是否可以编辑（整字归并检查）
+  const editCheck = canEditRoot(root)
+  if (!editCheck.canEdit) {
+    toast(editCheck.reason)
+    return
+  }
+  
+  // 检查是否有码位等值限制
+  const restrictedIndices = getRestrictedCodeIndices(root)
+  if (restrictedIndices.length > 0) {
+    // 允许编辑，但提示用户有码位限制
+    const positions = restrictedIndices.map(i => formatCodeIndex(i)).join('、')
+    toast(`注意：${positions}已设置码位等值，修改将被阻止`)
+  }
+  
   editingRoot.value = root
   const code = engine.rootCodes.get(root)
   editCode.value = code ? codeToString(code) : ''
 }
 
-// 获取某键位上的所有字根及其编码
+// 获取某键位上的所有字根及其编码（排除归并字根）
 const rootsOnKey = computed(() => {
   rootsVersion.value
   const result = new Map<string, { root: string; code: RootCode; subCode: string }[]>()
@@ -163,8 +192,11 @@ const rootsOnKey = computed(() => {
     }
   }
 
-  // 遍历所有字根
+  // 遍历所有字根（排除归并字根）
   for (const root of engine.roots) {
+    // 跳过归并字根（归并字根只显示在右侧面板的归并区域）
+    if (engine.isMergedRoot(root)) continue
+    
     const code = engine.rootCodes.get(root)
     if (code && code.main) {
       const mainKey = code.main.toLowerCase()
@@ -360,6 +392,13 @@ function addRoot() {
 
 // 开始编辑
 function startEdit(root: string) {
+  // 检查是否可以编辑（整字归并检查）
+  const editCheck = canEditRoot(root)
+  if (!editCheck.canEdit) {
+    toast(editCheck.reason)
+    return
+  }
+  
   editingRoot.value = root
   const code = engine.rootCodes.get(root)
   editCode.value = code ? codeToString(code) : ''
@@ -368,6 +407,35 @@ function startEdit(root: string) {
 // 保存编辑
 function saveEdit() {
   if (!editingRoot.value || !editCode.value) return
+  
+  const root = editingRoot.value
+  
+  // 检查整字归并限制
+  const editCheck = canEditRoot(root)
+  if (!editCheck.canEdit) {
+    toast(editCheck.reason)
+    cancelEdit()
+    return
+  }
+  
+  // 检查码位等值限制
+  const restrictedPositions = getRestrictedPositions(root, editCode.value.length)
+  if (restrictedPositions.length > 0) {
+    // 获取旧编码
+    const oldCode = engine.rootCodes.get(root)
+    const oldCodeStr = oldCode ? codeToString(oldCode) : ''
+    
+    // 检查每个受限位置是否被修改
+    for (const pos of restrictedPositions) {
+      const oldChar = oldCodeStr[pos.index] || ''
+      const newChar = editCode.value[pos.index] || ''
+      
+      if (oldChar !== newChar) {
+        toast(`${formatCodeIndex(pos.index)}已设置为等于「${pos.source}」，无法修改。如需修改，请先取消码位等值设置。`)
+        return
+      }
+    }
+  }
   
   const parsed = parseCode(editCode.value)
   engine.rootCodes.set(editingRoot.value, { root: editingRoot.value, ...parsed })
@@ -625,6 +693,254 @@ function loadGBStrokeEquiv() {
   refreshStats()
   toast('已加载国标笔画五分类等效字根')
 }
+
+// ============ 归并字根相关方法 ============
+
+// 归并字根列表（用于显示 - 全部）
+const mergedRootsList = computed(() => {
+  rootsVersion.value
+  const result: { target: string; source: string; sourceCode: string }[] = []
+  for (const [target, source] of engine.mergedRoots) {
+    const sourceCode = engine.rootCodes.get(source)
+    result.push({
+      target,
+      source,
+      sourceCode: sourceCode ? codeToString(sourceCode) : '',
+    })
+  }
+  return result.sort((a, b) => a.target.localeCompare(b.target))
+})
+
+// 当前键位的归并字根列表（只显示当前键位相关的）
+const mergedRootsOnKey = computed(() => {
+  if (!selectedKey.value) return []
+  const key = selectedKey.value
+  
+  const result: { target: string; source: string; sourceCode: string }[] = []
+  for (const [target, source] of engine.mergedRoots) {
+    // 获取目标字根的编码（首码）
+    const targetCode = engine.rootCodes.get(target)
+    if (targetCode && targetCode.main) {
+      // 只显示首码与当前选中键位匹配的归并字根
+      if (targetCode.main.toLowerCase() === key) {
+        const sourceCode = engine.rootCodes.get(source)
+        result.push({
+          target,
+          source,
+          sourceCode: sourceCode ? codeToString(sourceCode) : '',
+        })
+      }
+    }
+  }
+  return result.sort((a, b) => a.target.localeCompare(b.target))
+})
+
+// 当前键位的码位等值列表（只显示当前键位相关的）
+const codeEquivalencesOnKey = computed(() => {
+  if (!selectedKey.value) return []
+  const key = selectedKey.value
+  
+  const result: { targetRef: string; sourceRef: string; targetCode: string; sourceCode: string }[] = []
+  for (const [targetRef, sourceRef] of engine.codeEquivalences) {
+    const targetParsed = engine.parseCodeRef(targetRef)
+    const sourceParsed = engine.parseCodeRef(sourceRef)
+    
+    if (targetParsed && sourceParsed) {
+      // 获取目标字根的编码（首码）
+      const targetRootCode = engine.rootCodes.get(targetParsed.root)
+      if (targetRootCode && targetRootCode.main) {
+        // 只显示首码与当前选中键位匹配的码位等值
+        if (targetRootCode.main.toLowerCase() === key) {
+          const targetCode = engine.getRootCodeAt(targetParsed.root, targetParsed.codeIndex) || ''
+          const sourceCode = engine.getRootCodeAt(sourceParsed.root, sourceParsed.codeIndex) || ''
+          result.push({ targetRef, sourceRef, targetCode, sourceCode })
+        }
+      }
+    }
+  }
+  return result.sort((a, b) => a.targetRef.localeCompare(b.targetRef))
+})
+
+// 打开归并设置弹窗
+function openMergeModal(targetRoot?: string) {
+  mergeForm.value = {
+    targetRoot: targetRoot || '',
+    sourceRoot: '',
+  }
+  showMergeModal.value = true
+}
+
+// 执行归并
+function applyMerge() {
+  const { targetRoot, sourceRoot } = mergeForm.value
+  
+  if (!targetRoot) {
+    toast('请输入要归并的字根')
+    return
+  }
+  if (!sourceRoot) {
+    toast('请输入来源字根')
+    return
+  }
+  if (targetRoot === sourceRoot) {
+    toast('目标字根和来源字根不能相同')
+    return
+  }
+  
+  // 检查来源字根是否有编码
+  const sourceCode = engine.rootCodes.get(sourceRoot)
+  if (!sourceCode) {
+    toast(`来源字根「${sourceRoot}」没有编码，请先为其设置编码`)
+    return
+  }
+  
+  // 执行归并
+  engine.setMergedRoot(targetRoot, sourceRoot)
+  
+  // 保存配置
+  saveCurrentConfig()
+  refreshStats()
+  
+  showMergeModal.value = false
+  toast(`已将「${targetRoot}」归并到「${sourceRoot}」`)
+}
+
+// 取消归并
+function removeMerge(targetRoot: string) {
+  engine.removeMergedRoot(targetRoot)
+  saveCurrentConfig()
+  refreshStats()
+  toast(`已取消「${targetRoot}」的归并`)
+}
+
+// 获取所有字根列表（用于选择来源字根）
+const allRootsForMerge = computed(() => {
+  rootsVersion.value
+  return [...engine.roots].sort()
+})
+
+// ============ 编辑限制相关方法 ============
+
+// 检查字根是否被整字归并
+function isMergedRoot(root: string): boolean {
+  return engine.mergedRoots.has(root)
+}
+
+// 获取字根的归并来源
+function getMergedSource(root: string): string | undefined {
+  return engine.mergedRoots.get(root)
+}
+
+// 获取字根被限制编辑的码位索引列表（由于码位等值）
+function getRestrictedCodeIndices(root: string): number[] {
+  const indices: number[] = []
+  for (const [targetRef] of engine.codeEquivalences) {
+    const parsed = engine.parseCodeRef(targetRef)
+    if (parsed && parsed.root === root) {
+      indices.push(parsed.codeIndex)
+    }
+  }
+  return indices
+}
+
+// 检查字根是否可以编辑（考虑整字归并和码位等值）
+function canEditRoot(root: string): { canEdit: boolean; reason: string } {
+  // 检查整字归并
+  if (isMergedRoot(root)) {
+    const source = getMergedSource(root)
+    return { 
+      canEdit: false, 
+      reason: `此字根已归并到「${source}」，无法修改编码。如需修改，请先取消归并设置。` 
+    }
+  }
+  return { canEdit: true, reason: '' }
+}
+
+// 检查编码字符串中哪些位置被限制编辑
+function getRestrictedPositions(root: string, codeLength: number): { index: number; source: string }[] {
+  const restricted: { index: number; source: string }[] = []
+  for (const [targetRef, sourceRef] of engine.codeEquivalences) {
+    const targetParsed = engine.parseCodeRef(targetRef)
+    if (targetParsed && targetParsed.root === root) {
+      restricted.push({
+        index: targetParsed.codeIndex,
+        source: sourceRef
+      })
+    }
+  }
+  return restricted
+}
+
+// 格式化码位索引为"第N码"
+function formatCodeIndex(index: number): string {
+  return `第${index + 1}码`
+}
+
+// ============ 码位等值相关方法 ============
+
+// 码位等值列表（用于显示）
+const codeEquivalencesList = computed(() => {
+  rootsVersion.value
+  const result: { targetRef: string; sourceRef: string; targetCode: string; sourceCode: string }[] = []
+  for (const [targetRef, sourceRef] of engine.codeEquivalences) {
+    const targetParsed = engine.parseCodeRef(targetRef)
+    const sourceParsed = engine.parseCodeRef(sourceRef)
+    
+    if (targetParsed && sourceParsed) {
+      const targetCode = engine.getRootCodeAt(targetParsed.root, targetParsed.codeIndex) || ''
+      const sourceCode = engine.getRootCodeAt(sourceParsed.root, sourceParsed.codeIndex) || ''
+      result.push({ targetRef, sourceRef, targetCode, sourceCode })
+    }
+  }
+  return result.sort((a, b) => a.targetRef.localeCompare(b.targetRef))
+})
+
+// 执行码位等值
+function applyCodeEquiv() {
+  const { targetRef, sourceRef } = codeEquivForm.value
+  
+  if (!targetRef) {
+    toast('请输入目标码位引用（如：目.1）')
+    return
+  }
+  if (!sourceRef) {
+    toast('请输入来源码位引用（如：日.1）')
+    return
+  }
+  
+  // 验证格式
+  const targetParsed = engine.parseCodeRef(targetRef)
+  const sourceParsed = engine.parseCodeRef(sourceRef)
+  
+  if (!targetParsed) {
+    toast('目标码位引用格式错误，正确格式：字根.索引（如：目.1）')
+    return
+  }
+  if (!sourceParsed) {
+    toast('来源码位引用格式错误，正确格式：字根.索引（如：日.1）')
+    return
+  }
+  
+  // 执行码位等值
+  const success = engine.setCodeEquivalence(targetRef, sourceRef)
+  
+  if (success) {
+    saveCurrentConfig()
+    refreshStats()
+    codeEquivForm.value = { targetRef: '', sourceRef: '' }
+    toast(`已设置「${targetRef}」=「${sourceRef}」`)
+  } else {
+    toast('设置失败，请检查来源字根是否有编码')
+  }
+}
+
+// 取消码位等值
+function removeCodeEquiv(targetRef: string) {
+  engine.removeCodeEquivalence(targetRef)
+  saveCurrentConfig()
+  refreshStats()
+  toast(`已取消「${targetRef}」的码位等值`)
+}
 </script>
 
 <template>
@@ -824,8 +1140,46 @@ function loadGBStrokeEquiv() {
           <h3>
             键位 <strong>{{ selectedKey === '_' ? '空格' : selectedKey.toUpperCase() }}</strong>
           </h3>
-          <span class="count">{{ selectedRoots.length }} 个字根</span>
+          <div class="panel-header-actions">
+            <button class="btn btn-sm btn-purple" @click="openMergeModal()">归并设置</button>
+            <span class="count">{{ selectedRoots.length }} 个字根</span>
+          </div>
         </div>
+        
+        <!-- 归并字根列表（只显示当前键位相关） -->
+        <div v-if="mergedRootsOnKey.length > 0" class="merged-roots-section">
+          <div class="merged-roots-header">
+            <span class="merged-label">归并字根</span>
+            <span class="merged-count">{{ mergedRootsOnKey.length }} 个</span>
+          </div>
+          <div class="merged-roots-list">
+            <div v-for="item in mergedRootsOnKey" :key="item.target" class="merged-item">
+              <span class="merged-target">{{ item.target }}</span>
+              <span class="merged-arrow">→</span>
+              <span class="merged-source">{{ item.source }}</span>
+              <span class="merged-code">({{ item.sourceCode.toUpperCase() }})</span>
+              <button class="btn btn-sm btn-outline merged-remove" @click="removeMerge(item.target)">取消</button>
+            </div>
+          </div>
+        </div>
+        
+        <!-- 码位等值列表（只显示当前键位相关） -->
+        <div v-if="codeEquivalencesOnKey.length > 0" class="code-equiv-section">
+          <div class="code-equiv-header">
+            <span class="code-equiv-label">码位等值</span>
+            <span class="code-equiv-count">{{ codeEquivalencesOnKey.length }} 个</span>
+          </div>
+          <div class="code-equiv-list">
+            <div v-for="item in codeEquivalencesOnKey" :key="item.targetRef" class="code-equiv-item">
+              <span class="equiv-target">{{ item.targetRef }}</span>
+              <span class="equiv-arrow">=</span>
+              <span class="equiv-source">{{ item.sourceRef }}</span>
+              <span class="equiv-code">({{ item.targetCode.toUpperCase() }} = {{ item.sourceCode.toUpperCase() }})</span>
+              <button class="btn btn-sm btn-outline equiv-remove" @click="removeCodeEquiv(item.targetRef)">取消</button>
+            </div>
+          </div>
+        </div>
+        
         <div class="roots-list">
           <div 
             v-for="item in selectedRoots" 
@@ -887,6 +1241,138 @@ function loadGBStrokeEquiv() {
     <template #actions>
       <button class="btn btn-ghost" @click="showAddModal = false">取消</button>
       <button class="btn btn-success" @click="addRoot">添加</button>
+    </template>
+  </ModalDialog>
+
+  <!-- 归并字根设置弹窗 -->
+  <ModalDialog :visible="showMergeModal" title="归并管理" @close="showMergeModal = false">
+    <div class="merge-modal-content">
+      <!-- 标签页切换 -->
+      <div class="merge-tabs">
+        <button 
+          class="merge-tab" 
+          :class="{ active: mergeModalTab === 'merge' }"
+          @click="mergeModalTab = 'merge'"
+        >
+          整字归并
+        </button>
+        <button 
+          class="merge-tab" 
+          :class="{ active: mergeModalTab === 'codeEquiv' }"
+          @click="mergeModalTab = 'codeEquiv'"
+        >
+          码位等值
+        </button>
+      </div>
+
+      <!-- 整字归并标签页 -->
+      <div v-if="mergeModalTab === 'merge'" class="merge-tab-content">
+        <p class="merge-desc">将一个字根的编码设置为与另一个字根相同。归并后，两个字根将拥有相同的编码。</p>
+        
+        <div class="merge-form-row">
+          <label>要归并的字根</label>
+          <input
+            v-model="mergeForm.targetRoot"
+            type="text"
+            placeholder="输入要归并的字根"
+            class="merge-input"
+          />
+          <span class="merge-hint">此字根将获得与来源字根相同的编码</span>
+        </div>
+        
+        <div class="merge-form-row">
+          <label>来源字根（已有编码）</label>
+          <input
+            v-model="mergeForm.sourceRoot"
+            type="text"
+            placeholder="输入来源字根"
+            class="merge-input"
+            list="roots-merge-datalist"
+          />
+          <datalist id="roots-merge-datalist">
+            <option v-for="root in allRootsForMerge" :key="root" :value="root" />
+          </datalist>
+          <span class="merge-hint">此字根的编码将被复制到目标字根</span>
+        </div>
+        
+        <div v-if="mergeForm.sourceRoot && engine.rootCodes.get(mergeForm.sourceRoot)" class="merge-preview">
+          <span class="preview-label">来源字根编码：</span>
+          <span class="preview-code">{{ codeToString(engine.rootCodes.get(mergeForm.sourceRoot)!).toUpperCase() }}</span>
+        </div>
+
+        <!-- 已设置的归并列表 -->
+        <div v-if="mergedRootsList.length > 0" class="merge-list-section">
+          <div class="merge-list-header">
+            <span>已设置的归并 ({{ mergedRootsList.length }})</span>
+          </div>
+          <div class="merge-list-body">
+            <div v-for="item in mergedRootsList" :key="item.target" class="merge-list-item">
+              <span class="merge-target">{{ item.target }}</span>
+              <span class="merge-arrow">=</span>
+              <span class="merge-source">{{ item.source }}</span>
+              <span class="merge-code">({{ item.sourceCode.toUpperCase() }})</span>
+              <button class="btn btn-xs btn-outline" @click="removeMerge(item.target)">取消</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 码位等值标签页 -->
+      <div v-if="mergeModalTab === 'codeEquiv'" class="merge-tab-content">
+        <p class="merge-desc">设置某字根的第 N 码等于另一字根的第 N 码。例如：「目.1」=「日.1」表示目的第2码等于日的第2码。简写格式：「目」=「日」表示目的第1码等于日的第1码。</p>
+        
+        <div class="merge-form-row">
+          <label>目标码位（格式：字根 或 字根.索引）</label>
+          <input
+            v-model="codeEquivForm.targetRef"
+            type="text"
+            placeholder="如：目 或 目.1（表示目的第2码）"
+            class="merge-input"
+          />
+          <span class="merge-hint">简写「目」表示第1码（索引0），完整格式「目.1」表示第2码</span>
+        </div>
+        
+        <div class="merge-form-row">
+          <label>来源码位（格式：字根 或 字根.索引）</label>
+          <input
+            v-model="codeEquivForm.sourceRef"
+            type="text"
+            placeholder="如：日 或 日.1（表示日的第2码）"
+            class="merge-input"
+          />
+          <span class="merge-hint">来源字根必须有编码</span>
+        </div>
+
+        <!-- 码位等值预览 -->
+        <div v-if="codeEquivForm.sourceRef" class="merge-preview">
+          <template v-if="engine.parseCodeRef(codeEquivForm.sourceRef)">
+            <span class="preview-label">来源码位值：</span>
+            <span class="preview-code">{{ engine.getRootCodeAt(engine.parseCodeRef(codeEquivForm.sourceRef)!.root, engine.parseCodeRef(codeEquivForm.sourceRef)!.codeIndex)?.toUpperCase() || '不存在' }}</span>
+          </template>
+          <span v-else class="preview-error">格式错误</span>
+        </div>
+
+        <!-- 已设置的码位等值列表 -->
+        <div v-if="codeEquivalencesList.length > 0" class="merge-list-section">
+          <div class="merge-list-header">
+            <span>已设置的码位等值 ({{ codeEquivalencesList.length }})</span>
+          </div>
+          <div class="merge-list-body">
+            <div v-for="item in codeEquivalencesList" :key="item.targetRef" class="merge-list-item">
+              <span class="merge-target">{{ item.targetRef }}</span>
+              <span class="merge-arrow">=</span>
+              <span class="merge-source">{{ item.sourceRef }}</span>
+              <span class="merge-code">({{ item.targetCode.toUpperCase() }} = {{ item.sourceCode.toUpperCase() }})</span>
+              <button class="btn btn-xs btn-outline" @click="removeCodeEquiv(item.targetRef)">取消</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <template #actions>
+      <button class="btn btn-ghost" @click="showMergeModal = false">取消</button>
+      <button v-if="mergeModalTab === 'merge'" class="btn btn-purple" @click="applyMerge">确认归并</button>
+      <button v-if="mergeModalTab === 'codeEquiv'" class="btn btn-purple" @click="applyCodeEquiv">确认设置</button>
     </template>
   </ModalDialog>
 
@@ -1936,5 +2422,323 @@ function loadGBStrokeEquiv() {
 
 .btn-info:hover {
   background: #40a9ff;
+}
+
+/* 面板头部操作区 */
+.panel-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* 归并字根区块 */
+.merged-roots-section {
+  background: var(--bg3);
+  border-bottom: 1px solid var(--border);
+  padding: 12px 16px;
+}
+
+.merged-roots-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.merged-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text2);
+}
+
+.merged-count {
+  font-size: 11px;
+  color: var(--text2);
+  background: var(--bg);
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.merged-roots-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.merged-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg);
+  border: 1px solid var(--purple);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 13px;
+}
+
+.merged-target {
+  font-weight: 600;
+  color: var(--purple);
+}
+
+.merged-arrow {
+  color: var(--text2);
+  font-size: 12px;
+}
+
+.merged-source {
+  color: var(--primary);
+}
+
+.merged-code {
+  font-family: monospace;
+  font-size: 12px;
+  color: var(--text2);
+  background: var(--bg3);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.merged-remove {
+  font-size: 11px;
+  padding: 2px 6px;
+  margin-left: 4px;
+}
+
+/* 码位等值区块 */
+.code-equiv-section {
+  background: var(--bg3);
+  border-bottom: 1px solid var(--border);
+  padding: 12px 16px;
+}
+
+.code-equiv-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.code-equiv-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text2);
+}
+
+.code-equiv-count {
+  font-size: 11px;
+  color: var(--text2);
+  background: var(--bg);
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.code-equiv-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.code-equiv-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg);
+  border: 1px solid #13c2c2;
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 13px;
+}
+
+.equiv-target {
+  font-weight: 600;
+  color: #13c2c2;
+}
+
+.equiv-arrow {
+  color: var(--text2);
+  font-size: 12px;
+}
+
+.equiv-source {
+  color: var(--primary);
+}
+
+.equiv-code {
+  font-family: monospace;
+  font-size: 12px;
+  color: var(--text2);
+  background: var(--bg3);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.equiv-remove {
+  font-size: 11px;
+  padding: 2px 6px;
+  margin-left: 4px;
+}
+
+/* 归并弹窗样式 */
+.merge-modal-content {
+  min-width: 360px;
+  min-height: 380px;
+}
+
+.merge-desc {
+  font-size: 13px;
+  color: var(--text2);
+  margin: 0 0 16px 0;
+  line-height: 1.5;
+  min-height: 42px;
+}
+
+.merge-form-row {
+  margin-bottom: 16px;
+}
+
+.merge-form-row label {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  margin-bottom: 6px;
+}
+
+.merge-input {
+  width: 100%;
+  padding: 10px 12px;
+  font-size: 15px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.merge-input:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+.merge-hint {
+  display: block;
+  font-size: 12px;
+  color: var(--text2);
+  margin-top: 4px;
+}
+
+.merge-preview {
+  background: var(--primary-bg);
+  border-radius: 6px;
+  padding: 12px;
+  margin-top: 16px;
+}
+
+.preview-label {
+  font-size: 12px;
+  color: var(--text2);
+}
+
+.preview-code {
+  font-family: monospace;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--primary);
+  margin-left: 8px;
+}
+
+.preview-error {
+  color: var(--danger);
+  font-size: 13px;
+}
+
+/* 标签页样式 */
+.merge-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 8px;
+}
+
+.merge-tab {
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  background: transparent;
+  border: none;
+  border-radius: 6px 6px 0 0;
+  cursor: pointer;
+  color: var(--text2);
+  transition: all 0.15s ease;
+}
+
+.merge-tab:hover {
+  background: var(--bg3);
+  color: var(--text);
+}
+
+.merge-tab.active {
+  background: var(--primary-bg);
+  color: var(--primary);
+  border-bottom: 2px solid var(--primary);
+  margin-bottom: -9px;
+}
+
+.merge-tab-content {
+  min-height: 200px;
+}
+
+/* 归并列表样式 */
+.merge-list-section {
+  margin-top: 20px;
+  border-top: 1px solid var(--border);
+  padding-top: 16px;
+}
+
+.merge-list-header {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text2);
+  margin-bottom: 12px;
+}
+
+.merge-list-body {
+  max-height: 150px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.merge-list-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--bg3);
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+.merge-list-item .merge-target {
+  font-weight: 600;
+  color: var(--purple);
+}
+
+.merge-list-item .merge-arrow {
+  color: var(--text3);
+}
+
+.merge-list-item .merge-source {
+  color: var(--primary);
+}
+
+.merge-list-item .merge-code {
+  font-family: monospace;
+  font-size: 11px;
+  color: var(--text2);
+  background: var(--bg);
+  padding: 2px 6px;
+  border-radius: 4px;
 }
 </style>

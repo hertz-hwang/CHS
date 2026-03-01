@@ -19,10 +19,17 @@ export const CHARSET_OPTIONS: CharsetOption[] = [
 
 const engine = new CharsHijack()
 
+// 当前选中的字集ID（默认值 'all'）
+const currentCharsetId = ref<string>('all')
+
 // 在模块初始化时立即加载保存的配置
 const savedConfig = loadConfigFromStorage()
 if (savedConfig) {
   engine.applyConfig(savedConfig)
+  // 恢复字集设置
+  if (savedConfig.charset) {
+    currentCharsetId.value = savedConfig.charset
+  }
 }
 
 const stats = reactive({ decomp: 0, roots: 0, strokes: 0, freq: 0 })
@@ -64,9 +71,6 @@ const rootsVersion = ref(0)
 
 // 配置版本号，用于触发配置相关的更新
 const configVersion = ref(0)
-
-// 当前选中的字集ID
-const currentCharsetId = ref<string>('all')
 
 // 字集版本号，用于触发字集相关的更新
 const charsetVersion = ref(0)
@@ -152,6 +156,12 @@ function setCharset(charsetId: string): boolean {
   
   currentCharsetId.value = charsetId
   charsetVersion.value++ // 触发字集相关更新
+  
+  // 保存字集设置到配置
+  const config = engine.getConfig()
+  config.charset = charsetId
+  saveConfigToStorage(config)
+  
   return true
 }
 
@@ -171,11 +181,19 @@ function getCurrentCharset(): string[] {
 
 function applyConfig(config: UserConfig): void {
   engine.applyConfig(config)
+  // 恢复字集设置
+  if (config.charset && CHARSET_OPTIONS.some(o => o.id === config.charset)) {
+    currentCharsetId.value = config.charset
+    charsetVersion.value++
+  }
   refreshStats()
 }
 
 function getConfig(): UserConfig {
-  return engine.getConfig()
+  const config = engine.getConfig()
+  // 包含当前字集信息
+  config.charset = currentCharsetId.value
+  return config
 }
 
 function importConfigFromToml(toml: string): boolean {

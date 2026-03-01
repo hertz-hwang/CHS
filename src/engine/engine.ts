@@ -91,6 +91,12 @@ export class CharsHijack {
   // 等效字根 { 主字根 -> 等效字根列表 }
   equivalentRoots = new Map<string, string[]>()
 
+  // 归并字根 { 归并字根 -> 来源字根 }（编码相同）
+  mergedRoots = new Map<string, string>()
+
+  // 码位等值 { "目.1" => "日.1" } 表示目的第2码等于日的第2码
+  codeEquivalences = new Map<string, string>()
+
   // 配置元信息
   private _meta: UserConfig['meta'] = { version: '1.0' }
 
@@ -374,6 +380,24 @@ export class CharsHijack {
       this.equivalentRoots = new Map(Object.entries(config.equivalent_roots))
     }
 
+    // 设置归并字根
+    if (config.merged_roots) {
+      this.mergedRoots = new Map(Object.entries(config.merged_roots))
+      // 应用归并字根：将归并字根的编码设置为来源字根的编码
+      for (const [targetRoot, sourceRoot] of this.mergedRoots) {
+        const sourceCode = this.rootCodes.get(sourceRoot)
+        if (sourceCode) {
+          this.rootCodes.set(targetRoot, { ...sourceCode, root: targetRoot, mergedFrom: sourceRoot })
+          this.roots.add(targetRoot)
+        }
+      }
+    }
+
+    // 设置码位等值
+    if (config.code_equivalences) {
+      this.setCodeEquivalencesMap(config.code_equivalences)
+    }
+
     // 保存字根到 localStorage（包括转换器生成的命名字根）
     this._saveRoots()
     this._cache.clear()
@@ -389,11 +413,21 @@ export class CharsHijack {
     for (const [k, v] of this.equivalentRoots) {
       equivalentRootsObj[k] = v
     }
+    const mergedRootsObj: Record<string, string> = {}
+    for (const [k, v] of this.mergedRoots) {
+      mergedRootsObj[k] = v
+    }
+    const codeEquivsObj: Record<string, string> = {}
+    for (const [k, v] of this.codeEquivalences) {
+      codeEquivsObj[k] = v
+    }
     return {
       meta: this._meta,
       roots: rootCodesToRecord(this.rootCodes),
       named_roots: namedRootsObj,
       equivalent_roots: equivalentRootsObj,
+      merged_roots: mergedRootsObj,
+      code_equivalences: codeEquivsObj,
       rules,
       code_rules: this.codeRules,
     }
@@ -492,6 +526,232 @@ export class CharsHijack {
       }
     }
     return undefined
+  }
+
+  // ============ 归并字根方法 ============
+
+  // 设置归并字根（将 targetRoot 的编码设置为与 sourceRoot 相同）
+  setMergedRoot(targetRoot: string, sourceRoot: string): void {
+    // 获取来源字根的编码
+    const sourceCode = this.rootCodes.get(sourceRoot)
+    if (!sourceCode) {
+      console.warn(`Source root "${sourceRoot}" has no code`)
+      return
+    }
+
+    // 设置归并关系
+    this.mergedRoots.set(targetRoot, sourceRoot)
+    
+    // 复制编码到目标字根
+    this.rootCodes.set(targetRoot, { ...sourceCode, root: targetRoot, mergedFrom: sourceRoot })
+    
+    // 确保目标字根在 roots 集合中
+    this.roots.add(targetRoot)
+    this._cache.clear()
+  }
+
+  // 移除归并字根关系
+  removeMergedRoot(targetRoot: string): void {
+    const sourceRoot = this.mergedRoots.get(targetRoot)
+    if (sourceRoot) {
+      this.mergedRoots.delete(targetRoot)
+      // 清除归并标记，但保留编码（用户可以自行修改）
+      const code = this.rootCodes.get(targetRoot)
+      if (code && code.mergedFrom === sourceRoot) {
+        this.rootCodes.set(targetRoot, { ...code, mergedFrom: undefined })
+      }
+      this._cache.clear()
+    }
+  }
+
+  // 获取归并来源字根
+  getMergedFrom(targetRoot: string): string | undefined {
+    return this.mergedRoots.get(targetRoot)
+  }
+
+  // 检查字根是否是归并字根
+  isMergedRoot(root: string): boolean {
+    return this.mergedRoots.has(root)
+  }
+
+  // 获取所有归并到某字根的字根列表
+  getMergedToRoots(sourceRoot: string): string[] {
+    const result: string[] = []
+    for (const [target, source] of this.mergedRoots) {
+      if (source === sourceRoot) {
+        result.push(target)
+      }
+    }
+    return result
+  }
+
+  // 批量设置归并字根
+  setMergedRootsMap(mergedRoots: Record<string, string>): void {
+    this.mergedRoots = new Map(Object.entries(mergedRoots))
+    // 应用所有归并关系
+    for (const [targetRoot, sourceRoot] of this.mergedRoots) {
+      const sourceCode = this.rootCodes.get(sourceRoot)
+      if (sourceCode) {
+        this.rootCodes.set(targetRoot, { ...sourceCode, root: targetRoot, mergedFrom: sourceRoot })
+        this.roots.add(targetRoot)
+      }
+    }
+    this._cache.clear()
+  }
+
+  // ============ 码位等值方法 ============
+
+  // 解析码位引用 "目.1" => { root: "目", codeIndex: 1 }
+  // 支持简写格式 "目" => { root: "目", codeIndex: 0 }（默认第1码）
+  parseCodeRef(ref: string): { root: string; codeIndex: number } | null {
+    // 尝试匹配 "字根.索引" 格式
+    const match = ref.match(/^(.+)\.(\d+)$/)
+    if (match) {
+      return { root: match[1], codeIndex: parseInt(match[2]) }
+    }
+    // 简写格式：单个字根，默认索引为 0（第1码）
+    // 只有当 ref 是有效的非空字符串且不包含点号时才解析
+    if (ref && !ref.includes('.') && ref.trim()) {
+      return { root: ref.trim(), codeIndex: 0 }
+    }
+    return null
+  }
+
+  // 获取字根的第 N 码（0-indexed）
+  // 如果索引越界，返回空字符串（而不是 undefined，以便于码位等值设置）
+  getRootCodeAt(root: string, index: number): string | undefined {
+    const code = this.rootCodes.get(root)
+    if (!code) return undefined
+    
+    const fullCode = (code.main || '') + (code.sub || '') + (code.supplement || '')
+    // 如果索引越界，返回空字符串（表示该位置没有编码，但可以设置）
+    if (index >= fullCode.length) {
+      return ''
+    }
+    return fullCode[index]
+  }
+
+  // 设置码位等值 "目.1" = "日.1"
+  setCodeEquivalence(targetRef: string, sourceRef: string): boolean {
+    const target = this.parseCodeRef(targetRef)
+    const source = this.parseCodeRef(sourceRef)
+    
+    if (!target || !source) {
+      console.warn('Invalid code reference format')
+      return false
+    }
+    
+    // 获取来源字根的编码
+    const sourceCode = this.rootCodes.get(source.root)
+    if (!sourceCode) {
+      console.warn(`Source root "${source.root}" has no code`)
+      return false
+    }
+    
+    // 获取来源码位
+    // 注意：getRootCodeAt 可能返回空字符串 ''（表示该位置可设置），这是有效值
+    const sourceCodeChar = this.getRootCodeAt(source.root, source.codeIndex)
+    if (sourceCodeChar === undefined) {
+      // 来源字根没有编码
+      console.warn(`Source root "${source.root}" has no code`)
+      return false
+    }
+    // 空字符串 '' 是有效的（表示来源字根有编码但该位置为空，可以设置）
+    
+    // 获取或创建目标字根的编码
+    let targetCode = this.rootCodes.get(target.root)
+    if (!targetCode) {
+      // 如果目标字根没有编码，创建一个空的编码结构
+      targetCode = { root: target.root, main: '' }
+    }
+    
+    // 构建新的编码字符串
+    const targetFullCode = (targetCode.main || '') + (targetCode.sub || '') + (targetCode.supplement || '')
+    const codeChars = targetFullCode.split('')
+    
+    // 确保数组足够长
+    while (codeChars.length <= target.codeIndex) {
+      codeChars.push('')
+    }
+    
+    // 设置目标码位
+    codeChars[target.codeIndex] = sourceCodeChar
+    
+    // 重新构建编码
+    const newCode = codeChars.join('')
+    const parsed = parseCode(newCode)
+    
+    // 更新目标字根的编码
+    this.rootCodes.set(target.root, { 
+      root: target.root, 
+      ...parsed,
+      codeEquivFrom: `${sourceRef}` 
+    })
+    
+    // 记录等值关系
+    this.codeEquivalences.set(targetRef, sourceRef)
+    
+    // 确保目标字根在 roots 集合中
+    this.roots.add(target.root)
+    this._cache.clear()
+    
+    return true
+  }
+
+  // 移除码位等值
+  removeCodeEquivalence(targetRef: string): void {
+    this.codeEquivalences.delete(targetRef)
+    this._cache.clear()
+  }
+
+  // 获取码位等值
+  getCodeEquivalence(targetRef: string): string | undefined {
+    return this.codeEquivalences.get(targetRef)
+  }
+
+  // 批量设置码位等值
+  setCodeEquivalencesMap(codeEquivalences: Record<string, string>): void {
+    this.codeEquivalences = new Map(Object.entries(codeEquivalences))
+    // 应用所有码位等值
+    for (const [targetRef, sourceRef] of this.codeEquivalences) {
+      this.applyCodeEquivalence(targetRef, sourceRef)
+    }
+    this._cache.clear()
+  }
+
+  // 应用单个码位等值（内部方法）
+  private applyCodeEquivalence(targetRef: string, sourceRef: string): void {
+    const target = this.parseCodeRef(targetRef)
+    const source = this.parseCodeRef(sourceRef)
+    
+    if (!target || !source) return
+    
+    const sourceCodeChar = this.getRootCodeAt(source.root, source.codeIndex)
+    if (!sourceCodeChar) return
+    
+    let targetCode = this.rootCodes.get(target.root)
+    if (!targetCode) {
+      targetCode = { root: target.root, main: '' }
+    }
+    
+    const targetFullCode = (targetCode.main || '') + (targetCode.sub || '') + (targetCode.supplement || '')
+    const codeChars = targetFullCode.split('')
+    
+    while (codeChars.length <= target.codeIndex) {
+      codeChars.push('')
+    }
+    
+    codeChars[target.codeIndex] = sourceCodeChar
+    
+    const newCode = codeChars.join('')
+    const parsed = parseCode(newCode)
+    
+    this.rootCodes.set(target.root, { 
+      root: target.root, 
+      ...parsed,
+      codeEquivFrom: sourceRef 
+    })
+    this.roots.add(target.root)
   }
 
   decompose(char: string): DecompResult {

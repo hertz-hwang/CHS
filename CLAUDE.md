@@ -2,65 +2,61 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## 项目概述
+## Project Overview
 
-字劫 (chars-hijack) 是一个汉字拆分系统，用于分析和拆解汉字结构。支持加载 IDS (Ideographic Description Sequence) 数据，将汉字拆分为字根，并分析字根覆盖率。
+字劫 (Chars Hijack) - A Vue 3 + TypeScript web application for Chinese character decomposition analysis and input method encoding design. It parses IDS (Ideographic Description Sequence) data to decompose characters into components (字根), manage root encodings, and analyze coverage across character sets.
 
-## 常用命令
+## Commands
 
 ```bash
-npm run dev      # 启动开发服务器
-npm run build    # 生产构建 (含 TypeScript 类型检查)
-npm run preview  # 预览生产构建
+npm run dev      # Start development server (Vite)
+npm run build    # Type check (vue-tsc) and build for production
+npm run preview  # Preview production build locally
 ```
 
-## 架构
+## Architecture
 
-### 核心引擎 (`src/engine/`)
+### Core Engine (`src/engine/`)
 
-- [engine.ts](src/engine/engine.ts) - 主引擎类 `CharsHijack`，处理：
-  - 数据加载 (IDS、笔画、字频、字集)
-  - 字根管理 (添加/删除/保存到 localStorage)
-  - 汉字拆分 (`decompose`, `buildTree`, `decomposeSteps`)
-  - 覆盖率分析 (`coverage`)
-  - 字根建议 (`suggestRoots`)
-  - 数据导出 (`exportFull`, `exportCompact`, `exportDetail`)
+The business logic is independent of Vue and can be tested standalone:
 
-- [ids.ts](src/engine/ids.ts) - IDS 解析器，处理 Unicode 结构描述符 (⿰⿱⿲⿳ 等)，`IDSNode` 类表示拆分树
+- **engine.ts** - `CharsHijack` class: Main engine handling character decomposition, root management, coverage analysis, and configuration
+- **config.ts** - TOML parsing/export, `UserConfig` types, localStorage persistence
+- **ids.ts** - IDS parsing with `IDSNode` tree structure
+- **transformer.ts** - IDS transformation rules engine
+- **unicode.ts** - Unicode block detection and hex utilities
 
-- [unicode.ts](src/engine/unicode.ts) - Unicode 区块判断和十六进制转换
+### State Management (`src/composables/`)
 
-### Vue 状态管理
+- **useEngine.ts** - Global singleton state using Vue composables pattern. Provides reactive access to the engine, configuration, charsets, and navigation. All components use this composable.
 
-- [useEngine.ts](src/composables/useEngine.ts) - 全局单例 composable，提供 `engine` 实例和响应式状态 (`stats`, `currentPage`, `selectedChar`, `toast`)
+### Data Files (`data/`)
 
-### 数据文件 (`data/`)
+- `sky_ids.txt` - Main IDS decomposition data (SkyIDS format)
+- `custom_ids.txt` - Custom IDS overrides
+- `stroke.txt` - Stroke count data
+- `dictionary.txt` - Pinyin and frequency data
+- `gb2312.txt`, `tg8105.txt`, `kc6000.txt`, `cjk.txt`, `all.txt` - Character set definitions
 
-- `sky_ids.txt` - IDS 序列 (TSV: U+码点、汉字、IDS表达式)
-- `custom_ids.txt` - 自定义 IDS，会覆盖 sky_ids 中的条目
-- `stroke.txt` - 笔画数据
-- `dictionary.txt` - 拼音和字频
-- `tg8105.txt` / `cjk.txt` - 字集文件
+### Component Structure
 
-### 页面组件 (`src/components/pages/`)
+- `src/components/pages/` - Page-level components (DataPage, CodePage, SplitPage, etc.)
+- `src/components/shared/` - Reusable UI components
+- `src/App.vue` - Layout with HeaderBar, SideNav, and DetailPanel
 
-页面通过 `currentPage` 状态切换，支持快捷键 (1-9, f)。主要页面：
-- LoadDataPage - 数据加载入口
-- DecomposePage - 单字拆分
-- TreePage / StepsPage - 可视化拆分树
-- RootsPage / ViewRootsPage - 字根管理
-- CoveragePage - 覆盖率分析
-- ExportPage - 数据导出
+## Key Concepts
 
-## 关键概念
+- **IDS (Ideographic Description Sequence)**: Unicode standard for describing character structure using operators like ⿰ (left-right), ⿱ (top-bottom)
+- **字根 (Root)**: Basic components that characters decompose into. Stored in `engine.roots` Set
+- **字根编码 (Root Code)**: Each root can have main code (第1码), sub code (第2码), and supplement codes
+- **等效字根**: Roots that share the same encoding as a main root
+- **归并字根**: Roots whose encoding is copied from another root
+- **Coverage**: Percentage of characters in a charset that fully decompose into defined roots
 
-- **IDS**: Unicode 汉字结构描述序列，如 `⿰木木` 表示"林"
-- **字根 (Roots)**: 拆分终点，遇到字根时停止递归拆分
-- **原子字根**: 无法再拆分的部件集合 (`atomicComponents()`)
-- **覆盖率**: 给定字集中能完全用当前字根表示的汉字比例
+## Configuration Persistence
 
-## 开发注意事项
+User configuration (roots, named roots, rules, code rules) is persisted to localStorage as JSON. TOML import/export is supported via `exportConfigToToml()` and `importConfigFromToml()`.
 
-- 路径别名 `@/` 映射到 `src/`
-- 字根数据自动保存到 `localStorage` (key: `chars_hijack_roots`)
-- IDS 数据加载时会优先选择带 `[G]` 标记的条目 (中国大陆标准)
+## Path Alias
+
+`@` is aliased to `src/` in vite.config.ts. Use `@/engine/engine` imports.
