@@ -14,10 +14,15 @@ const pageSize = 30
 // 展开状态
 const expandedChars = ref<Set<string>>(new Set())
 
-// 获取所有汉字
+// 获取所有汉字，按字频降序排序
 const allChars = computed(() => {
   rootsVersion.value
-  return engine.getCharset()
+  const chars = engine.getCharset()
+  return [...chars].sort((a, b) => {
+    const freqA = engine.freq.get(a) || 0
+    const freqB = engine.freq.get(b) || 0
+    return freqB - freqA
+  })
 })
 
 // 根据搜索条件过滤并排序
@@ -98,11 +103,16 @@ function getRootCodes(split: string[]) {
   })
 }
 
-// 获取字的完整编码
+// 获取字的全息编码（首位大写）
 function getCharCode(split: string[]) {
   const codes = getRootCodes(split)
   if (codes.every(c => c.hasCode)) {
-    return codes.map(c => c.code).join('')
+    return codes.map(c => {
+      if (c.code.length > 0) {
+        return c.code[0].toUpperCase() + c.code.slice(1)
+      }
+      return c.code
+    }).join('')
   }
   return ''
 }
@@ -193,12 +203,9 @@ const stats = computed(() => {
         <thead>
           <tr>
             <th style="width: 50px">字</th>
-            <th style="width: 70px">拼音</th>
-            <th style="width: 70px">笔画</th>
-            <th>结构式</th>
             <th>拆分</th>
-            <th style="width: 100px">编码</th>
-            <th style="width: 60px">状态</th>
+            <th style="width: 120px">全息编码</th>
+            <th style="width: 70px">状态</th>
             <th style="width: 40px"></th>
           </tr>
         </thead>
@@ -206,9 +213,6 @@ const stats = computed(() => {
           <template v-for="char in pagedChars" :key="char">
             <tr @click="toggleExpand(char)" class="main-row">
               <td class="char-cell">{{ char }}</td>
-              <td>{{ getSplitInfo(char).pinyin || '-' }}</td>
-              <td>{{ getSplitInfo(char).strokeCount || '-' }}</td>
-              <td class="mono ids-cell">{{ getSplitInfo(char).ids }}</td>
               <td class="split-cell">
                 <span 
                   v-for="(root, i) in getSplitInfo(char).split" 
@@ -238,7 +242,7 @@ const stats = computed(() => {
             </tr>
             <!-- 展开详情 -->
             <tr v-if="expandedChars.has(char)" class="detail-row">
-              <td colspan="8">
+              <td colspan="5">
                 <div class="detail-content">
                   <div class="detail-section">
                     <h4>字根编码</h4>

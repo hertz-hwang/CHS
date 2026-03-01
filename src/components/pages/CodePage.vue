@@ -5,6 +5,17 @@ import { unicodeHex } from '../../engine/unicode'
 
 const { engine, toast, rootsVersion, configVersion, selectChar } = useEngine()
 
+// 导出功能
+function downloadFile(content: string, filename: string) {
+  const blob = new Blob([content], { type: 'text/plain;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
 // 搜索、筛选和分页
 const searchQuery = ref('')
 const statusFilter = ref<'all' | '完整' | '缺失'>('all')
@@ -237,16 +248,24 @@ function getCharInfo(char: string) {
 const statsInfo = computed(() => {
   let encoded = 0
   let total = 0
+  let encodedWeight = 0  // 已编码字的字频总和
+  let totalWeight = 0    // 所有字的字频总和
   
   for (const char of sortedChars.value) {
     total++
-    if (calculateCharCode(char)) encoded++
+    const freq = engine.freq.get(char) || 0
+    totalWeight += freq
+    
+    if (getCodeStatus(char) === '完整') {
+      encoded++
+      encodedWeight += freq
+    }
   }
   
   return {
     total,
     encoded,
-    rate: total > 0 ? (encoded / total * 100).toFixed(1) : '0'
+    rate: totalWeight > 0 ? (encodedWeight / totalWeight * 100).toFixed(1) : '0'
   }
 })
 
@@ -257,6 +276,175 @@ watch([searchQuery, statusFilter], () => {
 
 function goToPage(page: number) {
   currentPage.value = Math.max(1, Math.min(page, totalPages.value))
+}
+
+// 计算元素序列（跟踪每个码对应的元素）
+function calculateElementSequence(char: string): string[] {
+  // 触发 configVersion 依赖，确保规则变更时重新计算
+  configVersion.value
+  
+  const rules = engine.getCodeRules()
+  
+  // 如果没有规则或只有开始/结束节点（空配置），返回空
+  if (rules.length < 2) return []
+  
+  // 检查是否只有开始和结束节点（空配置）
+  const hasActualRules = rules.some(r => r.type !== 'start' && r.type !== 'end')
+  if (!hasActualRules) return []
+  
+  const decomp = engine.decompose(char)
+  const roots = decomp.leaves
+  
+  if (!roots.length) return []
+  
+  const elements: string[] = []
+  let currentNodeId = 'start'
+  const visited = new Set<string>()
+  const maxIterations = 100 // 防止无限循环
+  
+  while (currentNodeId !== 'end' && !visited.has(currentNodeId) && visited.size < maxIterations) {
+    visited.add(currentNodeId)
+    
+    const node = rules.find(r => r.id === currentNodeId)
+    if (!node) break
+    
+    if (node.type === 'start') {
+      // 开始节点：跳转到下一个非开始节点
+      const startIdx = rules.findIndex(r => r.id === 'start')
+      if (startIdx >= 0 && startIdx < rules.length - 1) {
+        currentNodeId = rules[startIdx + 1].id
+      } else {
+        break
+      }
+    } else if (node.type === 'pick') {
+      // 取码节点
+      const rootIdx = node.rootIndex || 1
+      const codeIdx = node.codeIndex || 1
+      
+      // 计算实际字根索引（-1 表示末根）
+      const actualRootIdx = rootIdx === -1 ? roots.length - 1 : rootIdx - 1
+      
+      if (actualRootIdx >= 0 && actualRootIdx < roots.length) {
+        const root = roots[actualRootIdx]
+        const fullCode = getRootFullCode(root)
+        
+        if (fullCode) {
+          // 计算实际码位索引（-1 表示末码）
+          const actualCodeIdx = codeIdx === -1 ? fullCode.length - 1 : codeIdx - 1
+          
+          if (actualCodeIdx >= 0 && actualCodeIdx < fullCode.length) {
+            // 记录元素：第1码直接记录字根名，其他码记录为"字根名.索引"
+            if (actualCodeIdx === 0) {
+              elements.push(root)
+            } else {
+              elements.push(`${root}.${actualCodeIdx}`)
+            }
+          }
+        }
+      }
+      
+      // 跳转到下一节点
+      if (node.nextNode) {
+        currentNodeId = node.nextNode
+      } else {
+        // 找当前节点的下一个节点
+        const currentIdx = rules.findIndex(r => r.id === node.id)
+        if (currentIdx >= 0 && currentIdx < rules.length - 1) {
+          currentNodeId = rules[currentIdx + 1].id
+        } else {
+          break
+        }
+      }
+    } else if (node.type === 'condition') {
+      // 条件判断节点
+      let conditionMet = false
+      
+      if (node.conditionType === 'root_exists') {
+        // 判断第N个根是否存在
+        const idx = (node.conditionValue || 1) - 1
+        conditionMet = idx >= 0 && idx < roots.length
+      } else if (node.conditionType === 'root_has_code') {
+        // 判断第N个根是否有第M码
+        const rootIdx = (node.conditionValue || 1) - 1
+        const codeIdx = (node.conditionCodeIndex || 1) - 1
+        
+        if (rootIdx >= 0 && rootIdx < roots.length) {
+          const root = roots[rootIdx]
+          const fullCode = getRootFullCode(root)
+          conditionMet = codeIdx >= 0 && codeIdx < fullCode.length
+        }
+      } else if (node.conditionType === 'root_count') {
+        // 判断字根数量是否 >= N
+        conditionMet = roots.length >= (node.conditionValue || 1)
+      }
+      
+      // 根据条件结果跳转
+      if (conditionMet && node.trueBranch) {
+        currentNodeId = node.trueBranch
+      } else if (!conditionMet && node.falseBranch) {
+        currentNodeId = node.falseBranch
+      } else {
+        // 没有配置分支，跳到下一个节点
+        const currentIdx = rules.findIndex(r => r.id === node.id)
+        if (currentIdx >= 0 && currentIdx < rules.length - 1) {
+          currentNodeId = rules[currentIdx + 1].id
+        } else {
+          break
+        }
+      }
+    } else if (node.type === 'end') {
+      break
+    } else {
+      break
+    }
+  }
+  
+  return elements
+}
+
+// 导出元素序列
+function exportElementSequence() {
+  const chars = sortedChars.value
+  const lines: string[] = []
+  
+  for (const char of chars) {
+    const elements = calculateElementSequence(char)
+    if (elements.length > 0) {
+      lines.push(`${char}\t${elements.join(' ')}`)
+    }
+  }
+  
+  if (lines.length === 0) {
+    toast.show('没有可导出的数据', 'warning')
+    return
+  }
+  
+  const content = lines.join('\n')
+  downloadFile(content, 'input-division.txt')
+  toast.show(`已导出 ${lines.length} 条元素序列`, 'success')
+}
+
+// 导出码表
+function exportCodeTable() {
+  const chars = sortedChars.value
+  const lines: string[] = []
+  
+  for (const char of chars) {
+    const code = calculateCharCode(char)
+    if (code) {
+      const freq = engine.freq.get(char) || 0
+      lines.push(`${char}\t${code}\t${freq}`)
+    }
+  }
+  
+  if (lines.length === 0) {
+    toast.show('没有可导出的数据', 'warning')
+    return
+  }
+  
+  const content = lines.join('\n')
+  downloadFile(content, 'code.txt')
+  toast.show(`已导出 ${lines.length} 条编码`, 'success')
 }
 </script>
 
@@ -270,7 +458,12 @@ function goToPage(page: number) {
         <span class="encoded-info">已编码: {{ statsInfo.encoded }} ({{ statsInfo.rate }}%)</span>
       </div>
       <div class="toolbar-right">
-        <span class="hint">按字频降序排列</span>
+        <button class="export-btn" @click="exportElementSequence" title="导出元素序列，可用于码灵优化器（Code Genie）优化布局。">
+          📄 导出元素序列
+        </button>
+        <button class="export-btn" @click="exportCodeTable" title="导出码表，可作为 Rime 等输入法码表使用。">
+          📊 导出码表
+        </button>
       </div>
     </div>
 
@@ -431,6 +624,32 @@ function goToPage(page: number) {
 .hint {
   font-size: 12px;
   color: var(--text3);
+}
+
+.toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.export-btn {
+  font-size: 13px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg3);
+  color: var(--text1);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.export-btn:hover {
+  background: var(--primary-bg);
+  color: var(--primary);
+  border-color: var(--primary);
 }
 
 .search-panel {
