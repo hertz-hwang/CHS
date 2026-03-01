@@ -5,8 +5,9 @@ import { unicodeHex } from '../../engine/unicode'
 
 const { engine, toast, rootsVersion, configVersion, selectChar } = useEngine()
 
-// 搜索和分页
+// 搜索、筛选和分页
 const searchQuery = ref('')
+const statusFilter = ref<'all' | '完整' | '缺失'>('all')
 const currentPage = ref(1)
 const pageSize = 50
 
@@ -149,14 +150,27 @@ const sortedChars = computed(() => {
   })
 })
 
-// 搜索过滤
+// 搜索和状态过滤
 const filteredChars = computed(() => {
   const query = searchQuery.value.trim().toLowerCase()
-  if (!query) return sortedChars.value
-
+  const status = statusFilter.value
+  
   return sortedChars.value.filter(char => {
-    const code = calculateCharCode(char)
-    return char.includes(searchQuery.value) || code.toLowerCase().includes(query)
+    // 状态筛选
+    if (status !== 'all') {
+      const charStatus = getCodeStatus(char)
+      if (charStatus !== status) return false
+    }
+    
+    // 搜索筛选
+    if (query) {
+      const code = calculateCharCode(char)
+      if (!char.includes(searchQuery.value) && !code.toLowerCase().includes(query)) {
+        return false
+      }
+    }
+    
+    return true
   })
 })
 
@@ -166,6 +180,29 @@ const pagedChars = computed(() => {
   const start = (currentPage.value - 1) * pageSize
   return filteredChars.value.slice(start, start + pageSize)
 })
+
+// 检查编码状态：是否有字根缺失编码
+function getCodeStatus(char: string): '完整' | '缺失' {
+  const decomp = engine.decompose(char)
+  const roots = decomp.leaves
+  
+  // 如果没有字根，无法判断，返回缺失
+  if (!roots.length) return '缺失'
+  
+  // 检查每个字根是否有编码
+  for (const root of roots) {
+    const fullCode = getRootFullCode(root)
+    if (!fullCode) {
+      return '缺失'
+    }
+  }
+  
+  // 所有字根都有编码，检查最终编码是否生成
+  const code = calculateCharCode(char)
+  if (!code) return '缺失'
+  
+  return '完整'
+}
 
 // 获取字的完整信息
 function getCharInfo(char: string) {
@@ -177,25 +214,23 @@ function getCharInfo(char: string) {
   // 按降频显示所有拼音
   const allPinyin = pyList.map(p => p.py).join(' ')
   
+  // 获取每个部件及其编码状态
+  const roots = decomp.leaves
+  const rootInfos = roots.map(root => ({
+    root,
+    hasCode: !!getRootFullCode(root)
+  }))
+  
   return {
     char,
     unicode: unicodeHex(char),
     pinyin: allPinyin,
-    split: decomp.leaves.join(' '),
+    roots: rootInfos,
     code,
     codeLength: code.length,
     freq,
-    freqRank: freq > 0 ? getFreqRank(freq) : '-',
+    status: getCodeStatus(char),
   }
-}
-
-// 获取字频排名
-function getFreqRank(freq: number): string {
-  if (freq >= 10000) return '高频'
-  if (freq >= 1000) return '常用'
-  if (freq >= 100) return '次常用'
-  if (freq >= 10) return '低频'
-  return '生僻'
 }
 
 // 统计
@@ -216,7 +251,7 @@ const statsInfo = computed(() => {
 })
 
 // 重置页码
-watch(searchQuery, () => {
+watch([searchQuery, statusFilter], () => {
   currentPage.value = 1
 })
 
@@ -247,6 +282,30 @@ function goToPage(page: number) {
         class="search-input"
         placeholder="搜索汉字或编码..."
       />
+      <div class="filter-group">
+        <span class="filter-label">状态筛选:</span>
+        <button 
+          class="filter-btn" 
+          :class="{ active: statusFilter === 'all' }"
+          @click="statusFilter = 'all'"
+        >
+          全部
+        </button>
+        <button 
+          class="filter-btn filter-complete" 
+          :class="{ active: statusFilter === '完整' }"
+          @click="statusFilter = '完整'"
+        >
+          完整
+        </button>
+        <button 
+          class="filter-btn filter-missing" 
+          :class="{ active: statusFilter === '缺失' }"
+          @click="statusFilter = '缺失'"
+        >
+          缺失
+        </button>
+      </div>
     </div>
 
     <!-- 编码结果表格 -->
@@ -261,7 +320,7 @@ function goToPage(page: number) {
             <th style="width: 120px">编码</th>
             <th style="width: 60px">码长</th>
             <th style="width: 80px">字频</th>
-            <th style="width: 70px">等级</th>
+            <th style="width: 70px">状态</th>
           </tr>
         </thead>
         <tbody>
@@ -269,7 +328,14 @@ function goToPage(page: number) {
             <td class="char-cell">{{ char }}</td>
             <td class="mono">{{ getCharInfo(char).unicode }}</td>
             <td>{{ getCharInfo(char).pinyin || '-' }}</td>
-            <td class="split-cell">{{ getCharInfo(char).split }}</td>
+            <td class="split-cell">
+              <span 
+                v-for="(rootInfo, idx) in getCharInfo(char).roots" 
+                :key="idx"
+                class="root-part"
+                :class="rootInfo.hasCode ? 'root-has-code' : 'root-no-code'"
+              >{{ rootInfo.root }}</span>
+            </td>
             <td class="code-cell">
               <span v-if="getCharInfo(char).code" class="char-code">
                 {{ getCharInfo(char).code }}
@@ -279,8 +345,8 @@ function goToPage(page: number) {
             <td>{{ getCharInfo(char).codeLength || '-' }}</td>
             <td class="freq-cell">{{ getCharInfo(char).freq.toLocaleString() }}</td>
             <td>
-              <span class="freq-rank" :class="'rank-' + getCharInfo(char).freqRank">
-                {{ getCharInfo(char).freqRank }}
+              <span class="status-badge" :class="getCharInfo(char).status === '完整' ? 'status-complete' : 'status-missing'">
+                {{ getCharInfo(char).status }}
               </span>
             </td>
           </tr>
@@ -372,10 +438,60 @@ function goToPage(page: number) {
   background: var(--bg2);
   border-radius: 8px;
   border: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
 .search-input {
   width: 100%;
+}
+
+.filter-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.filter-label {
+  font-size: 13px;
+  color: var(--text2);
+  margin-right: 4px;
+}
+
+.filter-btn {
+  font-size: 12px;
+  padding: 4px 12px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--bg3);
+  color: var(--text2);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.filter-btn:hover {
+  background: var(--bg1);
+  border-color: var(--primary);
+}
+
+.filter-btn.active {
+  background: var(--primary-bg);
+  color: var(--primary);
+  border-color: var(--primary);
+}
+
+.filter-btn.filter-complete.active {
+  background: rgba(0, 180, 42, 0.15);
+  color: var(--success);
+  border-color: var(--success);
+}
+
+.filter-btn.filter-missing.active {
+  background: rgba(245, 63, 63, 0.15);
+  color: var(--danger);
+  border-color: var(--danger);
 }
 
 .table-container {
@@ -411,6 +527,22 @@ function goToPage(page: number) {
   letter-spacing: 1px;
 }
 
+.root-part {
+  margin-right: 2px;
+  padding: 1px 2px;
+  border-radius: 2px;
+}
+
+.root-part.root-has-code {
+  color: var(--success);
+  background: rgba(0, 180, 42, 0.1);
+}
+
+.root-part.root-no-code {
+  color: var(--danger);
+  background: rgba(245, 63, 63, 0.1);
+}
+
 .code-cell {
   font-family: monospace;
   font-size: 13px;
@@ -435,35 +567,20 @@ function goToPage(page: number) {
   color: var(--text2);
 }
 
-.freq-rank {
+.status-badge {
   font-size: 11px;
   padding: 2px 6px;
   border-radius: 4px;
 }
 
-.freq-rank.rank-高频 {
-  background: rgba(245, 63, 63, 0.15);
-  color: var(--danger);
-}
-
-.freq-rank.rank-常用 {
-  background: rgba(255, 125, 0, 0.15);
-  color: var(--warning);
-}
-
-.freq-rank.rank-次常用 {
+.status-badge.status-complete {
   background: rgba(0, 180, 42, 0.15);
   color: var(--success);
 }
 
-.freq-rank.rank-低频 {
-  background: var(--primary-bg);
-  color: var(--primary);
-}
-
-.freq-rank.rank-生僻 {
-  background: var(--bg3);
-  color: var(--text3);
+.status-badge.status-missing {
+  background: rgba(245, 63, 63, 0.15);
+  color: var(--danger);
 }
 
 .clickable-row {

@@ -1,4 +1,4 @@
-import { reactive, ref, readonly, computed } from 'vue'
+import { reactive, ref, readonly } from 'vue'
 import { CharsHijack } from '@/engine/engine'
 import { UserConfig, parseConfig, exportConfig, saveConfigToStorage, loadConfigFromStorage } from '@/engine/config'
 
@@ -11,7 +11,32 @@ if (savedConfig) {
 }
 
 const stats = reactive({ decomp: 0, roots: 0, strokes: 0, freq: 0 })
-const currentPage = ref('load')
+
+// 有效的页面名称列表
+const validPages = ['data', 'element', 'split', 'rule', 'code', 'coverage', 'suggest', 'load']
+
+// 从 URL hash 获取初始页面
+function getInitialPage(): string {
+  const hash = window.location.hash.slice(1) // 移除 # 号
+  return validPages.includes(hash) ? hash : 'data'
+}
+
+const currentPage = ref(getInitialPage())
+
+// 初始化时设置 URL hash（如果当前没有 hash 或 hash 无效）
+if (typeof window !== 'undefined' && !window.location.hash) {
+  window.history.replaceState(null, '', `#${currentPage.value}`)
+}
+
+// 监听 URL hash 变化（浏览器前进/后退）
+if (typeof window !== 'undefined') {
+  window.addEventListener('hashchange', () => {
+    const hash = window.location.hash.slice(1)
+    if (validPages.includes(hash) && hash !== currentPage.value) {
+      currentPage.value = hash
+    }
+  })
+}
 const selectedChar = ref<string | null>(null)
 const searchChar = ref<string | null>(null)  // 用于页面间传递查询字
 const toastMsg = ref('')
@@ -41,7 +66,13 @@ function toast(msg: string, duration = 2500) {
   toastTimer = setTimeout(() => { toastVisible.value = false }, duration)
 }
 
-function switchPage(name: string) { currentPage.value = name }
+function switchPage(name: string) {
+  currentPage.value = name
+  // 更新 URL hash（不触发 hashchange 事件，避免重复处理）
+  if (typeof window !== 'undefined') {
+    window.history.replaceState(null, '', `#${name}`)
+  }
+}
 function selectChar(ch: string) { selectedChar.value = ch }
 function setSearchChar(ch: string) { searchChar.value = ch }
 function clearSearchChar() { searchChar.value = null }
