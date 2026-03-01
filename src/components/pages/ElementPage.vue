@@ -515,11 +515,36 @@ function isBracedRoot(char: string): boolean {
 const allComponentsList = computed(() => {
   rootsVersion.value
   const query = equivSearchQuery.value.trim()
-  const components = engine.atomicComponents()
+  
+  // 收集所有部件：实际分解的叶子节点 + 原子字根 + 已定义的字根 + 命名字根
+  const allChars = new Set<string>()
+  
+  // 1. 实际分解后得到的叶子节点（经过转换规则处理）
+  for (const char of engine.getCharset()) {
+    const { leaves } = engine.decompose(char)
+    for (const leaf of leaves) {
+      allChars.add(leaf)
+    }
+  }
+  
+  // 2. 原子字根（原始 IDS 的叶子节点，不可再拆分）
+  for (const char of engine.atomicComponents()) {
+    allChars.add(char)
+  }
+  
+  // 3. 已定义的字根
+  for (const char of engine.roots) {
+    allChars.add(char)
+  }
+  
+  // 4. 命名字根
+  for (const char of engine.namedRoots.keys()) {
+    allChars.add(char)
+  }
   
   const list: { char: string; strokeCount: number; isMain: boolean; isEquiv: boolean; mainRoot?: string; isBraced: boolean }[] = []
   
-  for (const char of components) {
+  for (const char of allChars) {
     // 检索过滤
     if (query && !char.includes(query)) {
       const strokes = engine.getStrokes(char)
