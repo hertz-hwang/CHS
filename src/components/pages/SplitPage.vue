@@ -91,14 +91,32 @@ function getSplitInfo(char: string) {
   }
 }
 
-// 获取字根编码
+// 获取字根编码（考虑等效字根）
 function getRootCodes(split: string[]) {
   return split.map(root => {
-    const code = engine.rootCodes.get(root)
+    // 先尝试直接获取编码
+    let code = engine.rootCodes.get(root)
+    let hasCode = !!code
+    let isEquiv = false
+    let mainRoot: string | undefined
+    
+    // 如果没有直接编码，检查是否是等效字根
+    if (!code) {
+      const effectiveCode = engine.getEffectiveRootCode(root)
+      if (effectiveCode) {
+        code = effectiveCode
+        hasCode = true
+        isEquiv = true
+        mainRoot = engine.getMainRoot(root)
+      }
+    }
+    
     return {
       root,
       code: code ? (code.main || '') + (code.sub || '') + (code.supplement || '') : '',
-      hasCode: !!code
+      hasCode,
+      isEquiv,
+      mainRoot
     }
   })
 }
@@ -248,7 +266,11 @@ function exportSplitTable() {
                   v-for="(root, i) in getSplitInfo(char).split" 
                   :key="i"
                   class="root-tag"
-                  :class="{ 'root-missing': !engine.roots.has(root) }"
+                  :class="{ 
+                    'root-missing': !engine.roots.has(root) && !engine.isEquivalentRoot(root),
+                    'root-equiv': engine.isEquivalentRoot(root)
+                  }"
+                  :title="engine.isEquivalentRoot(root) ? `等效字根，主字根: ${engine.getMainRoot(root)}` : ''"
                 >
                   {{ root }}
                 </span>
@@ -281,11 +303,13 @@ function exportSplitTable() {
                         v-for="(item, i) in getRootCodes(getSplitInfo(char).split)" 
                         :key="i"
                         class="root-code-item"
-                        :class="{ 'missing': !item.hasCode }"
+                        :class="{ 'missing': !item.hasCode, 'equiv': item.isEquiv }"
+                        :title="item.isEquiv ? `等效字根，主字根: ${item.mainRoot}` : ''"
                       >
                         <span class="root">{{ item.root }}</span>
                         <span class="arrow">→</span>
                         <span class="code">{{ item.code || '?' }}</span>
+                        <span v-if="item.isEquiv" class="equiv-badge">≡</span>
                       </div>
                     </div>
                   </div>
@@ -472,6 +496,11 @@ function exportSplitTable() {
   color: var(--warning);
 }
 
+.root-equiv {
+  background: rgba(19, 194, 194, 0.15);
+  color: #13c2c2;
+}
+
 .code-cell {
   font-family: monospace;
   font-size: 12px;
@@ -561,6 +590,17 @@ function exportSplitTable() {
 .root-code-item.missing {
   border-color: var(--warning);
   background: rgba(255, 125, 0, 0.1);
+}
+
+.root-code-item.equiv {
+  border-color: #13c2c2;
+  background: rgba(19, 194, 194, 0.1);
+}
+
+.equiv-badge {
+  font-size: 10px;
+  color: #13c2c2;
+  margin-left: 2px;
 }
 
 .root-code-item .root {

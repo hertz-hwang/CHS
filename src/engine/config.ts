@@ -55,6 +55,7 @@ export interface UserConfig {
   }
   roots: Record<string, string>      // 字根 -> 编码字符串
   named_roots: Record<string, string> // 命名字根名 -> IDS
+  equivalent_roots: Record<string, string[]> // 主字根 -> 等效字根列表
   rules: TransformRuleConfig[]        // IDS 转换规则
   code_rules: CodeRuleNode[]          // 取码规则
 }
@@ -102,6 +103,7 @@ export function parseConfig(toml: string): UserConfig {
       meta: parsed.meta || { version: '1.0' },
       roots: parsed.roots || {},
       named_roots: parsed.named_roots || {},
+      equivalent_roots: parsed.equivalent_roots || {},
       rules: parsed.rules || [],
       code_rules: parsed.code_rules || [],
     }
@@ -111,6 +113,7 @@ export function parseConfig(toml: string): UserConfig {
       meta: { version: '1.0' },
       roots: {},
       named_roots: {},
+      equivalent_roots: {},
       rules: [],
       code_rules: [],
     }
@@ -143,6 +146,16 @@ export function exportConfig(config: UserConfig): string {
     lines.push('[named_roots]')
     for (const [name, ids] of Object.entries(config.named_roots)) {
       lines.push(`"${name}" = "${ids}"`)
+    }
+    lines.push('')
+  }
+
+  // equivalent_roots (等效字根)
+  if (Object.keys(config.equivalent_roots).length > 0) {
+    lines.push('[equivalent_roots]')
+    for (const [main, equivs] of Object.entries(config.equivalent_roots)) {
+      const equivsStr = equivs.map(e => `"${e}"`).join(', ')
+      lines.push(`"${main}" = [${equivsStr}]`)
     }
     lines.push('')
   }
@@ -222,6 +235,7 @@ export function createDefaultConfig(name?: string, author?: string): UserConfig 
     },
     roots: {},
     named_roots: {},
+    equivalent_roots: {},
     rules: [],
     code_rules: [],
   }

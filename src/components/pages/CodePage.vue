@@ -22,11 +22,21 @@ const statusFilter = ref<'all' | '完整' | '缺失'>('all')
 const currentPage = ref(1)
 const pageSize = 50
 
-// 获取字根的完整编码字符串
+// 获取字根的完整编码字符串（考虑等效字根）
 function getRootFullCode(root: string): string {
+  // 先尝试直接获取编码
   const rootCode = engine.rootCodes.get(root)
-  if (!rootCode) return ''
-  return (rootCode.main || '') + (rootCode.sub || '') + (rootCode.supplement || '')
+  if (rootCode) {
+    return (rootCode.main || '') + (rootCode.sub || '') + (rootCode.supplement || '')
+  }
+  
+  // 如果没有直接编码，检查是否是等效字根
+  const effectiveCode = engine.getEffectiveRootCode(root)
+  if (effectiveCode) {
+    return (effectiveCode.main || '') + (effectiveCode.sub || '') + (effectiveCode.supplement || '')
+  }
+  
+  return ''
 }
 
 // 根据用户定义的规则计算编码

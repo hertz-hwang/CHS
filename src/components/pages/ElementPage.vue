@@ -3,8 +3,17 @@ import { ref, computed } from 'vue'
 import ModalDialog from '../ModalDialog.vue'
 import { useEngine } from '../../composables/useEngine'
 import { parseCode, codeToString, RootCode } from '../../engine/config'
+import { GB_STROKE_EQUIVALENT_ROOTS } from '../../engine/engine'
 
 const { engine, toast, refreshStats, rootsVersion } = useEngine()
+
+// 等效字根相关状态
+const showEquivModal = ref(false)
+const equivSearchQuery = ref('')
+const selectedMainRoot = ref<string | null>(null)
+const draggedRoot = ref<string | null>(null)
+const editingEquivRoot = ref<string | null>(null)
+const editingEquivCode = ref('')
 
 // 31键布局
 const KEYBOARD_LAYOUT = [
@@ -415,6 +424,207 @@ function removeRootFromSearch(root: string) {
   refreshStats()
   toast(`已删除字根: ${root}`)
 }
+
+// ============ 等效字根相关方法 ============
+
+// 等效字根列表
+const equivalentRootsList = computed(() => {
+  rootsVersion.value
+  const list: { mainRoot: string; equivalents: string[]; mainCode: string }[] = []
+  for (const [mainRoot, equivs] of engine.equivalentRoots) {
+    const mainCode = engine.getRootCodeString(mainRoot)
+    list.push({ mainRoot, equivalents: equivs, mainCode })
+  }
+  return list
+})
+
+// 判断是否是花括号字根
+function isBracedRoot(char: string): boolean {
+  return char.startsWith('{') && char.endsWith('}')
+}
+
+// 所有部件列表（按笔画数升序，支持检索）
+const allComponentsList = computed(() => {
+  rootsVersion.value
+  const query = equivSearchQuery.value.trim()
+  const components = engine.atomicComponents()
+  
+  const list: { char: string; strokeCount: number; isMain: boolean; isEquiv: boolean; mainRoot?: string; isBraced: boolean }[] = []
+  
+  for (const char of components) {
+    // 检索过滤
+    if (query && !char.includes(query)) {
+      const strokes = engine.getStrokes(char)
+      const strokeCode = strokes.length > 0 ? strokes[0] : ''
+      if (!strokeCode.includes(query)) continue
+    }
+    
+    const isMain = engine.equivalentRoots.has(char)
+    const mainRoot = engine.getMainRoot(char)
+    const isEquiv = !!mainRoot
+    const isBraced = isBracedRoot(char)
+    
+    list.push({
+      char,
+      strokeCount: engine.strokeCount(char),
+      isMain,
+      isEquiv,
+      mainRoot,
+      isBraced
+    })
+  }
+  
+  // 按笔画数升序
+  list.sort((a, b) => a.strokeCount - b.strokeCount)
+  
+  return list
+})
+
+// 打开等效字根弹窗
+function openEquivModal() {
+  showEquivModal.value = true
+  selectedMainRoot.value = null
+  equivSearchQuery.value = ''
+}
+
+// 选择主字根
+function selectMainRoot(root: string) {
+  if (selectedMainRoot.value === root) {
+    selectedMainRoot.value = null
+  } else {
+    selectedMainRoot.value = root
+  }
+}
+
+// 添加等效字根到主字根
+function addToEquivRoots(mainRoot: string, equivRoot: string) {
+  if (mainRoot === equivRoot) {
+    toast('不能将自己设为等效字根')
+    return
+  }
+  
+  const current = engine.getEquivalentRoots(mainRoot)
+  if (current.includes(equivRoot)) {
+    toast('该字根已是等效字根')
+    return
+  }
+  
+  // 检查是否是其他主字根的等效字根
+  const existingMain = engine.getMainRoot(equivRoot)
+  if (existingMain) {
+    // 从原来的主字根中移除
+    const oldEquivs = engine.getEquivalentRoots(existingMain).filter(r => r !== equivRoot)
+    engine.setEquivalentRoots(existingMain, oldEquivs)
+  }
+  
+  engine.setEquivalentRoots(mainRoot, [...current, equivRoot])
+  refreshStats()
+  toast(`已将 "${equivRoot}" 设为 "${mainRoot}" 的等效字根`)
+}
+
+// 从主字根移除等效字根
+function removeFromEquivRoots(mainRoot: string, equivRoot: string) {
+  const current = engine.getEquivalentRoots(mainRoot)
+  const updated = current.filter(r => r !== equivRoot)
+  engine.setEquivalentRoots(mainRoot, updated)
+  refreshStats()
+  toast(`已移除等效字根 "${equivRoot}"`)
+}
+
+// 删除等效字根组
+function deleteEquivGroup(mainRoot: string) {
+  engine.equivalentRoots.delete(mainRoot)
+  refreshStats()
+  toast(`已删除 "${mainRoot}" 的等效字根组`)
+}
+
+// 拖拽开始
+function onDragStart(root: string) {
+  draggedRoot.value = root
+}
+
+// 拖拽结束
+function onDragEnd() {
+  draggedRoot.value = null
+}
+
+// 放置到主字根区域
+function onDropToMain(mainRoot: string) {
+  if (draggedRoot.value) {
+    addToEquivRoots(mainRoot, draggedRoot.value)
+    draggedRoot.value = null
+  }
+}
+
+// 放置到选中的主字根区域
+function onDropToSelected() {
+  if (draggedRoot.value && selectedMainRoot.value) {
+    addToEquivRoots(selectedMainRoot.value, draggedRoot.value)
+    draggedRoot.value = null
+  }
+}
+
+// 点击部件设为主字根
+function onComponentClick(char: string) {
+  // 检查是否已经是主字根
+  if (engine.equivalentRoots.has(char)) {
+    // 已经是主字根，选中它
+    selectedMainRoot.value = char
+    toast(`已选中主字根 "${char}"`)
+    return
+  }
+  
+  // 检查是否是其他主字根的等效字根
+  const existingMain = engine.getMainRoot(char)
+  if (existingMain) {
+    // 是等效字根，切换选中主字根
+    selectedMainRoot.value = existingMain
+    toast(`"${char}" 是 "${existingMain}" 的等效字根，已选中该主字根`)
+    return
+  }
+  
+  // 创建新的等效字根组
+  engine.setEquivalentRoots(char, [])
+  selectedMainRoot.value = char
+  refreshStats()
+  toast(`已将 "${char}" 设为主字根，拖拽其他部件添加为等效字根`)
+}
+
+// 点击主字根编码区域开始编辑
+function clickMainRootCode(mainRoot: string) {
+  editingEquivRoot.value = mainRoot
+  const code = engine.rootCodes.get(mainRoot)
+  editingEquivCode.value = code ? codeToString(code) : ''
+}
+
+// 保存主字根编码
+function saveEquivRootCode() {
+  if (!editingEquivRoot.value) return
+  
+  const parsed = parseCode(editingEquivCode.value)
+  engine.rootCodes.set(editingEquivRoot.value, { root: editingEquivRoot.value, ...parsed })
+  engine.roots.add(editingEquivRoot.value)
+  editingEquivRoot.value = null
+  editingEquivCode.value = ''
+  refreshStats()
+  toast('编码已更新')
+}
+
+// 取消编辑主字根编码
+function cancelEquivRootCode() {
+  editingEquivRoot.value = null
+  editingEquivCode.value = ''
+}
+
+// 加载国标笔画五分类等效字根
+function loadGBStrokeEquiv() {
+  // 将国标笔画五分类等效字根加载到引擎
+  for (const [mainRoot, equivs] of Object.entries(GB_STROKE_EQUIVALENT_ROOTS)) {
+    engine.setEquivalentRoots(mainRoot, equivs)
+  }
+  refreshStats()
+  toast('已加载国标笔画五分类等效字根')
+}
 </script>
 
 <template>
@@ -427,6 +637,7 @@ function removeRootFromSearch(root: string) {
         <span class="encoded-info">已编码: {{ statsInfo.encoded }}</span>
       </div>
       <div class="toolbar-right">
+        <button class="btn btn-sm btn-info" @click="openEquivModal">等效字根设置</button>
         <button class="btn btn-sm btn-success" @click="initAtomic">初始化原子字根</button>
         <button class="btn btn-sm btn-purple" @click="openAddModal">+ 添加字根</button>
       </div>
@@ -677,6 +888,123 @@ function removeRootFromSearch(root: string) {
       <button class="btn btn-ghost" @click="showAddModal = false">取消</button>
       <button class="btn btn-success" @click="addRoot">添加</button>
     </template>
+  </ModalDialog>
+
+  <!-- 等效字根设置弹窗 -->
+  <ModalDialog :visible="showEquivModal" title="等效字根设置" @close="showEquivModal = false">
+    <div class="equiv-modal-content">
+      <!-- 等效字根列表区域 -->
+      <div class="equiv-list-section">
+        <div class="equiv-list-header-row">
+          <h4 class="section-title">等效字根列表</h4>
+          <button class="btn btn-sm btn-info" @click="loadGBStrokeEquiv" title="加载国标笔画五分类：横竖撇捺折">
+            加载国标笔画五分类
+          </button>
+        </div>
+        <div class="equiv-list-header">
+          <span class="col-main">主字根</span>
+          <span class="col-equiv">等效根</span>
+        </div>
+        
+        <!-- 当前选中主字根的放置区域 -->
+        <div 
+          v-if="selectedMainRoot" 
+          class="drop-zone"
+          :class="{ 'drag-over': draggedRoot }"
+          @dragover.prevent
+          @drop="onDropToSelected"
+        >
+          <div class="drop-zone-label">
+            主字根：<strong>{{ selectedMainRoot }}</strong>
+          </div>
+          <div class="drop-zone-hint">
+            拖拽部件到此处添加为等效字根
+          </div>
+        </div>
+        
+        <div class="equiv-list-body">
+          <div 
+            v-for="item in equivalentRootsList" 
+            :key="item.mainRoot" 
+            class="equiv-item"
+            :class="{ 'selected': selectedMainRoot === item.mainRoot }"
+            @click="selectMainRoot(item.mainRoot)"
+            @dragover.prevent
+            @drop="onDropToMain(item.mainRoot)"
+          >
+            <div class="main-root">
+              <span class="root-char">{{ item.mainRoot }}</span>
+              <template v-if="editingEquivRoot === item.mainRoot">
+                <input 
+                  v-model="editingEquivCode"
+                  class="equiv-code-input"
+                  placeholder="编码"
+                  maxlength="4"
+                  @keyup.enter="saveEquivRootCode"
+                  @keyup.esc="cancelEquivRootCode"
+                  @click.stop
+                />
+                <button class="btn btn-xs" @click.stop="saveEquivRootCode">保存</button>
+                <button class="btn btn-xs btn-ghost" @click.stop="cancelEquivRootCode">取消</button>
+              </template>
+              <span v-else class="root-code editable" @click.stop="clickMainRootCode(item.mainRoot)" title="点击编辑编码">
+                {{ item.mainCode || '点击设置编码' }}
+              </span>
+            </div>
+            <div class="equiv-roots">
+              <span 
+                v-for="equiv in item.equivalents" 
+                :key="equiv" 
+                class="equiv-tag"
+              >
+                {{ equiv }}
+                <button class="remove-btn" @click.stop="removeFromEquivRoots(item.mainRoot, equiv)">×</button>
+              </span>
+              <span v-if="item.equivalents.length === 0" class="empty-hint">拖拽添加</span>
+            </div>
+            <button class="delete-group-btn" @click.stop="deleteEquivGroup(item.mainRoot)" title="删除此组">删除</button>
+          </div>
+          <div v-if="equivalentRootsList.length === 0" class="empty-list">
+            点击下方部件设为主字根
+          </div>
+        </div>
+      </div>
+
+      <!-- 部件选择区域 -->
+      <div class="components-section">
+        <div class="section-header">
+          <h4 class="section-title">所有部件（点击或拖拽添加）</h4>
+          <input 
+            v-model="equivSearchQuery"
+            type="search"
+            class="search-input-sm"
+            placeholder="检索部件..."
+          />
+        </div>
+        <div class="components-grid">
+          <div 
+            v-for="comp in allComponentsList.slice(0, 200)" 
+            :key="comp.char" 
+            class="component-item"
+            :class="{ 
+              'is-main': comp.isMain,
+              'is-equiv': comp.isEquiv,
+              'is-braced': comp.isBraced
+            }"
+            :title="comp.isEquiv ? `等效于: ${comp.mainRoot}，拖拽到其他主字根可转移` : comp.isMain ? '已是主字根，拖拽其他部件添加为等效字根' : `${comp.strokeCount}画，点击设为主字根`"
+            draggable="true"
+            @click="onComponentClick(comp.char)"
+            @dragstart="onDragStart(comp.char)"
+            @dragend="onDragEnd"
+          >
+            {{ comp.char }}
+          </div>
+        </div>
+        <div class="components-hint">
+          {{ selectedMainRoot ? `已选择主字根: ${selectedMainRoot}，拖拽其他部件添加为等效字根` : '点击部件设为主字根，然后拖拽其他部件添加为等效字根' }}
+        </div>
+      </div>
+    </div>
   </ModalDialog>
 </template>
 
@@ -1291,5 +1619,322 @@ function removeRootFromSearch(root: string) {
   font-family: monospace;
   font-size: 12px;
   padding: 2px 4px;
+}
+
+/* 等效字根弹窗样式 */
+.equiv-modal-content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 850px;
+  max-height: 75vh;
+}
+
+.equiv-list-section {
+  background: var(--bg2);
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.section-title {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0;
+  color: var(--text);
+}
+
+.equiv-list-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  background: var(--bg3);
+  border-bottom: 1px solid var(--border);
+}
+
+.equiv-list-header {
+  display: grid;
+  grid-template-columns: 120px 1fr 60px;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--bg3);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text2);
+  border-bottom: 1px solid var(--border);
+}
+
+/* 拖放区域样式 */
+.drop-zone {
+  padding: 12px 16px;
+  background: rgba(24, 144, 255, 0.08);
+  border-bottom: 1px solid var(--border);
+  transition: all 0.2s ease;
+}
+
+.drop-zone.drag-over {
+  background: rgba(24, 144, 255, 0.2);
+  border-color: #1890ff;
+}
+
+.drop-zone-label {
+  font-size: 13px;
+  color: var(--text);
+}
+
+.drop-zone-label strong {
+  font-size: 18px;
+  color: #1890ff;
+}
+
+.drop-zone-hint {
+  font-size: 11px;
+  color: var(--text2);
+  margin-top: 4px;
+}
+
+.equiv-list-body {
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.equiv-item {
+  display: grid;
+  grid-template-columns: 120px 1fr 60px;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.equiv-item:last-child {
+  border-bottom: none;
+}
+
+.equiv-item:hover {
+  background: var(--bg3);
+}
+
+.equiv-item.selected {
+  background: var(--primary-bg);
+  border-color: var(--primary);
+}
+
+.main-root {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.main-root .root-char {
+  font-size: 18px;
+}
+
+.main-root .root-code {
+  font-size: 11px;
+  color: var(--text2);
+  font-family: monospace;
+}
+
+.main-root .root-code.editable {
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: all 0.15s ease;
+}
+
+.main-root .root-code.editable:hover {
+  background: var(--primary-bg);
+  color: var(--primary);
+}
+
+.equiv-code-input {
+  width: 60px;
+  font-family: monospace;
+  font-size: 11px;
+  padding: 2px 4px;
+  border: 1px solid var(--primary);
+  border-radius: 4px;
+  outline: none;
+}
+
+.btn-xs {
+  padding: 2px 6px;
+  font-size: 10px;
+}
+
+.equiv-roots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-content: flex-start;
+}
+
+.equiv-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  background: var(--primary-bg);
+  color: var(--primary);
+  border-radius: 4px;
+  font-size: 14px;
+}
+
+.equiv-tag .remove-btn {
+  width: 16px;
+  height: 16px;
+  border: none;
+  background: rgba(245, 63, 63, 0.2);
+  color: var(--danger);
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  transition: all 0.15s ease;
+}
+
+.equiv-tag .remove-btn:hover {
+  background: var(--danger);
+  color: white;
+}
+
+.empty-hint {
+  font-size: 12px;
+  color: var(--text3);
+  font-style: italic;
+}
+
+.delete-group-btn {
+  padding: 4px 8px;
+  font-size: 11px;
+  background: rgba(245, 63, 63, 0.1);
+  color: var(--danger);
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.delete-group-btn:hover {
+  background: var(--danger);
+  color: white;
+}
+
+.empty-list {
+  padding: 20px;
+  text-align: center;
+  color: var(--text3);
+  font-size: 13px;
+}
+
+.components-section {
+  background: var(--bg2);
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  background: var(--bg3);
+  border-bottom: 1px solid var(--border);
+}
+
+.search-input-sm {
+  width: 150px;
+  padding: 4px 8px;
+  font-size: 12px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  outline: none;
+}
+
+.search-input-sm:focus {
+  border-color: var(--primary);
+}
+
+.components-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 12px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.component-item {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.component-item:hover {
+  border-color: var(--primary);
+  background: var(--primary-bg);
+}
+
+.component-item.draggable {
+  cursor: grab;
+}
+
+.component-item.is-main {
+  background: rgba(114, 46, 209, 0.15);
+  border-color: #722ed1;
+  color: #722ed1;
+}
+
+.component-item.is-equiv {
+  background: rgba(19, 194, 194, 0.15);
+  border-color: #13c2c2;
+  color: #13c2c2;
+}
+
+/* 花括号字根长条形样式 */
+.component-item.is-braced {
+  width: auto;
+  min-width: 28px;
+  padding: 0 8px;
+  font-size: 12px;
+  background: rgba(245, 166, 35, 0.15);
+  border-color: #f5a623;
+  color: #a37718;
+}
+
+.component-item.is-braced:hover {
+  background: rgba(245, 166, 35, 0.25);
+}
+
+.components-hint {
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--text2);
+  background: var(--bg3);
+  border-top: 1px solid var(--border);
+}
+
+/* 按钮样式补充 */
+.btn-info {
+  background: #1890ff;
+  color: white;
+}
+
+.btn-info:hover {
+  background: #40a9ff;
 }
 </style>

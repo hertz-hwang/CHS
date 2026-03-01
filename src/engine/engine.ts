@@ -37,6 +37,14 @@ export interface PinyinInfo {
 
 const LS_KEY = 'chars_hijack_roots'
 
+// 国标笔画五分类等效字根配置
+export const GB_STROKE_EQUIVALENT_ROOTS: Record<string, string[]> = {
+  "一": ["㇀"],
+  "丨": ["亅"],
+  "丶": ["㇏", "乀"],
+  "乛": ["㇇", "㇂", "𠃊", "㇅", "𠃌", "乚", "𠃍", "㇉", "⺄", "𠄎", "𠃋", "𠄌", "㇎", "𠃑", "㇌", "㇋", "㇁", "𡿨", "乙", "〇"]
+}
+
 function parseRootsFromText(text: string): Set<string> {
   const roots = new Set<string>()
   let i = 0
@@ -80,6 +88,9 @@ export class CharsHijack {
   // 取码规则
   codeRules: CodeRuleNode[] = createDefaultCodeRules()
 
+  // 等效字根 { 主字根 -> 等效字根列表 }
+  equivalentRoots = new Map<string, string[]>()
+
   // 配置元信息
   private _meta: UserConfig['meta'] = { version: '1.0' }
 
@@ -107,7 +118,9 @@ export class CharsHijack {
       if (cols.length < 3) continue
       const ch = cols[1]
       const ids = this._pickG(cols.slice(2))
-      if (ids && ids !== ch) { this.decomp.set(ch, ids); n++ }
+      // 存储所有 IDS，即使 IDS 与字符本身相同（如「乙」）
+      // 这样不可拆分的单字也会出现在字符集中
+      if (ids) { this.decomp.set(ch, ids); n++ }
     }
     this._cache.clear()
     return n
@@ -354,6 +367,11 @@ export class CharsHijack {
       this.codeRules = createDefaultCodeRules()
     }
 
+    // 设置等效字根
+    if (config.equivalent_roots) {
+      this.equivalentRoots = new Map(Object.entries(config.equivalent_roots))
+    }
+
     // 保存字根到 localStorage（包括转换器生成的命名字根）
     this._saveRoots()
     this._cache.clear()
@@ -365,10 +383,15 @@ export class CharsHijack {
     for (const [k, v] of this.namedRoots) {
       namedRootsObj[k] = v
     }
+    const equivalentRootsObj: Record<string, string[]> = {}
+    for (const [k, v] of this.equivalentRoots) {
+      equivalentRootsObj[k] = v
+    }
     return {
       meta: this._meta,
       roots: rootCodesToRecord(this.rootCodes),
       named_roots: namedRootsObj,
+      equivalent_roots: equivalentRootsObj,
       rules,
       code_rules: this.codeRules,
     }
@@ -409,6 +432,64 @@ export class CharsHijack {
     const code = this.rootCodes.get(root)
     if (!code) return ''
     return (code.main || '') + (code.sub || '') + (code.supplement || '')
+  }
+
+  // 获取字根的有效编码（考虑等效字根）
+  getEffectiveRootCode(root: string): RootCode | undefined {
+    // 直接编码优先
+    const directCode = this.rootCodes.get(root)
+    if (directCode) return directCode
+    
+    // 检查是否是等效字根
+    for (const [mainRoot, equivs] of this.equivalentRoots) {
+      if (equivs.includes(root)) {
+        return this.rootCodes.get(mainRoot)
+      }
+    }
+    
+    return undefined
+  }
+
+  // 设置等效字根
+  setEquivalentRoots(mainRoot: string, equivalents: string[]): void {
+    if (equivalents.length === 0) {
+      this.equivalentRoots.delete(mainRoot)
+    } else {
+      this.equivalentRoots.set(mainRoot, equivalents)
+    }
+    this._cache.clear()
+  }
+
+  // 获取等效字根列表
+  getEquivalentRoots(mainRoot: string): string[] {
+    return this.equivalentRoots.get(mainRoot) || []
+  }
+
+  // 获取所有等效字根（扁平列表）
+  getAllEquivalentRoots(): string[] {
+    const result: string[] = []
+    for (const equivs of this.equivalentRoots.values()) {
+      result.push(...equivs)
+    }
+    return result
+  }
+
+  // 检查字根是否是等效字根
+  isEquivalentRoot(root: string): boolean {
+    for (const equivs of this.equivalentRoots.values()) {
+      if (equivs.includes(root)) return true
+    }
+    return false
+  }
+
+  // 获取等效字根的主字根
+  getMainRoot(equivalentRoot: string): string | undefined {
+    for (const [mainRoot, equivs] of this.equivalentRoots) {
+      if (equivs.includes(equivalentRoot)) {
+        return mainRoot
+      }
+    }
+    return undefined
   }
 
   decompose(char: string): DecompResult {

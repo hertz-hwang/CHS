@@ -36,8 +36,8 @@ const emit = defineEmits<{ close: [] }>()
   border-radius: 8px;
   padding: 24px;
   min-width: 400px;
-  max-width: 600px;
-  max-height: 80vh;
+  max-width: 90vw;
+  max-height: 85vh;
   overflow-y: auto;
   box-shadow: var(--shadow2);
 }

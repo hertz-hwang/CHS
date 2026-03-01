@@ -87,6 +87,13 @@ function confirmSetRoot() {
 
 // 点击字根元素按钮，打开设置编码对话框
 function openLeafDialog(leaf: string) {
+  // 如果是等效字根，不允许设置编码
+  if (engine.isEquivalentRoot(leaf)) {
+    const mainRoot = engine.getMainRoot(leaf)
+    toast(`"${leaf}" 是 "${mainRoot}" 的等效字根，无法单独设置编码`)
+    return
+  }
+  
   editingRoot.value = leaf
   rootCodeInput.value = engine.getRootCodeString(leaf) || ''
   showRootCodeDialog.value = true
@@ -120,6 +127,16 @@ function closeRootCodeDialog() {
 // 检查字根元素是否已存在于字根集
 function isLeafRoot(leaf: string): boolean {
   return engine.roots.has(leaf)
+}
+
+// 检查字根元素是否是等效字根
+function isLeafEquivRoot(leaf: string): boolean {
+  return engine.isEquivalentRoot(leaf)
+}
+
+// 获取等效字根的主字根
+function getLeafMainRoot(leaf: string): string | undefined {
+  return engine.getMainRoot(leaf)
 }
 
 // 对话框确认处理
@@ -159,12 +176,16 @@ function goToPage(page: string) {
           <template v-for="(leaf, index) in detail.leaves" :key="index">
             <button
               class="leaf-btn"
-              :class="{ 'is-root': isLeafRoot(leaf) }"
+              :class="{ 
+                'is-root': isLeafRoot(leaf),
+                'is-equiv': isLeafEquivRoot(leaf)
+              }"
               @click="openLeafDialog(leaf)"
-              :title="isLeafRoot(leaf) ? '已是字根，点击修改编码' : '点击添加为字根'"
+              :title="isLeafRoot(leaf) ? '已是字根，点击修改编码' : isLeafEquivRoot(leaf) ? `等效字根，主字根: ${getLeafMainRoot(leaf)}` : '点击添加为字根'"
             >
               <span class="leaf-char">{{ leaf }}</span>
               <span v-if="isLeafRoot(leaf)" class="leaf-badge">✓</span>
+              <span v-else-if="isLeafEquivRoot(leaf)" class="leaf-badge equiv">≡</span>
             </button>
             <span v-if="index < detail.leaves.length - 1" class="leaf-sep">+</span>
           </template>
@@ -414,6 +435,19 @@ h3 {
   border-color: var(--primary-dark, #0066cc);
 }
 
+/* 等效字根样式 */
+.leaf-btn.is-equiv {
+  background: rgba(19, 194, 194, 0.15);
+  border-color: #13c2c2;
+  color: #0d8a8a;
+}
+
+.leaf-btn.is-equiv:hover {
+  background: rgba(19, 194, 194, 0.25);
+  border-color: #13c2c2;
+  color: #0d8a8a;
+}
+
 .leaf-char {
   font-weight: 500;
 }
@@ -431,6 +465,10 @@ h3 {
   background: var(--success, #28a745);
   color: white;
   border-radius: 50%;
+}
+
+.leaf-badge.equiv {
+  background: #13c2c2;
 }
 
 .leaf-sep {
