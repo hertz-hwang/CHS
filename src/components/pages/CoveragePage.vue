@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useEngine } from '../../composables/useEngine'
+import Icon from '../Icon.vue'
 import type { CoverageResult } from '../../engine/engine'
 const { engine, refreshStats, selectChar, toast, saveCurrentConfig } = useEngine()
 const charsetName = ref(''); const result = ref<CoverageResult | null>(null); const loading = ref(false)
@@ -55,7 +56,7 @@ function confirmAddRoot() {
 </script>
 <template>
   <div class="panel">
-    <div class="panel-head">📊 覆盖率分析</div>
+    <div class="panel-head"><Icon name="coverage" :size="18" /> 覆盖率分析</div>
     <div class="panel-body">
       <div class="input-row">
         <select v-model="charsetName"><option v-for="o in opts" :key="o.value" :value="o.value">{{ o.label }}</option></select>

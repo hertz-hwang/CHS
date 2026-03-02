@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useEngine } from '../../composables/useEngine'
+import Icon from '../Icon.vue'
 import type { SuggestItem } from '../../engine/engine'
 const { engine, refreshStats, toast, selectChar } = useEngine()
 const minUse = ref(5); const maxStroke = ref<number | undefined>(undefined)
@@ -42,7 +43,7 @@ function onCharClick(ch: string) { selectChar(ch) }
 </script>
 <template>
   <div class="panel">
-    <div class="panel-head">💡 推荐字根</div>
+    <div class="panel-head"><Icon name="suggest" :size="18" /> 推荐字根</div>
     <div class="panel-body">
       <div class="input-row">
         <input v-model.number="minUse" type="number" placeholder="最小使用次数 (5)" />

@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import FileDropZone from '../shared/FileDropZone.vue'
 import IdsTransformer from '../shared/IdsTransformer.vue'
 import { useEngine } from '../../composables/useEngine'
+import Icon from '../Icon.vue'
 
 const { engine, refreshStats, toast } = useEngine()
 const statusIds = ref(''); const statusCustom = ref(''); const statusStroke = ref('')
@@ -40,8 +41,8 @@ function restoreRoots() { if (engine.loadSavedRoots()) { refreshStats(); toast(`
       <h4 class="section-title">字根文件 (可选)</h4>
       <FileDropZone icon="🧩" title="字根文件 (.txt)" desc="每行一组字根" :status="statusRoots" @files="onRoots" />
       <div class="action-row">
-        <button class="btn btn-success" @click="initAtomic">🧩 使用原子字根</button>
-        <button class="btn btn-outline" @click="restoreRoots">📥 恢复保存的字根</button>
+        <button class="btn btn-success" @click="initAtomic"><Icon name="puzzle" :size="14" /> 使用原子字根</button>
+        <button class="btn btn-outline" @click="restoreRoots"><Icon name="download" :size="14" /> 恢复保存的字根</button>
       </div>
     </div>
   </div>

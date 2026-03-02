@@ -3,6 +3,7 @@ import { ref, computed, watch } from 'vue'
 import { useEngine } from '../../composables/useEngine'
 import IdsTransformer from '../shared/IdsTransformer.vue'
 import { unicodeHex, unicodeBlock } from '../../engine/unicode'
+import Icon from '../Icon.vue'
 
 const { 
   engine, stats, selectChar, charsetVersion, getCurrentCharset,
@@ -120,7 +121,7 @@ function goToPage(page: number) {
     <!-- 顶部工具栏 -->
     <div class="toolbar">
       <div class="toolbar-left">
-        <span class="title">📊 汉字数据</span>
+        <span class="title"><Icon name="database" :size="18" /> 汉字数据</span>
         <span class="count">共 {{ allChars.length }} 字</span>
         <span v-if="searchQuery" class="filter-info">
           筛选: {{ filteredChars.length }} 字

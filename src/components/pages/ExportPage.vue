@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useEngine } from '../../composables/useEngine'
+import Icon from '../Icon.vue'
 const { engine, toast } = useEngine()
 const format = ref('compact'); const charsetName = ref(''); const preview = ref(''); const showPreview = ref(false)
 const opts = computed(() => {
@@ -25,7 +26,7 @@ function doExport() {
 </script>
 <template>
   <div class="panel">
-    <div class="panel-head">💾 导出结果</div>
+    <div class="panel-head"><Icon name="export" :size="18" /> 导出结果</div>
     <div class="panel-body">
       <div class="input-row">
         <select v-model="format">
@@ -34,7 +35,7 @@ function doExport() {
           <option value="detail">详情表 (汉字/[拆分,拼音,UNICODE区,编码])</option>
         </select>
         <select v-model="charsetName"><option v-for="o in opts" :key="o.value" :value="o.value">{{ o.label }}</option></select>
-        <button class="btn btn-success" @click="doExport">📥 下载</button>
+        <button class="btn btn-success" @click="doExport"><Icon name="download" :size="14" /> 下载</button>
       </div>
       <div style="margin-top:8px"><button class="btn btn-outline btn-sm" @click="doPreview">预览前20行</button></div>
       <pre v-if="showPreview" class="ep">{{ preview }}</pre>

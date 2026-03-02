@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { useEngine } from '../composables/useEngine'
 import { useTheme } from '../composables/useTheme'
+import Icon from './Icon.vue'
 
 const { currentPage, switchPage, navCollapsed, toggleNavCollapsed } = useEngine()
 const { toggleTheme, isDark } = useTheme()
@@ -11,18 +12,18 @@ const isCollapsed = computed(() => navCollapsed.value)
 
 // 主导航项（一级菜单，无二级）
 const navItems = [
-  { page: 'data', icon: '📊', label: '数据' },
-  { page: 'element', icon: '⌨️', label: '元素' },
-  { page: 'split', icon: '🔧', label: '拆分' },
-  { page: 'rule', icon: '🔀', label: '取码' },
-  { page: 'code', icon: '🔢', label: '编码' },
-  { page: 'evaluate', icon: '📈', label: '测评' },
+  { page: 'data', icon: 'database', label: '数据' },
+  { page: 'element', icon: 'element', label: '元素' },
+  { page: 'split', icon: 'split', label: '拆分' },
+  { page: 'rule', icon: 'rule', label: '取码' },
+  { page: 'code', icon: 'code', label: '编码' },
+  { page: 'evaluate', icon: 'chart', label: '测评' },
 ]
 
 // 辅助功能
 const auxItems = [
-  { page: 'coverage', icon: '📈', label: '覆盖率' },
-  { page: 'suggest', icon: '💡', label: '推荐' },
+  { page: 'coverage', icon: 'coverage', label: '覆盖率' },
+  { page: 'suggest', icon: 'lightbulb', label: '推荐' },
 ]
 
 function toggleCollapse() {
@@ -48,7 +49,7 @@ function toggleCollapse() {
         @click="switchPage(item.page)"
         :title="isCollapsed ? item.label : ''"
       >
-        <span class="nav-icon">{{ item.icon }}</span>
+        <span class="nav-icon"><Icon :name="item.icon" :size="18" /></span>
         <span v-if="!isCollapsed" class="nav-label">{{ item.label }}</span>
       </button>
     </div>
@@ -66,7 +67,7 @@ function toggleCollapse() {
         @click="switchPage(item.page)"
         :title="isCollapsed ? item.label : ''"
       >
-        <span class="nav-icon">{{ item.icon }}</span>
+        <span class="nav-icon"><Icon :name="item.icon" :size="18" /></span>
         <span v-if="!isCollapsed" class="nav-label">{{ item.label }}</span>
       </button>
     </div>
@@ -74,8 +75,8 @@ function toggleCollapse() {
     <!-- 底部主题切换 -->
     <div class="nav-footer">
       <button class="theme-btn" @click="toggleTheme" :title="isDark() ? '切换亮色' : '切换暗色'">
-        <span v-if="isDark()">☀️</span>
-        <span v-else>🌙</span>
+        <Icon v-if="isDark()" name="sun" :size="18" />
+        <Icon v-else name="moon" :size="18" />
         <span v-if="!isCollapsed" class="theme-label">{{ isDark() ? '亮色' : '暗色' }}</span>
       </button>
     </div>

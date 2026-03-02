@@ -2,6 +2,7 @@
 import { ref, computed, watch } from 'vue'
 import { useEngine } from '../../composables/useEngine'
 import { unicodeHex } from '../../engine/unicode'
+import Icon from '../Icon.vue'
 
 const { 
   engine, toast, rootsVersion, configVersion, selectChar, charsetVersion, getCurrentCharset,
@@ -470,16 +471,16 @@ function exportCodeTable() {
     <!-- 顶部工具栏 -->
     <div class="toolbar">
       <div class="toolbar-left">
-        <span class="title">🔢 汉字编码</span>
+        <span class="title"><Icon name="code" :size="18" /> 汉字编码</span>
         <span class="count">{{ statsInfo.total }} 字</span>
         <span class="encoded-info">已编码: {{ statsInfo.encoded }} ({{ statsInfo.rate }}%)</span>
       </div>
       <div class="toolbar-right">
         <button class="btn btn-sm btn-primary" @click="exportElementSequence" title="导出元素序列，可用于码灵优化器（Code Genie）优化布局。">
-          📄 导出元素序列
+          <Icon name="file" :size="14" /> 导出元素序列
         </button>
         <button class="btn btn-sm btn-primary" @click="exportCodeTable" title="导出码表，可作为 Rime 等输入法码表使用。">
-          📊 导出码表
+          <Icon name="chart" :size="14" /> 导出码表
         </button>
       </div>
     </div>

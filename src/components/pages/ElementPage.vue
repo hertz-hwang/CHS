@@ -5,6 +5,7 @@ import { useEngine } from '../../composables/useEngine'
 import { parseCode, codeToString, RootCode } from '../../engine/config'
 import { GB_STROKE_EQUIVALENT_ROOTS } from '../../engine/engine'
 import { unicodeHex } from '../../engine/unicode'
+import Icon from '../Icon.vue'
 
 const { 
   engine, toast, refreshStats, rootsVersion, saveCurrentConfig,
@@ -1332,7 +1333,7 @@ async function exportKeyboardPng() {
     <!-- 顶部工具栏 -->
     <div class="toolbar">
       <div class="toolbar-left">
-        <span class="title">⌨️ 字根管理</span>
+        <span class="title"><Icon name="element" :size="18" /> 字根管理</span>
         <span class="count">{{ statsInfo.total }} 字根</span>
         <span class="encoded-info">已编码: {{ statsInfo.encoded }}</span>
       </div>

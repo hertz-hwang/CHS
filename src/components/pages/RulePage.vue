@@ -7,6 +7,7 @@ import '@vue-flow/core/dist/style.css'
 import '@vue-flow/core/dist/theme-default.css'
 import { useEngine } from '../../composables/useEngine'
 import type { CodeRuleNode } from '../../engine/config'
+import Icon from '../Icon.vue'
 
 const { engine, toast, saveCurrentConfig } = useEngine()
 
@@ -571,7 +572,7 @@ onMounted(() => {
     <!-- 顶部工具栏 -->
     <div class="toolbar">
       <div class="toolbar-left">
-        <span class="title">🔀 取码规则</span>
+        <span class="title"><Icon name="rule" :size="18" /> 取码规则</span>
         <span class="count">{{ codeRules.length }} 个节点</span>
       </div>
       <div class="toolbar-right">
@@ -604,8 +605,8 @@ onMounted(() => {
           </div>
         </div>
         <div class="panel-hint">
-          <p>💡 点击或拖动节点到右侧画布</p>
-          <p>🔗 拖动节点连接点创建连线</p>
+          <p><Icon name="info" :size="14" /> 点击或拖动节点到右侧画布</p>
+          <p><Icon name="link" :size="14" /> 拖动节点连接点创建连线</p>
         </div>
       </div>
 

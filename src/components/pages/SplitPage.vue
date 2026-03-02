@@ -2,6 +2,7 @@
 import { ref, computed, watch } from 'vue'
 import { useEngine } from '../../composables/useEngine'
 import { unicodeHex } from '../../engine/unicode'
+import Icon from '../Icon.vue'
 
 const { 
   engine, rootsVersion, toast, charsetVersion, getCurrentCharset,
@@ -222,7 +223,7 @@ function exportSplitTable() {
     <!-- 顶部工具栏 -->
     <div class="toolbar">
       <div class="toolbar-left">
-        <span class="title">🔧 汉字拆分</span>
+        <span class="title"><Icon name="split" :size="18" /> 汉字拆分</span>
         <span class="count">共 {{ allChars.length }} 字</span>
         <span class="complete-info">
           完整: {{ stats.complete }} ({{ stats.rate }}%)
@@ -233,7 +234,7 @@ function exportSplitTable() {
       </div>
       <div class="toolbar-right">
         <button class="btn btn-sm btn-primary" @click="exportSplitTable">
-          📥 导出拆分表
+          <Icon name="download" :size="14" /> 导出拆分表
         </button>
       </div>
     </div>

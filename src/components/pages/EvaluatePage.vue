@@ -2,6 +2,7 @@
 import { ref, watch } from 'vue'
 import { useEngine } from '../../composables/useEngine'
 import KeyboardHeatmap from '../shared/KeyboardHeatmap.vue'
+import Icon from '../Icon.vue'
 import {
   evaluateScheme,
   parseCodeTable,
@@ -402,7 +403,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
     <!-- 顶部工具栏 -->
     <div class="toolbar">
       <div class="toolbar-left">
-        <span class="title">📊 编码测评</span>
+        <span class="title"><Icon name="chart" :size="18" /> 编码测评</span>
       </div>
       <div class="toolbar-right">
         <div class="config-group">

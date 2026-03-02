@@ -3,6 +3,7 @@ import { ref, watch, computed } from 'vue'
 import { useEngine, CHARSET_OPTIONS, CharsetOption } from "../composables/useEngine"
 import { useTheme } from "../composables/useTheme"
 import { exportConfig, parseConfig, saveConfigToStorage, createDefaultConfig } from "../engine/config"
+import Icon from './Icon.vue'
 
 const { engine, refreshStats, toast, stats, configVersion, getConfig, applyConfig, currentCharsetId, setCharset, getCurrentCharsetName } = useEngine()
 const { theme, toggleTheme, isDark } = useTheme()
@@ -243,15 +244,15 @@ function onCharsetChange(event: Event) {
       <div class="config-actions">
         <input ref="fileInput" type="file" accept=".toml" style="display:none" @change="importConfig" />
         <button class="btn btn-sm btn-ghost" @click="newConfig" title="新建配置">
-          <span class="btn-icon">📄</span>
+          <Icon name="new" :size="16" class="btn-icon" />
           <span class="btn-text">新建</span>
         </button>
         <button class="btn btn-sm btn-ghost" @click="triggerFileInput" title="导入配置">
-          <span class="btn-icon">📥</span>
+          <Icon name="import" :size="16" class="btn-icon" />
           <span class="btn-text">导入</span>
         </button>
         <button class="btn btn-sm btn-ghost" @click="exportConfigFile" title="导出配置">
-          <span class="btn-icon">📤</span>
+          <Icon name="export" :size="16" class="btn-icon" />
           <span class="btn-text">导出</span>
         </button>
       </div>
