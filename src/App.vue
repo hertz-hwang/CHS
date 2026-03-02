@@ -11,6 +11,7 @@ import ElementPage from './components/pages/ElementPage.vue'
 import SplitPage from './components/pages/SplitPage.vue'
 import RulePage from './components/pages/RulePage.vue'
 import CodePage from './components/pages/CodePage.vue'
+import EvaluatePage from './components/pages/EvaluatePage.vue'
 
 // 保留的页面
 import CoveragePage from './components/pages/CoveragePage.vue'
@@ -55,6 +56,7 @@ onMounted(async () => {
         <SplitPage v-else-if="currentPage === 'split'" />
         <RulePage v-else-if="currentPage === 'rule'" />
         <CodePage v-else-if="currentPage === 'code'" />
+        <EvaluatePage v-else-if="currentPage === 'evaluate'" />
         
         <!-- 保留页面 -->
         <CoveragePage v-else-if="currentPage === 'coverage'" />

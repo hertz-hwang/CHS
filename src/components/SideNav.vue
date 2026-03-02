@@ -16,6 +16,7 @@ const navItems = [
   { page: 'split', icon: '🔧', label: '拆分' },
   { page: 'rule', icon: '🔀', label: '取码' },
   { page: 'code', icon: '🔢', label: '编码' },
+  { page: 'evaluate', icon: '📈', label: '测评' },
 ]
 
 // 辅助功能

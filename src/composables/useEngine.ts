@@ -36,7 +36,7 @@ if (savedConfig) {
 const stats = reactive({ decomp: 0, roots: 0, strokes: 0, freq: 0 })
 
 // 有效的页面名称列表
-const validPages = ['data', 'element', 'split', 'rule', 'code', 'coverage', 'suggest', 'load']
+const validPages = ['data', 'element', 'split', 'rule', 'code', 'evaluate', 'coverage', 'suggest', 'load']
 
 // 从 URL hash 获取初始页面
 function getInitialPage(): string {
