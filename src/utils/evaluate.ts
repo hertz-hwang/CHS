@@ -108,24 +108,82 @@ const KEYBOARD_LAYOUT: Record<string, { hand: string; finger: string; row: numbe
   ' ': { hand: 'right', finger: 'thumb', row: 2 },
 }
 
-// 小指干扰组合（参考 schema-box 项目）
-// 小指的使用对其它手指产生神经干扰
-const PINKY_DISTURB_SET = new Set([
-  'aq', 'qa', 'az', 'za', 'aw', 'wa',  // 左手小指干扰
-  'pk', 'kp', 'pl', 'lp', 'p;', ';p',  // 右手小指干扰
-  ';a', 'a;', ';z', 'z;',              // 跨手小指干扰
-  'qz', 'zq', 'qp', 'pq',              // 其他小指组合
-])
+// 手指定义
+const PINKY_KEYS = new Set(['q', 'a', 'z', 'p', ';', '/', '0', '-', '=', '1'])  // 小指键
+const RING_KEYS = new Set(['w', 's', 'x', 'o', 'l', '.', '2', '9'])  // 无名指键
+const MIDDLE_KEYS = new Set(['e', 'd', 'c', 'i', 'k', ',', '3', '8'])  // 中指键
 
-// 错手组合（参考 schema-box 项目）
-// 因为中指、无名指下沉带动手掌下沉，导致高位按键难以按下的情况
-const LONG_FINGER_DISTURB_SET = new Set([
-  'xe', 'ex', 'cr', 'rc',  // 左手错手
-  'wr', 'rw',              // 左手错手
-  'cv', 'vc', 'dc', 'cd',  // 左手错手
-  'sx', 'xs', 'ze', 'ez',  // 左手错手
-  'xc', 'cx',              // 左手错手
-])
+// 错手下排键：中指、无名指在第三排的位置，按下后会导致手掌下沉
+// 根据用户资料：只统计与 xc,. 有关的错手情况
+// 左手：c（中指）、x（无名指）；右手：,（中指）、.（无名指）
+const LFD_BOTTOM_KEYS = new Set(['x', 'c', ',', '.'])
+
+// 错手上排键：第一排字母键（需要手掌上移才能按到）
+const LFD_TOP_KEYS = new Set(['q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p'])
+
+/**
+ * 判断是否为小指干扰
+ * 定义：同手中小指与无名指或中指的组合（存在神经干扰）
+ * 不包含：小指与食指组合（食指独立）、跨手组合
+ */
+function isPinkyDisturb(key1: string, key2: string): boolean {
+  const info1 = KEYBOARD_LAYOUT[key1.toLowerCase()]
+  const info2 = KEYBOARD_LAYOUT[key2.toLowerCase()]
+  
+  if (!info1 || !info2) return false
+  
+  // 必须同手
+  if (info1.hand !== info2.hand) return false
+  
+  const k1 = key1.toLowerCase()
+  const k2 = key2.toLowerCase()
+  
+  // 检查是否为小指+无名指 或 小指+中指 的组合
+  const isPinky1 = PINKY_KEYS.has(k1)
+  const isPinky2 = PINKY_KEYS.has(k2)
+  const isRing1 = RING_KEYS.has(k1)
+  const isRing2 = RING_KEYS.has(k2)
+  const isMiddle1 = MIDDLE_KEYS.has(k1)
+  const isMiddle2 = MIDDLE_KEYS.has(k2)
+  
+  // 小指 + 无名指
+  if ((isPinky1 && isRing2) || (isRing1 && isPinky2)) return true
+  // 小指 + 中指
+  if ((isPinky1 && isMiddle2) || (isMiddle1 && isPinky2)) return true
+  
+  return false
+}
+
+/**
+ * 判断是否为错手
+ * 定义：中指、无名指按下排键后，再按上排键（手掌需要移动）
+ * 只统计与 xc,. 有关的错手情况
+ * 方向性：只有从下排到上排才算错手
+ */
+function isLongFingerDisturb(key1: string, key2: string): boolean {
+  const info1 = KEYBOARD_LAYOUT[key1.toLowerCase()]
+  const info2 = KEYBOARD_LAYOUT[key2.toLowerCase()]
+  
+  if (!info1 || !info2) return false
+  
+  // 必须同手
+  if (info1.hand !== info2.hand) return false
+  
+  const k1 = key1.toLowerCase()
+  const k2 = key2.toLowerCase()
+  
+  // 第一个键必须是下排键（c 或 ,）
+  if (!LFD_BOTTOM_KEYS.has(k1)) return false
+  
+  // 第二个键必须是上排键
+  if (!LFD_TOP_KEYS.has(k2)) return false
+  
+  // 确认第一个键是中指或无名指
+  const isRingOrMiddle1 = RING_KEYS.has(k1) || MIDDLE_KEYS.has(k1)
+  if (!isRingOrMiddle1) return false
+  
+  return true
+}
 
 // 手感数据：每个组合的各种手感指标
 interface ComboFeel {
@@ -163,13 +221,12 @@ function getComboFeel(key1: string, key2: string): ComboFeel {
   }
   
   // 小指干扰
-  const combo = key1.toLowerCase() + key2.toLowerCase()
-  if (PINKY_DISTURB_SET.has(combo)) {
+  if (isPinkyDisturb(key1, key2)) {
     result.pd = 1
   }
   
   // 错手
-  if (LONG_FINGER_DISTURB_SET.has(combo)) {
+  if (isLongFingerDisturb(key1, key2)) {
     result.lfd = 1
   }
   
