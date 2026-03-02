@@ -26,29 +26,65 @@ const relativeUsage = computed(() => {
   return result
 })
 
-// 获取最大使用率
+// 获取普通键的最大使用率（排除空格键）
 const maxUsage = computed(() => {
-  return Math.max(...Object.values(relativeUsage.value), 1)
+  const values = Object.entries(relativeUsage.value)
+    .filter(([key]) => key !== ' ')
+    .map(([, value]) => value)
+  return Math.max(...values, 1)
+})
+
+// 获取空格键使用率
+const spaceUsage = computed(() => {
+  return relativeUsage.value[' '] || 0
 })
 
 // 获取键的颜色
 function getKeyColor(key: string): string {
-  const usage = relativeUsage.value[key.toLowerCase()] || 0
-  const intensity = usage / maxUsage.value
+  const normalizedKey = key.toLowerCase()
+  const usage = relativeUsage.value[normalizedKey] || 0
   
-  // 使用蓝色渐变
-  if (intensity === 0) return 'var(--bg3)'
-  if (intensity < 0.2) return 'rgba(59, 130, 246, 0.2)'
-  if (intensity < 0.4) return 'rgba(59, 130, 246, 0.4)'
-  if (intensity < 0.6) return 'rgba(59, 130, 246, 0.6)'
-  if (intensity < 0.8) return 'rgba(59, 130, 246, 0.8)'
-  return 'rgba(59, 130, 246, 1)'
+  // 空格键使用青色/绿色系
+  if (normalizedKey === ' ') {
+    if (usage === 0) return 'var(--bg3)'
+    // 使用四次方增强对比度，让低值变化更明显
+    const intensity = Math.min(Math.pow(usage / 15, 0.4), 1)
+    const hue = 160 + intensity * 20
+    const saturation = 40 + intensity * 60
+    const lightness = 55 - intensity * 20
+    return `hsl(${hue}, ${saturation}%, ${lightness}%)`
+  }
+  
+  // 普通键使用浅蓝色系
+  if (usage === 0) return 'var(--bg3)'
+  
+  // 使用四次方根增强低值对比度，让 1.5% 和 4.9% 差异更明显
+  const ratio = usage / maxUsage.value
+  const intensity = Math.pow(ratio, 0.55) // 0.35次方，大幅拉伸低值区域
+  
+  // 分段颜色：让低值也有明显变化
+  const hue = 195 + intensity * 25 // 195浅蓝 -> 220深蓝
+  const saturation = 45 + intensity * 55 // 45% -> 100%
+  const lightness = 75 - intensity * 40 // 75%(很浅) -> 35%(深)
+  
+  return `hsl(${hue}, ${saturation}%, ${lightness}%)`
 }
 
 // 获取文字颜色
 function getTextColor(key: string): string {
-  const usage = relativeUsage.value[key.toLowerCase()] || 0
-  const intensity = usage / maxUsage.value
+  const normalizedKey = key.toLowerCase()
+  const usage = relativeUsage.value[normalizedKey] || 0
+  
+  // 空格键
+  if (normalizedKey === ' ') {
+    const intensity = Math.min(Math.pow(usage / 15, 0.4), 1)
+    return intensity > 0.35 ? 'white' : 'var(--text)'
+  }
+  
+  // 普通键 - 使用与颜色相同的非线性算法
+  if (usage === 0) return 'var(--text)'
+  const ratio = usage / maxUsage.value
+  const intensity = Math.pow(ratio, 0.35)
   return intensity > 0.5 ? 'white' : 'var(--text)'
 }
 
@@ -95,13 +131,23 @@ function formatPercent(key: string): string {
     </div>
     
     <!-- 图例 -->
-    <div class="legend">
-      <span class="legend-label">使用频率:</span>
-      <span class="legend-min">0%</span>
-      <div class="legend-bar">
-        <div class="legend-gradient"></div>
+    <div class="legend-container">
+      <div class="legend">
+        <span class="legend-label">普通键:</span>
+        <span class="legend-min">0%</span>
+        <div class="legend-bar">
+          <div class="legend-gradient legend-gradient-keys"></div>
+        </div>
+        <span class="legend-max">{{ maxUsage.toFixed(1) }}%</span>
       </div>
-      <span class="legend-max">{{ maxUsage.toFixed(1) }}%</span>
+      <div class="legend legend-space">
+        <span class="legend-label">空格键:</span>
+        <span class="legend-min">0%</span>
+        <div class="legend-bar">
+          <div class="legend-gradient legend-gradient-space"></div>
+        </div>
+        <span class="legend-max">{{ spaceUsage.toFixed(1) }}%</span>
+      </div>
     </div>
   </div>
 </template>
@@ -179,17 +225,23 @@ function formatPercent(key: string): string {
   margin-top: 4px;
 }
 
+.legend-container {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 16px;
+}
+
 .legend {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-top: 16px;
   font-size: 12px;
   color: var(--text2);
 }
 
 .legend-label {
-  margin-right: 4px;
+  min-width: 50px;
 }
 
 .legend-bar {
@@ -201,15 +253,27 @@ function formatPercent(key: string): string {
   border: 1px solid var(--border);
 }
 
-.legend-gradient {
+.legend-gradient-keys {
   height: 100%;
   background: linear-gradient(to right, 
     var(--bg3) 0%,
-    rgba(59, 130, 246, 0.2) 20%,
-    rgba(59, 130, 246, 0.4) 40%,
-    rgba(59, 130, 246, 0.6) 60%,
-    rgba(59, 130, 246, 0.8) 80%,
-    rgba(59, 130, 246, 1) 100%
+    hsl(200, 50%, 70%) 20%,
+    hsl(205, 60%, 60%) 40%,
+    hsl(210, 75%, 55%) 60%,
+    hsl(215, 90%, 48%) 80%,
+    hsl(220, 100%, 40%) 100%
+  );
+}
+
+.legend-gradient-space {
+  height: 100%;
+  background: linear-gradient(to right, 
+    var(--bg3) 0%,
+    hsl(165, 60%, 50%) 20%,
+    hsl(170, 75%, 45%) 40%,
+    hsl(175, 90%, 42%) 60%,
+    hsl(180, 95%, 38%) 80%,
+    hsl(180, 100%, 35%) 100%
   );
 }
 

@@ -197,7 +197,7 @@ function onCharsetChange(event: Event) {
   <header class="header">
     <div class="header-left">
       <div class="title">
-        <h1>字劫 <span class="title-suffix">CHS</span><span class="ver">v0.1.3</span></h1>
+        <h1>字劫 <span class="title-suffix">CHS</span><span class="ver">v0.1.5</span></h1>
       </div>
       <div class="stats">
         <div class="stat-item">

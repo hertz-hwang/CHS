@@ -910,7 +910,6 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
   display: flex;
   flex-direction: column;
   gap: 20px;
-  height: 100%;
   padding: 4px;
 }
 
@@ -981,6 +980,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
   border-radius: 14px;
   border: 1px solid rgba(255, 255, 255, 0.05);
   box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.1);
+  position: relative;
 }
 
 .tab-btn {
@@ -1008,8 +1008,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
 }
 
 .tab-content {
-  flex: 1;
-  overflow-y: auto;
+  /* 内容跟随页面滚动 */
 }
 
 /* 操作栏 */
