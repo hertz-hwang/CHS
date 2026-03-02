@@ -40,9 +40,18 @@ function parseRoots2PuaText(text: string): void {
     const cols = line.split('\t')
     if (cols.length >= 2) {
       const bracedRoot = cols[0]  // 如 {⺀⺀}
-      const puaChar = cols[1]      // PUA 字符
+      const puaCode = cols[1]      // PUA 码位，如 U+E000
       
-      if (bracedRoot && puaChar) {
+      if (bracedRoot && puaCode) {
+        // 将 U+E000 格式转换为实际字符
+        let puaChar = puaCode
+        if (puaCode.startsWith('U+') || puaCode.startsWith('u+')) {
+          const codePoint = parseInt(puaCode.slice(2), 16)
+          if (!isNaN(codePoint)) {
+            puaChar = String.fromCodePoint(codePoint)
+          }
+        }
+        
         roots2puaMap.set(bracedRoot, puaChar)
         pua2rootsMap.set(puaChar, bracedRoot)
       }

@@ -7,6 +7,11 @@
   font-display: swap;
 }
 
+/* PUA 字体样式类 - 全局可用 */
+.pua-font {
+  font-family: 'CHS-PUA', 'Noto Sans SC', 'Microsoft YaHei', 'PingFang SC', sans-serif !important;
+}
+
 :root {
   /* 主色调 - 深蓝色 */
   --primary: #165DFF;

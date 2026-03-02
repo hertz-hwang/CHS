@@ -3,7 +3,20 @@ import { ref, computed, watch } from 'vue'
 import { useEngine } from '../../composables/useEngine'
 import { unicodeHex } from '../../engine/unicode'
 
-const { engine, rootsVersion, toast, charsetVersion, getCurrentCharset } = useEngine()
+const { 
+  engine, rootsVersion, toast, charsetVersion, getCurrentCharset,
+  bracedRootToPua, isBracedRoot 
+} = useEngine()
+
+// 显示字根（花括号字根转为 PUA 字符）
+function displayRoot(root: string): string {
+  return bracedRootToPua(root)
+}
+
+// 获取字根的字体样式类
+function getRootFontClass(root: string): string {
+  return isBracedRoot(root) ? 'pua-font' : ''
+}
 
 // 搜索相关
 const searchQuery = ref('')
@@ -267,13 +280,14 @@ function exportSplitTable() {
                   v-for="(root, i) in getSplitInfo(char).split" 
                   :key="i"
                   class="root-tag"
-                  :class="{ 
-                    'root-missing': !engine.roots.has(root) && !engine.isEquivalentRoot(root),
-                    'root-equiv': engine.isEquivalentRoot(root)
-                  }"
+                  :class="[
+                    !engine.roots.has(root) && !engine.isEquivalentRoot(root) ? 'root-missing' : '',
+                    engine.isEquivalentRoot(root) ? 'root-equiv' : '',
+                    getRootFontClass(root)
+                  ]"
                   :title="engine.isEquivalentRoot(root) ? `等效字根，主字根: ${engine.getMainRoot(root)}` : ''"
                 >
-                  {{ root }}
+                  {{ displayRoot(root) }}
                 </span>
               </td>
               <td class="code-cell">
@@ -307,7 +321,7 @@ function exportSplitTable() {
                         :class="{ 'missing': !item.hasCode, 'equiv': item.isEquiv }"
                         :title="item.isEquiv ? `等效字根，主字根: ${item.mainRoot}` : ''"
                       >
-                        <span class="root">{{ item.root }}</span>
+                        <span class="root" :class="getRootFontClass(item.root)">{{ displayRoot(item.root) }}</span>
                         <span class="arrow">→</span>
                         <span class="code">{{ item.code || '?' }}</span>
                         <span v-if="item.isEquiv" class="equiv-badge">≡</span>

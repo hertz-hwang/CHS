@@ -4,7 +4,20 @@ import { useEngine } from '../../composables/useEngine'
 import IdsTransformer from '../shared/IdsTransformer.vue'
 import { unicodeHex, unicodeBlock } from '../../engine/unicode'
 
-const { engine, stats, selectChar, charsetVersion, getCurrentCharset } = useEngine()
+const { 
+  engine, stats, selectChar, charsetVersion, getCurrentCharset,
+  bracedRootToPua, isBracedRoot 
+} = useEngine()
+
+// 显示字根（花括号字根转为 PUA 字符）
+function displayRoot(root: string): string {
+  return bracedRootToPua(root)
+}
+
+// 获取字根的字体样式类
+function getRootFontClass(root: string): string {
+  return isBracedRoot(root) ? 'pua-font' : ''
+}
 
 // 搜索相关
 const searchQuery = ref('')
@@ -84,7 +97,7 @@ function getCharInfo(char: string) {
     pinyin: pyList.map(p => p.py).join(', '),
     mainPinyin: pyList[0]?.py || '',
     ids: decomp.ids,
-    split: decomp.leaves.join(' '),
+    split: decomp.leaves,  // 返回数组，便于单独处理每个字根
     strokeCount: engine.strokeCount(char),
     strokeCodes: strokes.join(' / '),
     freq: freq || 0,
@@ -167,7 +180,13 @@ function goToPage(page: number) {
             <td>{{ getCharInfo(char).pinyin || '-' }}</td>
             <td>{{ getCharInfo(char).strokeCount || '-' }}</td>
             <td class="mono ids-cell">{{ getCharInfo(char).ids }}</td>
-            <td class="split-cell">{{ getCharInfo(char).split }}</td>
+            <td class="split-cell">
+              <span 
+                v-for="(root, idx) in getCharInfo(char).split" 
+                :key="idx"
+                :class="getRootFontClass(root)"
+              >{{ displayRoot(root) }}</span>
+            </td>
             <td>{{ getCharInfo(char).freq ? getCharInfo(char).freq.toLocaleString() : '-' }}</td>
           </tr>
         </tbody>

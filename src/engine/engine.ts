@@ -278,7 +278,12 @@ export class CharsHijack {
       const t = parseIDS(ids_s)
       if (t) for (const l of t.leaves()) allLeaves.add(l)
     }
-    return new Set([...allLeaves].filter((c) => !this.decomp.has(c)))
+    // 过滤掉可以继续拆分的字符（有 IDS 记录且 IDS 不等于自身）
+    // 注意：IDS 等于自身的字符是不可拆分的原子字根
+    return new Set([...allLeaves].filter((c) => {
+      const ids = this.decomp.get(c)
+      return !ids || ids === c
+    }))
   }
 
   useAtomicRoots(): Set<string> {

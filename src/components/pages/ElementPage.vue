@@ -4,6 +4,7 @@ import ModalDialog from '../ModalDialog.vue'
 import { useEngine } from '../../composables/useEngine'
 import { parseCode, codeToString, RootCode } from '../../engine/config'
 import { GB_STROKE_EQUIVALENT_ROOTS } from '../../engine/engine'
+import { unicodeHex } from '../../engine/unicode'
 
 const { 
   engine, toast, refreshStats, rootsVersion, saveCurrentConfig,
@@ -439,9 +440,9 @@ function startEdit(root: string) {
   editCode.value = code ? codeToString(code) : ''
 }
 
-// 保存编辑
+// 保存编辑（允许空编码，即清除编码）
 function saveEdit() {
-  if (!editingRoot.value || !editCode.value) return
+  if (!editingRoot.value) return
   
   const root = editingRoot.value
   
@@ -450,6 +451,15 @@ function saveEdit() {
   if (!editCheck.canEdit) {
     toast(editCheck.reason)
     cancelEdit()
+    return
+  }
+  
+  // 如果是空编码，直接删除字根编码
+  if (!editCode.value || editCode.value.trim() === '') {
+    engine.rootCodes.delete(root)
+    editingRoot.value = null
+    refreshStats()
+    toast('编码已清除')
     return
   }
   
@@ -504,14 +514,25 @@ function initAtomic() {
   toast(`已初始化 ${engine.roots.size} 个原子字根`)
 }
 
-// 从搜索结果点击（点击添加字根）
+// 从搜索结果点击（点击添加字根或编辑已添加字根）
 function clickSearchResult(root: string, isAdded: boolean) {
   if (isAdded) {
-    // 已添加的字根，跳转到对应键位
-    const code = engine.rootCodes.get(root)
-    if (code && code.main) {
-      selectedKey.value = code.main.toLowerCase()
+    // 已添加的字根，打开编辑弹窗
+    // 检查是否可以编辑（整字归并检查）
+    const editCheck = canEditRoot(root)
+    if (!editCheck.canEdit) {
+      toast(editCheck.reason)
+      searchQuery.value = ''
+      return
     }
+    
+    // 打开添加弹窗作为编辑弹窗
+    const code = engine.rootCodes.get(root)
+    addForm.value = { 
+      root, 
+      code: code ? codeToString(code) : '' 
+    }
+    showAddModal.value = true
   } else {
     // 未添加的字根，打开添加弹窗
     addForm.value = { root, code: '' }
@@ -1341,6 +1362,8 @@ async function exportKeyboardPng() {
           @click="clickSearchResult(item.root, item.isAdded)"
         >
           <span class="result-root">{{ item.root }}</span>
+          <span class="result-unicode">{{ unicodeHex(item.root) }}</span>
+          <span class="result-pinyin">{{ engine.pinyin.get(item.root) || '' }}</span>
           <span class="result-info">
             <span class="char-type-tag" :class="'type-' + item.charType">
               {{ item.charType === 'named' ? '命名' : item.charType === 'atomic' ? '原子' : 'IDS' }}
@@ -1962,6 +1985,19 @@ async function exportKeyboardPng() {
 
 .result-root {
   font-size: 18px;
+}
+
+.result-unicode {
+  font-size: 11px;
+  color: var(--text3);
+  font-family: monospace;
+  margin-left: 4px;
+}
+
+.result-pinyin {
+  font-size: 12px;
+  color: var(--text2);
+  margin-left: 4px;
 }
 
 .result-code {

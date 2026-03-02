@@ -3,7 +3,20 @@ import { ref, computed, watch } from 'vue'
 import { useEngine } from '../../composables/useEngine'
 import { unicodeHex } from '../../engine/unicode'
 
-const { engine, toast, rootsVersion, configVersion, selectChar, charsetVersion, getCurrentCharset } = useEngine()
+const { 
+  engine, toast, rootsVersion, configVersion, selectChar, charsetVersion, getCurrentCharset,
+  bracedRootToPua, isBracedRoot 
+} = useEngine()
+
+// 显示字根（花括号字根转为 PUA 字符）
+function displayRoot(root: string): string {
+  return bracedRootToPua(root)
+}
+
+// 获取字根的字体样式类
+function getRootFontClass(root: string): string {
+  return isBracedRoot(root) ? 'pua-font' : ''
+}
 
 // 导出功能
 function downloadFile(content: string, filename: string) {
@@ -530,8 +543,11 @@ function exportCodeTable() {
                 v-for="(rootInfo, idx) in getCharInfo(char).roots" 
                 :key="idx"
                 class="root-part"
-                :class="rootInfo.hasCode ? 'root-has-code' : 'root-no-code'"
-              >{{ rootInfo.root }}</span>
+                :class="[
+                  rootInfo.hasCode ? 'root-has-code' : 'root-no-code',
+                  getRootFontClass(rootInfo.root)
+                ]"
+              >{{ displayRoot(rootInfo.root) }}</span>
             </td>
             <td class="code-cell">
               <span v-if="getCharInfo(char).code" class="char-code">
