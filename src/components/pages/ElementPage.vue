@@ -988,6 +988,270 @@ function removeCodeEquiv(targetRef: string) {
   refreshStats()
   toast(`已取消「${targetRef}」的码位等值`)
 }
+
+// ============ 导出字根图 PNG ============
+
+// 按真实 QWERTY 键盘斜列布局导出字根图（超高清）
+function exportKeyboardPng() {
+  rootsVersion.value
+  
+  // 获取配置名和作者名
+  const config = engine.getConfig()
+  const configName = config.meta.name || '未命名'
+  const authorName = config.meta.author || '未知作者'
+  
+  // 高清缩放比例（3x 超高清）
+  const scale = 3
+  
+  // 获取每个键位的字根（排除归并字根）
+  const getRootsOnKey = (key: string) => {
+    const roots: { root: string; code: RootCode }[] = []
+    for (const root of engine.roots) {
+      if (engine.isMergedRoot(root)) continue
+      const code = engine.rootCodes.get(root)
+      if (code && code.main && code.main.toLowerCase() === key) {
+        roots.push({ root, code })
+      }
+    }
+    return roots.sort((a, b) => a.root.localeCompare(b.root))
+  }
+  
+  // 三行键位
+  const rows = [
+    ['q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p'],
+    ['a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l', ';'],
+    ['z', 'x', 'c', 'v', 'b', 'n', 'm', ',', '.', '/'],
+  ]
+  
+  // 绘制参数
+  const keyCodeFontSize = 14
+  const lineGap = 6  // 行间距
+  const keyHeaderHeight = 26
+  const keyWidth = 130
+  const keyHeight = 110  // 统一键位高度
+  const keyGap = 8
+  const rowOffset = 35
+  const padding = 40
+  const rootGap = 5  // 字根之间的间距
+  
+  // 根据字根数量计算字号（字根多时缩小，少时放大）
+  const calculateFontSizes = (rootCount: number) => {
+    // 字根字号范围：9-18
+    // 根据字根数量动态调整：1-4个用大字，5-8个用中字，9+个用小字
+    let fontSize: number
+    if (rootCount <= 4) {
+      fontSize = 18
+    } else if (rootCount <= 8) {
+      fontSize = 14
+    } else if (rootCount <= 15) {
+      fontSize = 12
+    } else {
+      fontSize = 9
+    }
+    // 编码字号比字根小2号，但最小为7
+    const codeFontSize = Math.max(7, fontSize - 2)
+    return { fontSize, codeFontSize }
+  }
+  
+  // 计算画布尺寸
+  const canvasWidth = (padding * 2 + rowOffset * 2 + keyWidth * 10 + keyGap * 9) * scale
+  const canvasHeight = (padding * 2 + keyHeight * 3 + keyGap * 2 + 80 + 50) * scale  // 80给空格键，50给标题和底部
+  
+  // 创建 Canvas
+  const canvas = document.createElement('canvas')
+  canvas.width = canvasWidth
+  canvas.height = canvasHeight
+  const ctx = canvas.getContext('2d')!
+  
+  // 应用缩放
+  ctx.scale(scale, scale)
+  
+  // 绘制背景（纯白）
+  ctx.fillStyle = '#ffffff'
+  ctx.fillRect(0, 0, canvasWidth / scale, canvasHeight / scale)
+  
+  // 绘制标题
+  ctx.fillStyle = '#333333'
+  ctx.font = 'bold 20px "Microsoft YaHei", "PingFang SC", sans-serif'
+  ctx.textAlign = 'center'
+  ctx.fillText(`${configName}`, (canvasWidth / scale) / 2, 26)
+  
+  // 绘制单个键位（统一高度）
+  const drawKey = (x: number, y: number, key: string, keyLabel: string) => {
+    const roots = getRootsOnKey(key)
+    
+    // 绘制键位背景（简洁白色）
+    ctx.fillStyle = '#ffffff'
+    ctx.strokeStyle = roots.length > 0 ? '#2e2e2e' : '#d1d5db'
+    ctx.lineWidth = 1.5
+    ctx.beginPath()
+    ctx.roundRect(x, y, keyWidth, keyHeight, 6)
+    ctx.fill()
+    ctx.stroke()
+    
+    // 绘制键位标签（左上角）
+    ctx.fillStyle = '#6b7280'
+    ctx.font = `bold ${keyCodeFontSize}px "SF Mono", "Consolas", monospace`
+    ctx.textAlign = 'left'
+    ctx.fillText(keyLabel.toUpperCase(), x + 8, y + 18)
+    
+    // 绘制字根（全部显示，带间距，字号根据字根数量动态调整）
+    if (roots.length > 0) {
+      const startX = x + 8
+      const startY = y + keyHeaderHeight
+      
+      // 根据字根数量计算字号
+      const { fontSize, codeFontSize } = calculateFontSizes(roots.length)
+      const lineHeight = fontSize + lineGap
+      
+      // 计算布局：先测量每个字根+编码的宽度
+      const items: { root: string; subCode: string; width: number }[] = roots.map(item => {
+        const subCode = (item.code.sub || '') + (item.code.supplement || '')
+        ctx.font = `${fontSize}px "Microsoft YaHei", "PingFang SC", sans-serif`
+        const rootW = ctx.measureText(item.root).width
+        ctx.font = `${codeFontSize}px "SF Mono", "Consolas", monospace`
+        const codeW = subCode ? ctx.measureText(subCode).width + 3 : 0
+        return { root: item.root, subCode, width: rootW + codeW + rootGap }
+      })
+      
+      // 按行排列，每行放得下多少就放多少
+      let currentX = startX
+      let currentRow = 0
+      
+      items.forEach((item, index) => {
+        // 检查是否需要换行
+        if (currentX + item.width > x + keyWidth - 8) {
+          currentX = startX
+          currentRow++
+        }
+        
+        const ty = startY + currentRow * lineHeight
+        
+        // 只绘制在键位范围内的字根
+        if (ty + fontSize > y + keyHeight - 4) return
+        
+        // 绘制字根
+        ctx.fillStyle = '#1f2937'
+        ctx.font = `${fontSize}px "Microsoft YaHei", "PingFang SC", sans-serif`
+        ctx.textAlign = 'left'
+        ctx.fillText(item.root, currentX, ty + fontSize - 2)
+        
+        // 测量字根宽度
+        const rootWidth = ctx.measureText(item.root).width
+        
+        // 绘制编码在字根右侧（保持一定间距）
+        if (item.subCode) {
+          ctx.fillStyle = '#059669'
+          ctx.font = `${codeFontSize}px "SF Mono", "Consolas", monospace`
+          ctx.fillText(item.subCode, currentX + rootWidth + 3, ty + fontSize - 2)
+        }
+        
+        // 移动到下一个位置
+        ctx.font = `${fontSize}px "Microsoft YaHei", "PingFang SC", sans-serif`
+        const codeWidth = item.subCode ? ctx.measureText(item.subCode).width + 3 : 0
+        currentX += rootWidth + codeWidth + rootGap
+      })
+    }
+  }
+  
+  // 绘制三行键位（斜列布局，统一高度）
+  let currentY = padding
+  rows.forEach((row, rowIndex) => {
+    const xOffset = padding + rowIndex * rowOffset
+    
+    row.forEach((key, colIndex) => {
+      const x = xOffset + colIndex * (keyWidth + keyGap)
+      drawKey(x, currentY, key, key)
+    })
+    
+    currentY += keyHeight + keyGap
+  })
+  
+  // 绘制空格键
+  const spaceWidth = keyWidth * 5 + keyGap * 4
+  const spaceX = ((canvasWidth / scale) - spaceWidth) / 2
+  const spaceRoots = getRootsOnKey('_')
+  const spaceHeight = 70
+  
+  // 空格键背景
+  ctx.fillStyle = '#ffffff'
+  ctx.strokeStyle = spaceRoots.length > 0 ? '#2563eb' : '#d1d5db'
+  ctx.lineWidth = 1.5
+  ctx.beginPath()
+  ctx.roundRect(spaceX, currentY, spaceWidth, spaceHeight, 6)
+  ctx.fill()
+  ctx.stroke()
+  
+  // 空格键标签
+  ctx.fillStyle = '#6b7280'
+  ctx.font = `bold ${keyCodeFontSize}px "SF Mono", "Consolas", monospace`
+  ctx.textAlign = 'left'
+  ctx.fillText('空格', spaceX + 10, currentY + 18)
+  
+  // 空格键字根（全部显示，带间距，字号根据字根数量动态调整）
+  if (spaceRoots.length > 0) {
+    const startX = spaceX + 10
+    const startY = currentY + keyHeaderHeight
+    
+    // 根据字根数量计算字号
+    const { fontSize, codeFontSize } = calculateFontSizes(spaceRoots.length)
+    const lineHeight = fontSize + lineGap
+    
+    // 计算布局
+    let currentX = startX
+    let currentRow = 0
+    
+    spaceRoots.forEach((item) => {
+      const subCode = (item.code.sub || '') + (item.code.supplement || '')
+      
+      ctx.font = `${fontSize}px "Microsoft YaHei", "PingFang SC", sans-serif`
+      const rootW = ctx.measureText(item.root).width
+      ctx.font = `${codeFontSize}px "SF Mono", "Consolas", monospace`
+      const codeW = subCode ? ctx.measureText(subCode).width + 3 : 0
+      const totalW = rootW + codeW + rootGap
+      
+      // 检查是否需要换行
+      if (currentX + totalW > spaceX + spaceWidth - 10) {
+        currentX = startX
+        currentRow++
+      }
+      
+      const ty = startY + currentRow * lineHeight
+      if (ty + fontSize > currentY + spaceHeight - 4) return
+      
+      // 绘制字根
+      ctx.fillStyle = '#1f2937'
+      ctx.font = `${fontSize}px "Microsoft YaHei", "PingFang SC", sans-serif`
+      ctx.textAlign = 'left'
+      ctx.fillText(item.root, currentX, ty + fontSize - 2)
+      
+      // 绘制编码
+      if (subCode) {
+        const rW = ctx.measureText(item.root).width
+        ctx.fillStyle = '#059669'
+        ctx.font = `${codeFontSize}px "SF Mono", "Consolas", monospace`
+        ctx.fillText(subCode, currentX + rW + 3, ty + fontSize - 2)
+      }
+      
+      currentX += totalW
+    })
+  }
+  
+  // 绘制底部信息
+  ctx.fillStyle = '#9ca3af'
+  ctx.font = '12px "Microsoft YaHei", "PingFang SC", sans-serif'
+  ctx.textAlign = 'center'
+  ctx.fillText(`${authorName}`, (canvasWidth / scale) / 2, (canvasHeight / scale) - 10)
+  
+  // 导出 PNG
+  const fileName = `${configName}_${authorName}_字根图.png`
+  const link = document.createElement('a')
+  link.download = fileName
+  link.href = canvas.toDataURL('image/png')
+  link.click()
+  
+  toast(`已导出: ${fileName}`)
+}
 </script>
 
 <template>
@@ -1000,6 +1264,7 @@ function removeCodeEquiv(targetRef: string) {
         <span class="encoded-info">已编码: {{ statsInfo.encoded }}</span>
       </div>
       <div class="toolbar-right">
+        <button class="btn btn-sm btn-outline" @click="exportKeyboardPng">导出字根图PNG</button>
         <button class="btn btn-sm btn-info" @click="openEquivModal">等效字根设置</button>
         <button class="btn btn-sm btn-success" @click="initAtomic">初始化原子字根</button>
         <button class="btn btn-sm btn-purple" @click="openAddModal">+ 添加字根</button>
