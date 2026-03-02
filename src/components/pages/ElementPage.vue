@@ -5,7 +5,20 @@ import { useEngine } from '../../composables/useEngine'
 import { parseCode, codeToString, RootCode } from '../../engine/config'
 import { GB_STROKE_EQUIVALENT_ROOTS } from '../../engine/engine'
 
-const { engine, toast, refreshStats, rootsVersion, saveCurrentConfig } = useEngine()
+const { 
+  engine, toast, refreshStats, rootsVersion, saveCurrentConfig,
+  bracedRootToPua, isBracedRoot, getPuaFontName 
+} = useEngine()
+
+// 显示字根（花括号字根转为 PUA 字符）
+function displayRoot(root: string): string {
+  return bracedRootToPua(root)
+}
+
+// 获取字根的字体样式类
+function getRootFontClass(root: string): string {
+  return isBracedRoot(root) ? 'pua-font' : ''
+}
 
 // 归并字根相关状态
 const showMergeModal = ref(false)
@@ -528,11 +541,6 @@ const equivalentRootsList = computed(() => {
   return list
 })
 
-// 判断是否是花括号字根
-function isBracedRoot(char: string): boolean {
-  return char.startsWith('{') && char.endsWith('}')
-}
-
 // 所有部件列表（按笔画数升序，支持检索）
 const allComponentsList = computed(() => {
   rootsVersion.value
@@ -991,9 +999,31 @@ function removeCodeEquiv(targetRef: string) {
 
 // ============ 导出字根图 PNG ============
 
+// PUA 字体是否已加载
+let puaFontLoaded = false
+
+// 加载 PUA 字体（用于 Canvas 导出）
+async function loadPuaFont(): Promise<boolean> {
+  if (puaFontLoaded) return true
+  
+  try {
+    const font = new FontFace('CHS-PUA', 'url(/data/CHS_PUA-Regular.woff2)')
+    await font.load()
+    document.fonts.add(font)
+    puaFontLoaded = true
+    return true
+  } catch (error) {
+    console.warn('Failed to load PUA font for export:', error)
+    return false
+  }
+}
+
 // 按真实 QWERTY 键盘斜列布局导出字根图（超高清）
-function exportKeyboardPng() {
+async function exportKeyboardPng() {
   rootsVersion.value
+  
+  // 先加载 PUA 字体
+  await loadPuaFont()
   
   // 获取配置名和作者名
   const config = engine.getConfig()
@@ -1028,7 +1058,7 @@ function exportKeyboardPng() {
   const lineGap = 6  // 行间距
   const keyHeaderHeight = 26
   const keyWidth = 130
-  const keyHeight = 110  // 统一键位高度
+  const keyHeight = 130  // 统一键位高度
   const keyGap = 8
   const rowOffset = 35
   const padding = 40
@@ -1130,20 +1160,29 @@ function exportKeyboardPng() {
         // 只绘制在键位范围内的字根
         if (ty + fontSize > y + keyHeight - 4) return
         
+        // 获取显示用的字根文本（花括号字根转 PUA）
+        const displayRootText = bracedRootToPua(item.root)
+        const isPuaChar = isBracedRoot(item.root)
+        
         // 绘制字根
         ctx.fillStyle = '#1f2937'
-        ctx.font = `${fontSize}px "Microsoft YaHei", "PingFang SC", sans-serif`
+        // 如果是花括号字根，使用 PUA 字体
+        if (isPuaChar) {
+          ctx.font = `${fontSize}px "CHS-PUA", "Microsoft YaHei", "PingFang SC", sans-serif`
+        } else {
+          ctx.font = `${fontSize}px "Microsoft YaHei", "PingFang SC", sans-serif`
+        }
         ctx.textAlign = 'left'
-        ctx.fillText(item.root, currentX, ty + fontSize - 2)
+        ctx.fillText(displayRootText, currentX, ty + fontSize - 2)
         
         // 测量字根宽度
-        const rootWidth = ctx.measureText(item.root).width
+        const rootWidth = ctx.measureText(displayRootText).width
         
         // 绘制编码在字根右侧（保持一定间距）
         if (item.subCode) {
           ctx.fillStyle = '#059669'
           ctx.font = `${codeFontSize}px "SF Mono", "Consolas", monospace`
-          ctx.fillText(item.subCode, currentX + rootWidth + 3, ty + fontSize - 2)
+          ctx.fillText(item.subCode, currentX + rootWidth + 5, ty + fontSize - 2)
         }
         
         // 移动到下一个位置
@@ -1204,8 +1243,17 @@ function exportKeyboardPng() {
     spaceRoots.forEach((item) => {
       const subCode = (item.code.sub || '') + (item.code.supplement || '')
       
-      ctx.font = `${fontSize}px "Microsoft YaHei", "PingFang SC", sans-serif`
-      const rootW = ctx.measureText(item.root).width
+      // 获取显示用的字根文本（花括号字根转 PUA）
+      const displayRootText = bracedRootToPua(item.root)
+      const isPuaChar = isBracedRoot(item.root)
+      
+      // 测量宽度
+      if (isPuaChar) {
+        ctx.font = `${fontSize}px "CHS-PUA", "Microsoft YaHei", "PingFang SC", sans-serif`
+      } else {
+        ctx.font = `${fontSize}px "Microsoft YaHei", "PingFang SC", sans-serif`
+      }
+      const rootW = ctx.measureText(displayRootText).width
       ctx.font = `${codeFontSize}px "SF Mono", "Consolas", monospace`
       const codeW = subCode ? ctx.measureText(subCode).width + 3 : 0
       const totalW = rootW + codeW + rootGap
@@ -1221,13 +1269,17 @@ function exportKeyboardPng() {
       
       // 绘制字根
       ctx.fillStyle = '#1f2937'
-      ctx.font = `${fontSize}px "Microsoft YaHei", "PingFang SC", sans-serif`
+      if (isPuaChar) {
+        ctx.font = `${fontSize}px "CHS-PUA", "Microsoft YaHei", "PingFang SC", sans-serif`
+      } else {
+        ctx.font = `${fontSize}px "Microsoft YaHei", "PingFang SC", sans-serif`
+      }
       ctx.textAlign = 'left'
-      ctx.fillText(item.root, currentX, ty + fontSize - 2)
+      ctx.fillText(displayRootText, currentX, ty + fontSize - 2)
       
       // 绘制编码
       if (subCode) {
-        const rW = ctx.measureText(item.root).width
+        const rW = ctx.measureText(displayRootText).width
         ctx.fillStyle = '#059669'
         ctx.font = `${codeFontSize}px "SF Mono", "Consolas", monospace`
         ctx.fillText(subCode, currentX + rW + 3, ty + fontSize - 2)
@@ -1338,7 +1390,7 @@ function exportKeyboardPng() {
                   :key="item.root"
                   class="root-chip"
                 >
-                  <span class="root-text">{{ item.root }}</span>
+                  <span class="root-text" :class="getRootFontClass(item.root)">{{ displayRoot(item.root) }}</span>
                   <span v-if="item.subCode" class="root-sub" :title="`后续编码: ${item.subCode}`">
                     {{ item.subCode }}
                   </span>
@@ -1426,7 +1478,7 @@ function exportKeyboardPng() {
                 @click.stop
                 class="checkbox"
               />
-              <span class="root-char" @click="clickRootToEdit(item.root)">{{ item.root }}</span>
+              <span class="root-char" :class="getRootFontClass(item.root)" @click="clickRootToEdit(item.root)">{{ displayRoot(item.root) }}</span>
               <span v-if="item.isEquiv" class="root-tag tag-equiv" :title="`等效于 ${item.mainRoot}`">等效</span>
               <span v-if="item.isMerged" class="root-tag tag-merged" :title="`归并于 ${item.mergedFrom}`">归并</span>
               <template v-if="editingRoot === item.root">
@@ -3094,5 +3146,10 @@ function exportKeyboardPng() {
   background: var(--bg);
   padding: 2px 6px;
   border-radius: 4px;
+}
+
+/* PUA 字体样式 - 用于显示花括号字根 */
+.pua-font {
+  font-family: 'CHS-PUA', 'Noto Sans SC', 'Microsoft YaHei', 'PingFang SC', sans-serif !important;
 }
 </style>

@@ -1,6 +1,7 @@
 import { reactive, ref, readonly, computed } from 'vue'
 import { CharsHijack } from '@/engine/engine'
 import { UserConfig, parseConfig, exportConfig, saveConfigToStorage, loadConfigFromStorage } from '@/engine/config'
+import { loadRoots2PuaMap, bracedRootToPua, convertBracedRootsToPua, isBracedRoot, needsPuaFont, getPuaFontName } from '@/utils/pua'
 
 // 字集选项定义
 export interface CharsetOption {
@@ -145,6 +146,9 @@ async function loadDefaultData(): Promise<{ loaded: string[]; failed: string[] }
     }
   }
 
+  // 加载 PUA 字根映射
+  await loadRoots2PuaMap()
+
   refreshStats()
   return { loaded, failed }
 }
@@ -245,5 +249,11 @@ export function useEngine() {
     setCharset,
     getCurrentCharsetName,
     getCurrentCharset,
+    // PUA 字根转换
+    bracedRootToPua,
+    convertBracedRootsToPua,
+    isBracedRoot,
+    needsPuaFont,
+    getPuaFontName,
   }
 }
