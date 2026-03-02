@@ -97,10 +97,10 @@ function formatPercent(key: string): string {
     <!-- 图例 -->
     <div class="legend">
       <span class="legend-label">使用频率:</span>
+      <span class="legend-min">0%</span>
       <div class="legend-bar">
         <div class="legend-gradient"></div>
       </div>
-      <span class="legend-min">0%</span>
       <span class="legend-max">{{ maxUsage.toFixed(1) }}%</span>
     </div>
   </div>

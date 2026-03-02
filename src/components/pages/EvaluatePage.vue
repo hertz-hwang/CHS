@@ -30,8 +30,41 @@ const uploadedCodeMap = ref<Map<string, string> | null>(null)
 const uploadedFileName = ref('')
 const uploadedResult = ref<EvaluationResult | null>(null)
 
+// 方案名称
+const currentSchemeName = ref('当前方案')
+const uploadedSchemeName = ref('')
+
+// 编辑方案名称
+const editingSchemeName = ref(false)
+const editingUploadedSchemeName = ref(false)
+
+// 从文件名提取方案名称
+function extractSchemeName(fileName: string): string {
+  // 去掉扩展名
+  const lastDot = fileName.lastIndexOf('.')
+  return lastDot > 0 ? fileName.substring(0, lastDot) : fileName
+}
+
+// 开始编辑方案名称
+function startEditSchemeName(type: 'current' | 'upload') {
+  if (type === 'current') {
+    editingSchemeName.value = true
+  } else {
+    editingUploadedSchemeName.value = true
+  }
+}
+
+// 完成编辑方案名称
+function finishEditSchemeName(type: 'current' | 'upload') {
+  if (type === 'current') {
+    editingSchemeName.value = false
+  } else {
+    editingUploadedSchemeName.value = false
+  }
+}
+
 // 测评配置
-const selectKeys = ref('1234')
+const selectKeys = ref(";'456789")
 const maxCodeLength = ref(4)
 
 // 默认字频数据（kc6000.txt）
@@ -223,6 +256,7 @@ function handleFileUpload(event: Event) {
   if (!file) return
   
   uploadedFileName.value = file.name
+  uploadedSchemeName.value = extractSchemeName(file.name)
   
   const reader = new FileReader()
   reader.onload = (e) => {
@@ -441,6 +475,28 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
         <div class="table-container">
           <table class="eval-table">
             <thead>
+              <tr class="scheme-title-row">
+                <th colspan="20" class="scheme-title-cell">
+                  <div class="scheme-title-content">
+                    <template v-if="editingSchemeName">
+                      <input 
+                        v-model="currentSchemeName" 
+                        class="scheme-name-input" 
+                        @blur="finishEditSchemeName('current')"
+                        @keyup.enter="finishEditSchemeName('current')"
+                        ref="currentNameInput"
+                        autofocus
+                      />
+                      <span class="scheme-subtitle">单字测评数据</span>
+                    </template>
+                    <template v-else>
+                      <span class="scheme-name-text" @click="startEditSchemeName('current')">{{ currentSchemeName }}</span>
+                      <Icon name="edit" :size="14" class="edit-icon" @click="startEditSchemeName('current')" />
+                      <span class="scheme-subtitle">单字测评数据</span>
+                    </template>
+                  </div>
+                </th>
+              </tr>
               <tr>
                 <th class="sticky-col">统计范围</th>
                 <th>1码</th>
@@ -637,6 +693,27 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
         <div class="table-container">
           <table class="eval-table">
             <thead>
+              <tr class="scheme-title-row">
+                <th colspan="20" class="scheme-title-cell">
+                  <div class="scheme-title-content">
+                    <template v-if="editingUploadedSchemeName">
+                      <input 
+                        v-model="uploadedSchemeName" 
+                        class="scheme-name-input" 
+                        @blur="finishEditSchemeName('upload')"
+                        @keyup.enter="finishEditSchemeName('upload')"
+                        autofocus
+                      />
+                      <span class="scheme-subtitle">单字测评数据</span>
+                    </template>
+                    <template v-else>
+                      <span class="scheme-name-text" @click="startEditSchemeName('upload')">{{ uploadedSchemeName }}</span>
+                      <Icon name="edit" :size="14" class="edit-icon" @click="startEditSchemeName('upload')" />
+                      <span class="scheme-subtitle">单字测评数据</span>
+                    </template>
+                  </div>
+                </th>
+              </tr>
               <tr>
                 <th class="sticky-col">统计范围</th>
                 <th>1码</th>
@@ -1090,22 +1167,81 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
   box-shadow: 0 4px 24px rgba(0, 0, 0, 0.06);
 }
 
+/* 方案名称表头 - 表格内部标题行 */
+.scheme-title-row {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.08) 0%, rgba(139, 92, 246, 0.05) 100%);
+}
+
+.scheme-title-cell {
+  padding: 16px !important;
+  text-align: center !important;
+  border-radius: 16px 16px 0 0;
+}
+
+.scheme-title-content {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 8px;
+}
+
+.scheme-name-text {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text);
+  cursor: pointer;
+  transition: color 0.2s ease;
+}
+
+.scheme-name-text:hover {
+  color: var(--primary);
+}
+
+.scheme-name-input {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text);
+  background: var(--bg);
+  border: 2px solid var(--primary);
+  border-radius: 8px;
+  padding: 4px 12px;
+  outline: none;
+  min-width: 200px;
+}
+
+.scheme-subtitle {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text2);
+}
+
+.edit-icon {
+  color: var(--text3);
+  cursor: pointer;
+  transition: color 0.2s ease;
+}
+
+.edit-icon:hover {
+  color: var(--primary);
+}
+
 /* 上传区域 */
 .upload-section {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 12px;
 }
 
 .upload-area {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   align-items: center;
   justify-content: center;
-  padding: 48px 32px;
+  gap: 12px;
+  padding: 20px 24px;
   background: linear-gradient(135deg, var(--bg2) 0%, var(--bg1) 100%);
   border: 2px dashed rgba(99, 102, 241, 0.3);
-  border-radius: 16px;
+  border-radius: 12px;
   cursor: pointer;
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
@@ -1113,13 +1249,10 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
 .upload-area:hover {
   border-color: var(--primary);
   background: linear-gradient(135deg, rgba(99, 102, 241, 0.05) 0%, rgba(139, 92, 246, 0.05) 100%);
-  transform: translateY(-2px);
-  box-shadow: 0 8px 24px rgba(99, 102, 241, 0.15);
 }
 
 .upload-icon {
-  font-size: 48px;
-  margin-bottom: 12px;
+  font-size: 28px;
   opacity: 0.7;
 }
 

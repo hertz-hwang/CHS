@@ -301,7 +301,7 @@ function parseYamlCodeTable(content: string, codeMap: Map<string, string>): void
 export function evaluateScheme(
   codeMap: Map<string, string>,
   freqMap: Map<string, number>,
-  selectKeys: string = '1234',
+  selectKeys: string = ";'456789",
   maxCodeLength: number = 4,
   missingSet?: Set<string>
 ): EvaluationResult {
@@ -378,10 +378,15 @@ export function evaluateScheme(
       
       // 计算选重键
       let selectKey = ''
-      if (maxCodeLength > codeLen || collision > 1) {
-        const selectIdx = Math.min(collision - 1, selectKeys.length - 1)
+      if (collision > 1) {
+        // 有重码，使用配置的选重键（从第2选项开始）
+        const selectIdx = Math.min(collision - 2, selectKeys.length - 1)
         selectKey = selectKeys[selectIdx]
+      } else if (codeLen < maxCodeLength) {
+        // 码长不足，使用空格确认首选项
+        selectKey = ' '
       }
+      // else: 四码自动上屏，不需要确认键
       
       const fullCode = code + selectKey
       const keysLen = fullCode.length
