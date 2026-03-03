@@ -69,6 +69,13 @@ defineProps<{
       <line x1="12" y1="12" x2="12" y2="2" />
     </template>
 
+    <!-- 练习: 博士帽图标 -->
+    <template v-else-if="name === 'practice'">
+      <path d="M22 10v6M6 10v6" />
+      <path d="M12 14l10-4-10-4-10 4 10 4z" />
+      <path d="M6 16v2c0 1 2.5 2 6 2s6-1 6-2v-2" />
+    </template>
+
     <!-- 推荐: 灯泡图标 -->
     <template v-else-if="name === 'suggest'">
       <path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5" />
@@ -140,6 +147,14 @@ defineProps<{
     <template v-else-if="name === 'restore'">
       <polyline points="1 4 1 10 7 10" />
       <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
+    </template>
+
+    <!-- 刷新: 刷新图标 -->
+    <template v-else-if="name === 'refresh'">
+      <path d="M21 2v6h-6" />
+      <path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
+      <path d="M3 22v-6h6" />
+      <path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
     </template>
 
     <!-- 提示: 信息图标 -->

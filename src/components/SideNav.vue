@@ -18,12 +18,13 @@ const navItems = [
   { page: 'rule', icon: 'rule', label: '取码' },
   { page: 'code', icon: 'code', label: '编码' },
   { page: 'evaluate', icon: 'chart', label: '测评' },
+  { page: 'practice', icon: 'practice', label: '练习' },
 ]
 
 // 辅助功能
 const auxItems = [
   { page: 'coverage', icon: 'coverage', label: '覆盖率' },
-  { page: 'suggest', icon: 'lightbulb', label: '推荐' },
+  { page: 'suggest', icon: 'suggest', label: '推荐' },
 ]
 
 function toggleCollapse() {
