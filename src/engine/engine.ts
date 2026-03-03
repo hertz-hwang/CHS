@@ -444,6 +444,61 @@ export class CharsHijack {
     this.codeRules = rules
   }
 
+  // 重新排序字根：将 draggedRoot 移动到 targetRoot 前面（同一键位内）
+  reorderRootOnKey(draggedRoot: string, targetRoot: string): boolean {
+    const draggedCode = this.rootCodes.get(draggedRoot)
+    const targetCode = this.rootCodes.get(targetRoot)
+    
+    if (!draggedCode || !targetCode || !draggedCode.main || !targetCode.main) {
+      return false
+    }
+    
+    // 确保两个字根在同一个键位上
+    if (draggedCode.main.toLowerCase() !== targetCode.main.toLowerCase()) {
+      return false
+    }
+    
+    // 创建新的 Map 来保持顺序
+    const newRootCodes = new Map<string, RootCode>()
+    const targetKey = targetCode.main.toLowerCase()
+    
+    // 首先添加所有不在当前键位的字根
+    for (const [root, code] of this.rootCodes) {
+      if (code.main?.toLowerCase() !== targetKey || this.isMergedRoot(root)) {
+        newRootCodes.set(root, code)
+      }
+    }
+    
+    // 然后按新顺序添加当前键位的字根
+    let inserted = false
+    for (const [root, code] of this.rootCodes) {
+      if (this.isMergedRoot(root)) continue
+      if (code.main?.toLowerCase() !== targetKey) continue
+      
+      if (root === targetRoot) {
+        // 在目标字根前插入拖拽的字根
+        newRootCodes.set(draggedRoot, draggedCode)
+        inserted = true
+      }
+      
+      // 跳过拖拽的字根（它已经被插入到新位置）
+      if (root === draggedRoot) continue
+      
+      newRootCodes.set(root, code)
+    }
+    
+    // 如果目标字根是最后一个，需要单独处理
+    if (!inserted) {
+      newRootCodes.set(draggedRoot, draggedCode)
+    }
+    
+    this.rootCodes = newRootCodes
+    this._cache.clear()
+    this._saveRoots()
+    
+    return true
+  }
+
   // 获取取码规则
   getCodeRules(): CodeRuleNode[] {
     return this.codeRules

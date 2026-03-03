@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import { useEngine } from '../composables/useEngine'
 import { unicodeBlock, unicodeHex } from '../engine/unicode'
+import { isBracedRoot, bracedRootToPua } from '../utils/pua'
 import type { PinyinInfo } from '../engine/engine'
 
 const { engine, selectedChar, refreshStats, toast, switchPage, setSearchChar, saveCurrentConfig } = useEngine()
@@ -156,6 +157,17 @@ const dialogTitle = computed(() => {
   return '设为字根'
 })
 
+// 判断当前字符是否是花括号字根
+const isCharBracedRoot = computed(() => {
+  return detail.value ? isBracedRoot(detail.value.char) : false
+})
+
+// 获取用于显示的字符（花括号字根转换为 PUA 字符）
+const displayChar = computed(() => {
+  if (!detail.value) return ''
+  return bracedRootToPua(detail.value.char)
+})
+
 // 跳转到指定页面并带上当前字
 function goToPage(page: string) {
   if (!detail.value) return
@@ -168,7 +180,7 @@ function goToPage(page: string) {
     <h3>字详情</h3>
     <div v-if="!detail" class="empty">点击任意汉字查看详情</div>
     <template v-else>
-      <div class="char-display">{{ detail.char }}</div>
+      <div class="char-display" :class="{ 'pua-font': isCharBracedRoot }">{{ displayChar }}</div>
       
       <div class="info-row">
         <div class="label">拆分结果</div>
@@ -183,7 +195,7 @@ function goToPage(page: string) {
               @click="openLeafDialog(leaf)"
               :title="isLeafRoot(leaf) ? '已是字根，点击修改编码' : isLeafEquivRoot(leaf) ? `等效字根，主字根: ${getLeafMainRoot(leaf)}` : '点击添加为字根'"
             >
-              <span class="leaf-char">{{ leaf }}</span>
+              <span class="leaf-char" :class="{ 'pua-font': isBracedRoot(leaf) }">{{ bracedRootToPua(leaf) }}</span>
               <span v-if="isLeafRoot(leaf)" class="leaf-badge">✓</span>
               <span v-else-if="isLeafEquivRoot(leaf)" class="leaf-badge equiv">≡</span>
             </button>

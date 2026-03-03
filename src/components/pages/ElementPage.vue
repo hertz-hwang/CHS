@@ -678,6 +678,7 @@ function clickRootToEdit(root: string) {
 }
 
 // 获取某键位上的所有字根及其编码（排除归并字根）
+// 字根顺序按照 rootCodes Map 中的顺序排列（用户可通过拖拽调整）
 const rootsOnKey = computed(() => {
   rootsVersion.value
   const result = new Map<string, { root: string; code: RootCode; subCode: string }[]>()
@@ -690,11 +691,11 @@ const rootsOnKey = computed(() => {
   }
 
   // 遍历所有字根（排除归并字根）
-  for (const root of engine.roots) {
+  // 按照 rootCodes Map 的顺序添加，保持用户定义的排序
+  for (const [root, code] of engine.rootCodes) {
     // 跳过归并字根（归并字根只显示在右侧面板的归并区域）
     if (engine.isMergedRoot(root)) continue
     
-    const code = engine.rootCodes.get(root)
     if (code && code.main) {
       const mainKey = code.main.toLowerCase()
       if (result.has(mainKey)) {
@@ -705,11 +706,7 @@ const rootsOnKey = computed(() => {
     }
   }
 
-  // 排序
-  for (const [key, roots] of result) {
-    roots.sort((a, b) => a.root.localeCompare(b.root))
-  }
-
+  // 不再按字母排序，保持 rootCodes Map 中的顺序
   return result
 })
 
@@ -718,6 +715,70 @@ const selectedRoots = computed(() => {
   if (!selectedKey.value) return []
   return rootsOnKey.value.get(selectedKey.value) || []
 })
+
+// ============ 字根拖拽排序相关 ============
+
+// 拖拽排序状态
+const draggedRootItem = ref<string | null>(null)
+const dragOverRootItem = ref<string | null>(null)
+
+// 开始拖拽字根项
+function onRootDragStart(root: string) {
+  draggedRootItem.value = root
+}
+
+// 拖拽结束
+function onRootDragEnd() {
+  draggedRootItem.value = null
+  dragOverRootItem.value = null
+}
+
+// 拖拽经过其他字根项
+function onRootDragOver(root: string, event: DragEvent) {
+  event.preventDefault()
+  if (draggedRootItem.value && draggedRootItem.value !== root) {
+    dragOverRootItem.value = root
+  }
+}
+
+// 拖拽离开字根项
+function onRootDragLeave() {
+  dragOverRootItem.value = null
+}
+
+// 放置字根项（重新排序）
+function onRootDrop(targetRoot: string) {
+  if (!draggedRootItem.value || draggedRootItem.value === targetRoot) {
+    draggedRootItem.value = null
+    dragOverRootItem.value = null
+    return
+  }
+  
+  const draggedRoot = draggedRootItem.value
+  
+  // 获取当前键位
+  const key = selectedKey.value
+  if (!key) return
+  
+  // 获取拖拽字根和目标字根的编码
+  const draggedCode = engine.rootCodes.get(draggedRoot)
+  const targetCode = engine.rootCodes.get(targetRoot)
+  
+  if (!draggedCode || !targetCode) return
+  
+  // 执行重新排序
+  engine.reorderRootOnKey(draggedRoot, targetRoot)
+  
+  // 保存配置
+  saveCurrentConfig()
+  refreshStats()
+  
+  // 清除拖拽状态
+  draggedRootItem.value = null
+  dragOverRootItem.value = null
+  
+  toast(`已将「${draggedRoot}」移动到「${targetRoot}」前面`)
+}
 
 // 判断输入是否为笔画编码（仅包含1-5的数字）
 function isStrokeCodeQuery(query: string): boolean {
@@ -1533,20 +1594,22 @@ async function exportKeyboardPng() {
   const configName = config.meta.name || '未命名'
   const authorName = config.meta.author || '未知作者'
   
-  // 高清缩放比例（3x 超高清）
-  const scale = 3
+  // 高清缩放比例（8x 超高清）
+  const scale = 8
   
   // 获取每个键位的字根（排除归并字根）
+  // 保持 rootCodes Map 中的顺序（用户可通过拖拽调整）
   const getRootsOnKey = (key: string) => {
     const roots: { root: string; code: RootCode }[] = []
-    for (const root of engine.roots) {
+    // 按照 rootCodes Map 的顺序遍历，保持用户定义的排序
+    for (const [root, code] of engine.rootCodes) {
       if (engine.isMergedRoot(root)) continue
-      const code = engine.rootCodes.get(root)
       if (code && code.main && code.main.toLowerCase() === key) {
         roots.push({ root, code })
       }
     }
-    return roots.sort((a, b) => a.root.localeCompare(b.root))
+    // 不再按字母排序，保持 rootCodes Map 中的顺序
+    return roots
   }
   
   // 三行键位
@@ -1565,7 +1628,7 @@ async function exportKeyboardPng() {
   const keyGap = 8
   const rowOffset = 35
   const padding = 40
-  const rootGap = 5  // 字根之间的间距
+  const rootGap = 8  // 字根之间的间距
   
   // 根据字根数量计算字号（字根多时缩小，少时放大）
   const calculateFontSizes = (rootCount: number) => {
@@ -1573,16 +1636,18 @@ async function exportKeyboardPng() {
     // 根据字根数量动态调整：1-4个用大字，5-8个用中字，9+个用小字
     let fontSize: number
     if (rootCount <= 4) {
-      fontSize = 18
+      fontSize = 22
     } else if (rootCount <= 8) {
-      fontSize = 14
+      fontSize = 18
     } else if (rootCount <= 15) {
       fontSize = 12
-    } else {
+    } else if (rootCount <= 25) {
       fontSize = 9
+    } else {
+      fontSize = 6
     }
     // 编码字号比字根小2号，但最小为7
-    const codeFontSize = Math.max(7, fontSize - 2)
+    const codeFontSize = Math.max(4, fontSize - 2)
     return { fontSize, codeFontSize }
   }
   
@@ -1685,7 +1750,7 @@ async function exportKeyboardPng() {
         if (item.subCode) {
           ctx.fillStyle = '#059669'
           ctx.font = `${codeFontSize}px "SF Mono", "Consolas", monospace`
-          ctx.fillText(item.subCode, currentX + rootWidth + 5, ty + fontSize - 2)
+          ctx.fillText(item.subCode, currentX + rootWidth + 4, ty + fontSize - 2)
         }
         
         // 移动到下一个位置
@@ -2059,9 +2124,20 @@ async function exportKeyboardPng() {
             v-for="item in selectedRoots" 
             :key="item.root" 
             class="root-item"
-            :class="{ 'editing': editingRoot === item.root }"
+            :class="{ 
+              'editing': editingRoot === item.root,
+              'dragging': draggedRootItem === item.root,
+              'drag-over': dragOverRootItem === item.root
+            }"
+            draggable="true"
+            @dragstart="onRootDragStart(item.root)"
+            @dragend="onRootDragEnd"
+            @dragover="onRootDragOver(item.root, $event)"
+            @dragleave="onRootDragLeave"
+            @drop="onRootDrop(item.root)"
           >
-            <span class="root-char">{{ item.root }}</span>
+            <span class="drag-handle" title="拖拽排序">⋮⋮</span>
+            <span class="root-char" :class="getRootFontClass(item.root)">{{ displayRoot(item.root) }}</span>
             
             <!-- 编辑模式 -->
             <template v-if="editingRoot === item.root">
@@ -2920,6 +2996,34 @@ async function exportKeyboardPng() {
 .root-item.editing {
   border-color: var(--primary);
   background: var(--bg2);
+}
+
+/* 拖拽排序样式 */
+.root-item.dragging {
+  opacity: 0.5;
+  border-style: dashed;
+}
+
+.root-item.drag-over {
+  border-color: var(--primary);
+  background: var(--primary-bg);
+  border-style: dashed;
+}
+
+.drag-handle {
+  cursor: grab;
+  color: var(--text3);
+  font-size: 12px;
+  padding: 2px 4px;
+  user-select: none;
+}
+
+.drag-handle:hover {
+  color: var(--text);
+}
+
+.drag-handle:active {
+  cursor: grabbing;
 }
 
 .root-char {
