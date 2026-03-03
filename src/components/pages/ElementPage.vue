@@ -29,12 +29,477 @@ const mergeForm = ref({
   sourceRoot: '',
 })
 
+// 归并字根搜索相关
+const mergeTargetQuery = ref('')
+const mergeSourceQuery = ref('')
+const mergeTargetDebounced = ref('')
+const mergeSourceDebounced = ref('')
+
+// 防抖定时器
+let mergeTargetTimer: ReturnType<typeof setTimeout> | null = null
+let mergeSourceTimer: ReturnType<typeof setTimeout> | null = null
+
+// 监听输入变化，防抖更新
+function onMergeTargetInput() {
+  if (mergeTargetTimer) clearTimeout(mergeTargetTimer)
+  mergeTargetTimer = setTimeout(() => {
+    mergeTargetDebounced.value = mergeTargetQuery.value
+  }, 300)
+}
+
+function onMergeSourceInput() {
+  if (mergeSourceTimer) clearTimeout(mergeSourceTimer)
+  mergeSourceTimer = setTimeout(() => {
+    mergeSourceDebounced.value = mergeSourceQuery.value
+  }, 300)
+}
+
+// 判断输入是否为笔画编码（仅包含1-5的数字）
+function isStrokeCodeQueryForMerge(query: string): boolean {
+  return /^[1-5]+$/.test(query)
+}
+
+// 「要归并的字根」搜索结果（所有汉字及IDS原子字根）- 优化版
+const mergeTargetResults = computed(() => {
+  rootsVersion.value
+  const query = mergeTargetDebounced.value.trim()
+  if (!query || query.length < 1) return []
+  
+  const results: { root: string; strokeCode: string; isAtomic: boolean }[] = []
+  const strokeSearch = isStrokeCodeQueryForMerge(query)
+  
+  // 预先获取原子字根集合用于快速判断
+  const atomicSet = engine.atomicComponents()
+  const isShortQuery = query.length <= 2
+  
+  // 如果是短查询（1-2个字符），优先在原子字根中搜索
+  if (isShortQuery && !strokeSearch) {
+    // 先搜索原子字根
+    for (const char of atomicSet) {
+      if (char === query || char.includes(query)) {
+        const strokes = engine.getStrokes(char)
+        results.push({
+          root: char,
+          strokeCode: strokes.length > 0 ? strokes[0] : '',
+          isAtomic: true
+        })
+      }
+    }
+    
+    // 再搜索高频汉字（限制数量）
+    let count = 0
+    const maxExtra = 50 - results.length
+    for (const char of engine.getCharset()) {
+      if (count >= maxExtra) break
+      if (atomicSet.has(char)) continue // 已添加
+      if (char === query || char.includes(query)) {
+        const strokes = engine.getStrokes(char)
+        const freq = engine.freq.get(char) || 0
+        if (freq > 1000) { // 只取高频字
+          results.push({
+            root: char,
+            strokeCode: strokes.length > 0 ? strokes[0] : '',
+            isAtomic: false
+          })
+          count++
+        }
+      }
+    }
+  } else {
+    // 长查询或笔画搜索，限制搜索范围
+    let count = 0
+    const maxResults = 30
+    
+    // 先搜索原子字根
+    for (const char of atomicSet) {
+      if (count >= maxResults) break
+      let match = false
+      
+      if (strokeSearch) {
+        const strokes = engine.getStrokes(char)
+        const strokeCode = strokes.length > 0 ? strokes[0] : ''
+        if (strokeCode.includes(query)) match = true
+      } else {
+        if (char.includes(query)) match = true
+      }
+      
+      if (match) {
+        const strokes = engine.getStrokes(char)
+        results.push({
+          root: char,
+          strokeCode: strokes.length > 0 ? strokes[0] : '',
+          isAtomic: true
+        })
+        count++
+      }
+    }
+    
+    // 再搜索IDS汉字（限制数量）
+    for (const char of engine.getCharset()) {
+      if (count >= maxResults) break
+      if (atomicSet.has(char)) continue
+      
+      let match = false
+      if (strokeSearch) {
+        const strokes = engine.getStrokes(char)
+        const strokeCode = strokes.length > 0 ? strokes[0] : ''
+        if (strokeCode.includes(query)) match = true
+      } else {
+        if (char.includes(query)) match = true
+      }
+      
+      if (match) {
+        const strokes = engine.getStrokes(char)
+        results.push({
+          root: char,
+          strokeCode: strokes.length > 0 ? strokes[0] : '',
+          isAtomic: false
+        })
+        count++
+      }
+    }
+  }
+  
+  // 排序：完全匹配优先，然后按类型（原子字根优先），再按字频
+  results.sort((a, b) => {
+    const aExact = strokeSearch ? a.strokeCode === query : a.root === query
+    const bExact = strokeSearch ? b.strokeCode === query : b.root === query
+    if (aExact !== bExact) return aExact ? -1 : 1
+    if (a.isAtomic !== b.isAtomic) return a.isAtomic ? -1 : 1
+    const freqA = engine.freq.get(a.root) || 0
+    const freqB = engine.freq.get(b.root) || 0
+    return freqB - freqA
+  })
+  
+  return results.slice(0, 30)
+})
+
+// 「来源字根（已有编码）」搜索结果（当前方案中已添加并已有编码的字根）
+const mergeSourceResults = computed(() => {
+  rootsVersion.value
+  const query = mergeSourceDebounced.value.trim()
+  if (!query || query.length < 1) return []
+  
+  const results: { root: string; code: string; strokeCode: string }[] = []
+  const strokeSearch = isStrokeCodeQueryForMerge(query)
+  
+  for (const root of engine.roots) {
+    const code = engine.rootCodes.get(root)
+    if (!code || !code.main) continue
+    
+    let match = false
+    if (strokeSearch) {
+      const strokes = engine.getStrokes(root)
+      const strokeCode = strokes.length > 0 ? strokes[0] : ''
+      if (strokeCode.includes(query)) match = true
+    } else {
+      const searchTarget = root.startsWith('{') && root.endsWith('}')
+        ? root.slice(1, -1) + ' ' + root
+        : root
+      if (searchTarget.includes(query)) match = true
+    }
+    
+    if (match) {
+      const strokes = engine.getStrokes(root)
+      results.push({
+        root,
+        code: codeToString(code),
+        strokeCode: strokes.length > 0 ? strokes[0] : ''
+      })
+    }
+  }
+  
+  results.sort((a, b) => {
+    const aExact = strokeSearch ? a.strokeCode === query : a.root === query
+    const bExact = strokeSearch ? b.strokeCode === query : b.root === query
+    if (aExact !== bExact) return aExact ? -1 : 1
+    return a.code.localeCompare(b.code)
+  })
+  
+  return results.slice(0, 30)
+})
+
+// 选择要归并的字根
+function selectMergeTarget(root: string) {
+  mergeForm.value.targetRoot = root
+  mergeTargetQuery.value = ''
+  mergeTargetDebounced.value = ''
+}
+
+// 选择来源字根
+function selectMergeSource(root: string) {
+  mergeForm.value.sourceRoot = root
+  mergeSourceQuery.value = ''
+  mergeSourceDebounced.value = ''
+}
+
 // 码位等值相关状态
 const mergeModalTab = ref<'merge' | 'codeEquiv'>('merge')
 const codeEquivForm = ref({
   targetRef: '',  // 如 "目.1"
   sourceRef: '',  // 如 "日.1"
 })
+
+// 码位等值搜索相关状态
+const codeEquivTargetQuery = ref('')
+const codeEquivSourceQuery = ref('')
+const codeEquivTargetDebounced = ref('')
+const codeEquivSourceDebounced = ref('')
+const codeEquivTargetRoot = ref<string | null>(null)  // 已选择的目标字根
+const codeEquivSourceRoot = ref<string | null>(null)  // 已选择的来源字根
+const codeEquivTargetIndex = ref<number | null>(null)  // 目标码位索引
+const codeEquivSourceIndex = ref<number | null>(null)  // 来源码位索引
+const showCodeEquivTargetIndexPicker = ref(false)  // 显示目标码位选择器
+const showCodeEquivSourceIndexPicker = ref(false)  // 显示来源码位选择器
+
+// 码位等值搜索防抖定时器
+let codeEquivTargetTimer: ReturnType<typeof setTimeout> | null = null
+let codeEquivSourceTimer: ReturnType<typeof setTimeout> | null = null
+
+// 监听码位等值目标输入变化，防抖更新
+function onCodeEquivTargetInput() {
+  if (codeEquivTargetTimer) clearTimeout(codeEquivTargetTimer)
+  codeEquivTargetTimer = setTimeout(() => {
+    codeEquivTargetDebounced.value = codeEquivTargetQuery.value
+  }, 300)
+}
+
+// 监听码位等值来源输入变化，防抖更新
+function onCodeEquivSourceInput() {
+  if (codeEquivSourceTimer) clearTimeout(codeEquivSourceTimer)
+  codeEquivSourceTimer = setTimeout(() => {
+    codeEquivSourceDebounced.value = codeEquivSourceQuery.value
+  }, 300)
+}
+
+// 码位等值目标字根搜索结果（所有汉字及IDS原子字根）
+const codeEquivTargetResults = computed(() => {
+  rootsVersion.value
+  const query = codeEquivTargetDebounced.value.trim()
+  if (!query || query.length < 1) return []
+  
+  const results: { root: string; strokeCode: string; isAtomic: boolean; hasCode: boolean; codeStr: string }[] = []
+  const strokeSearch = isStrokeCodeQueryForMerge(query)
+  
+  // 预先获取原子字根集合用于快速判断
+  const atomicSet = engine.atomicComponents()
+  const isShortQuery = query.length <= 2
+  
+  // 如果是短查询（1-2个字符），优先在原子字根中搜索
+  if (isShortQuery && !strokeSearch) {
+    // 先搜索原子字根
+    for (const char of atomicSet) {
+      if (char === query || char.includes(query)) {
+        const strokes = engine.getStrokes(char)
+        const code = engine.rootCodes.get(char)
+        results.push({
+          root: char,
+          strokeCode: strokes.length > 0 ? strokes[0] : '',
+          isAtomic: true,
+          hasCode: !!code?.main,
+          codeStr: code ? codeToString(code) : ''
+        })
+      }
+    }
+    
+    // 再搜索高频汉字（限制数量）
+    let count = 0
+    const maxExtra = 50 - results.length
+    for (const char of engine.getCharset()) {
+      if (count >= maxExtra) break
+      if (atomicSet.has(char)) continue // 已添加
+      if (char === query || char.includes(query)) {
+        const strokes = engine.getStrokes(char)
+        const freq = engine.freq.get(char) || 0
+        if (freq > 1000) { // 只取高频字
+          const code = engine.rootCodes.get(char)
+          results.push({
+            root: char,
+            strokeCode: strokes.length > 0 ? strokes[0] : '',
+            isAtomic: false,
+            hasCode: !!code?.main,
+            codeStr: code ? codeToString(code) : ''
+          })
+          count++
+        }
+      }
+    }
+  } else {
+    // 长查询或笔画搜索，限制搜索范围
+    let count = 0
+    const maxResults = 30
+    
+    // 先搜索原子字根
+    for (const char of atomicSet) {
+      if (count >= maxResults) break
+      let match = false
+      
+      if (strokeSearch) {
+        const strokes = engine.getStrokes(char)
+        const strokeCode = strokes.length > 0 ? strokes[0] : ''
+        if (strokeCode.includes(query)) match = true
+      } else {
+        if (char.includes(query)) match = true
+      }
+      
+      if (match) {
+        const strokes = engine.getStrokes(char)
+        const code = engine.rootCodes.get(char)
+        results.push({
+          root: char,
+          strokeCode: strokes.length > 0 ? strokes[0] : '',
+          isAtomic: true,
+          hasCode: !!code?.main,
+          codeStr: code ? codeToString(code) : ''
+        })
+        count++
+      }
+    }
+    
+    // 再搜索IDS汉字（限制数量）
+    for (const char of engine.getCharset()) {
+      if (count >= maxResults) break
+      if (atomicSet.has(char)) continue
+      
+      let match = false
+      if (strokeSearch) {
+        const strokes = engine.getStrokes(char)
+        const strokeCode = strokes.length > 0 ? strokes[0] : ''
+        if (strokeCode.includes(query)) match = true
+      } else {
+        if (char.includes(query)) match = true
+      }
+      
+      if (match) {
+        const strokes = engine.getStrokes(char)
+        const code = engine.rootCodes.get(char)
+        results.push({
+          root: char,
+          strokeCode: strokes.length > 0 ? strokes[0] : '',
+          isAtomic: false,
+          hasCode: !!code?.main,
+          codeStr: code ? codeToString(code) : ''
+        })
+        count++
+      }
+    }
+  }
+  
+  // 排序：完全匹配优先，然后按类型（原子字根优先），再按字频
+  results.sort((a, b) => {
+    const aExact = strokeSearch ? a.strokeCode === query : a.root === query
+    const bExact = strokeSearch ? b.strokeCode === query : b.root === query
+    if (aExact !== bExact) return aExact ? -1 : 1
+    if (a.isAtomic !== b.isAtomic) return a.isAtomic ? -1 : 1
+    const freqA = engine.freq.get(a.root) || 0
+    const freqB = engine.freq.get(b.root) || 0
+    return freqB - freqA
+  })
+  
+  return results.slice(0, 30)
+})
+
+// 码位等值来源字根搜索结果（当前方案中已添加并已有编码的字根）
+const codeEquivSourceResults = computed(() => {
+  rootsVersion.value
+  const query = codeEquivSourceDebounced.value.trim()
+  if (!query || query.length < 1) return []
+  
+  const results: { root: string; code: string; codeLength: number; strokeCode: string }[] = []
+  const strokeSearch = isStrokeCodeQueryForMerge(query)
+  
+  for (const root of engine.roots) {
+    const code = engine.rootCodes.get(root)
+    if (!code || !code.main) continue
+    
+    let match = false
+    if (strokeSearch) {
+      const strokes = engine.getStrokes(root)
+      const strokeCode = strokes.length > 0 ? strokes[0] : ''
+      if (strokeCode.includes(query)) match = true
+    } else {
+      const searchTarget = root.startsWith('{') && root.endsWith('}')
+        ? root.slice(1, -1) + ' ' + root
+        : root
+      if (searchTarget.includes(query)) match = true
+    }
+    
+    if (match) {
+      const strokes = engine.getStrokes(root)
+      const codeStr = codeToString(code)
+      results.push({
+        root,
+        code: codeStr,
+        codeLength: codeStr.length,
+        strokeCode: strokes.length > 0 ? strokes[0] : ''
+      })
+    }
+  }
+  
+  results.sort((a, b) => {
+    const aExact = strokeSearch ? a.strokeCode === query : a.root === query
+    const bExact = strokeSearch ? b.strokeCode === query : b.root === query
+    if (aExact !== bExact) return aExact ? -1 : 1
+    return a.code.localeCompare(b.code)
+  })
+  
+  return results.slice(0, 30)
+})
+
+// 选择码位等值目标字根
+function selectCodeEquivTarget(root: string) {
+  codeEquivTargetRoot.value = root
+  codeEquivTargetQuery.value = ''
+  codeEquivTargetDebounced.value = ''
+  codeEquivTargetIndex.value = null
+  
+  // 始终显示码位选择器（无编码时基于来源字根的编码长度，但先让用户选）
+  showCodeEquivTargetIndexPicker.value = true
+}
+
+// 选择码位等值来源字根
+function selectCodeEquivSource(root: string) {
+  codeEquivSourceRoot.value = root
+  codeEquivSourceQuery.value = ''
+  codeEquivSourceDebounced.value = ''
+  codeEquivSourceIndex.value = null  // 重置码位选择
+  
+  // 显示码位选择器
+  showCodeEquivSourceIndexPicker.value = true
+}
+
+// 选择目标码位索引
+function selectTargetCodeIndex(index: number) {
+  codeEquivTargetIndex.value = index
+  showCodeEquivTargetIndexPicker.value = false
+}
+
+// 选择来源码位索引
+function selectSourceCodeIndex(index: number) {
+  codeEquivSourceIndex.value = index
+  showCodeEquivSourceIndexPicker.value = false
+}
+
+// 获取字根编码的码位列表（用于选择器）
+function getCodePositions(root: string): { index: number; char: string }[] {
+  const code = engine.rootCodes.get(root)
+  if (!code || !code.main) return []
+  
+  const fullCode = (code.main || '') + (code.sub || '') + (code.supplement || '')
+  return fullCode.split('').map((char, index) => ({ index, char }))
+}
+
+// 重置码位等值表单
+function resetCodeEquivForm() {
+  codeEquivTargetRoot.value = null
+  codeEquivSourceRoot.value = null
+  codeEquivTargetIndex.value = null
+  codeEquivSourceIndex.value = null
+  codeEquivTargetQuery.value = ''
+  codeEquivSourceQuery.value = ''
+  codeEquivTargetDebounced.value = ''
+  codeEquivSourceDebounced.value = ''
+}
 
 // 等效字根相关状态
 const showEquivModal = ref(false)
@@ -483,8 +948,8 @@ function saveEdit() {
     }
   }
   
-  const parsed = parseCode(editCode.value)
-  engine.rootCodes.set(editingRoot.value, { root: editingRoot.value, ...parsed })
+  // 使用 setRootCode 方法设置编码，自动同步归并字根编码
+  engine.setRootCode(editingRoot.value, editCode.value)
   editingRoot.value = null
   refreshStats()
   toast('编码已更新')
@@ -746,9 +1211,8 @@ function clickMainRootCode(mainRoot: string) {
 function saveEquivRootCode() {
   if (!editingEquivRoot.value) return
   
-  const parsed = parseCode(editingEquivCode.value)
-  engine.rootCodes.set(editingEquivRoot.value, { root: editingEquivRoot.value, ...parsed })
-  engine.roots.add(editingEquivRoot.value)
+  // 使用 setRootCode 方法设置编码，自动同步归并字根编码
+  engine.setRootCode(editingEquivRoot.value, editingEquivCode.value)
   editingEquivRoot.value = null
   editingEquivCode.value = ''
   refreshStats()
@@ -790,6 +1254,7 @@ const mergedRootsList = computed(() => {
 
 // 当前键位的归并字根列表（只显示当前键位相关的）
 const mergedRootsOnKey = computed(() => {
+  rootsVersion.value  // 触发响应式更新
   if (!selectedKey.value) return []
   const key = selectedKey.value
   
@@ -814,6 +1279,7 @@ const mergedRootsOnKey = computed(() => {
 
 // 当前键位的码位等值列表（只显示当前键位相关的）
 const codeEquivalencesOnKey = computed(() => {
+  rootsVersion.value  // 触发响应式更新
   if (!selectedKey.value) return []
   const key = selectedKey.value
   
@@ -974,29 +1440,30 @@ const codeEquivalencesList = computed(() => {
 
 // 执行码位等值
 function applyCodeEquiv() {
-  const { targetRef, sourceRef } = codeEquivForm.value
+  // 验证是否已选择目标字根和来源字根
+  if (!codeEquivTargetRoot.value) {
+    toast('请选择目标字根')
+    return
+  }
+  if (!codeEquivSourceRoot.value) {
+    toast('请选择来源字根')
+    return
+  }
+  if (codeEquivTargetIndex.value === null) {
+    toast('请选择目标码位')
+    return
+  }
+  if (codeEquivSourceIndex.value === null) {
+    toast('请选择来源码位')
+    return
+  }
   
-  if (!targetRef) {
-    toast('请输入目标码位引用（如：目.1）')
-    return
-  }
-  if (!sourceRef) {
-    toast('请输入来源码位引用（如：日.1）')
-    return
-  }
+  // 构建码位引用
+  const targetRef = `${codeEquivTargetRoot.value}.${codeEquivTargetIndex.value}`
+  const sourceRef = `${codeEquivSourceRoot.value}.${codeEquivSourceIndex.value}`
   
-  // 验证格式
-  const targetParsed = engine.parseCodeRef(targetRef)
-  const sourceParsed = engine.parseCodeRef(sourceRef)
-  
-  if (!targetParsed) {
-    toast('目标码位引用格式错误，正确格式：字根.索引（如：目.1）')
-    return
-  }
-  if (!sourceParsed) {
-    toast('来源码位引用格式错误，正确格式：字根.索引（如：日.1）')
-    return
-  }
+  // 检查目标字根是否已有编码
+  const targetHasCode = engine.rootCodes.get(codeEquivTargetRoot.value)?.main
   
   // 执行码位等值
   const success = engine.setCodeEquivalence(targetRef, sourceRef)
@@ -1004,8 +1471,16 @@ function applyCodeEquiv() {
   if (success) {
     saveCurrentConfig()
     refreshStats()
-    codeEquivForm.value = { targetRef: '', sourceRef: '' }
-    toast(`已设置「${targetRef}」=「${sourceRef}」`)
+    
+    // 根据是否有自动补全显示不同的提示
+    if (!targetHasCode) {
+      toast(`已设置「${targetRef}」=「${sourceRef}」，并自动复制了「${codeEquivSourceRoot.value}」的完整编码`)
+    } else {
+      toast(`已设置「${targetRef}」=「${sourceRef}」`)
+    }
+    
+    // 重置表单
+    resetCodeEquivForm()
   } else {
     toast('设置失败，请检查来源字根是否有编码')
   }
@@ -1663,28 +2138,63 @@ async function exportKeyboardPng() {
         
         <div class="merge-form-row">
           <label>要归并的字根</label>
-          <input
-            v-model="mergeForm.targetRoot"
-            type="text"
-            placeholder="输入要归并的字根"
-            class="merge-input"
-          />
-          <span class="merge-hint">此字根将获得与来源字根相同的编码</span>
+          <div class="merge-search-wrapper">
+            <input
+              v-model="mergeTargetQuery"
+              type="search"
+              placeholder="输入名称或笔顺（12345）检索"
+              class="merge-input"
+              @input="onMergeTargetInput"
+            />
+            <div v-if="mergeTargetResults.length > 0" class="merge-search-results">
+              <div 
+                v-for="item in mergeTargetResults" 
+                :key="item.root" 
+                class="merge-search-item"
+                @click="selectMergeTarget(item.root)"
+              >
+                <span class="item-root">{{ item.root }}</span>
+                <span v-if="item.isAtomic" class="item-tag tag-atomic">原子</span>
+                <span v-if="item.strokeCode" class="item-stroke">{{ item.strokeCode }}</span>
+              </div>
+            </div>
+          </div>
+          <div v-if="mergeForm.targetRoot" class="merge-selected">
+            已选择：<strong>{{ mergeForm.targetRoot }}</strong>
+          </div>
+          <span class="merge-hint">可搜索所有汉字及IDS原子字根</span>
         </div>
         
         <div class="merge-form-row">
           <label>来源字根（已有编码）</label>
-          <input
-            v-model="mergeForm.sourceRoot"
-            type="text"
-            placeholder="输入来源字根"
-            class="merge-input"
-            list="roots-merge-datalist"
-          />
-          <datalist id="roots-merge-datalist">
-            <option v-for="root in allRootsForMerge" :key="root" :value="root" />
-          </datalist>
-          <span class="merge-hint">此字根的编码将被复制到目标字根</span>
+          <div class="merge-search-wrapper">
+            <input
+              v-model="mergeSourceQuery"
+              type="search"
+              placeholder="输入名称或笔顺（12345）检索"
+              class="merge-input"
+              @input="onMergeSourceInput"
+            />
+            <div v-if="mergeSourceResults.length > 0" class="merge-search-results">
+              <div 
+                v-for="item in mergeSourceResults" 
+                :key="item.root" 
+                class="merge-search-item"
+                @click="selectMergeSource(item.root)"
+              >
+                <span class="item-root">{{ item.root }}</span>
+                <span class="item-code">{{ item.code.toUpperCase() }}</span>
+                <span v-if="item.strokeCode" class="item-stroke">{{ item.strokeCode }}</span>
+              </div>
+            </div>
+          </div>
+          <div v-if="mergeForm.sourceRoot" class="merge-selected">
+            已选择：<strong>{{ mergeForm.sourceRoot }}</strong>
+            <span v-if="engine.rootCodes.get(mergeForm.sourceRoot)" class="selected-code">
+              ({{ codeToString(engine.rootCodes.get(mergeForm.sourceRoot)!).toUpperCase() }})
+            </span>
+          </div>
+          <span class="merge-hint">可搜索当前方案中已添加并已有编码的字根</span>
         </div>
         
         <div v-if="mergeForm.sourceRoot && engine.rootCodes.get(mergeForm.sourceRoot)" class="merge-preview">
@@ -1711,37 +2221,135 @@ async function exportKeyboardPng() {
 
       <!-- 码位等值标签页 -->
       <div v-if="mergeModalTab === 'codeEquiv'" class="merge-tab-content">
-        <p class="merge-desc">设置某字根的第 N 码等于另一字根的第 N 码。例如：「目.1」=「日.1」表示目的第2码等于日的第2码。简写格式：「目」=「日」表示目的第1码等于日的第1码。</p>
+        <p class="merge-desc">设置某字根的第 N 码等于另一字根的第 N 码。例如：「目.1」=「日.1」表示目的第2码等于日的第2码。如果目标字根没有编码，将自动复制来源字根的完整编码。</p>
         
         <div class="merge-form-row">
-          <label>目标码位（格式：字根 或 字根.索引）</label>
-          <input
-            v-model="codeEquivForm.targetRef"
-            type="text"
-            placeholder="如：目 或 目.1（表示目的第2码）"
-            class="merge-input"
-          />
-          <span class="merge-hint">简写「目」表示第1码（索引0），完整格式「目.1」表示第2码</span>
+          <label>目标字根</label>
+          <div class="merge-search-wrapper">
+            <input
+              v-model="codeEquivTargetQuery"
+              type="search"
+              placeholder="输入名称或笔顺（12345）检索"
+              class="merge-input"
+              @input="onCodeEquivTargetInput"
+            />
+            <div v-if="codeEquivTargetResults.length > 0" class="merge-search-results">
+              <div 
+                v-for="item in codeEquivTargetResults" 
+                :key="item.root" 
+                class="merge-search-item"
+                @click="selectCodeEquivTarget(item.root)"
+              >
+                <span class="item-root">{{ item.root }}</span>
+                <span v-if="item.isAtomic" class="item-tag tag-atomic">原子</span>
+                <span v-if="item.hasCode" class="item-code">{{ item.codeStr.toUpperCase() }}</span>
+                <span v-if="item.strokeCode" class="item-stroke">{{ item.strokeCode }}</span>
+              </div>
+            </div>
+          </div>
+          <div v-if="codeEquivTargetRoot" class="merge-selected">
+            已选择：<strong>{{ codeEquivTargetRoot }}</strong>
+            <span v-if="engine.rootCodes.get(codeEquivTargetRoot)" class="selected-code">
+              ({{ codeToString(engine.rootCodes.get(codeEquivTargetRoot)!).toUpperCase() }})
+            </span>
+            <span v-else class="selected-code">(无编码)</span>
+          </div>
+          <span class="merge-hint">可搜索所有汉字及IDS原子字根</span>
+        </div>
+        
+        <!-- 目标码位选择器 -->
+        <div v-if="codeEquivTargetRoot && showCodeEquivTargetIndexPicker" class="code-index-picker">
+          <label>选择目标码位：</label>
+          <div class="code-index-buttons">
+            <template v-if="engine.rootCodes.get(codeEquivTargetRoot)?.main">
+              <button 
+                v-for="pos in getCodePositions(codeEquivTargetRoot)" 
+                :key="pos.index"
+                class="btn btn-sm"
+                :class="{ 'btn-primary': codeEquivTargetIndex === pos.index }"
+                @click="selectTargetCodeIndex(pos.index)"
+              >
+                第{{ pos.index + 1 }}码 ({{ pos.char.toUpperCase() }})
+              </button>
+            </template>
+            <template v-else>
+              <button 
+                v-for="i in 4" 
+                :key="i"
+                class="btn btn-sm"
+                :class="{ 'btn-primary': codeEquivTargetIndex === i - 1 }"
+                @click="selectTargetCodeIndex(i - 1)"
+              >
+                第{{ i }}码
+              </button>
+              <span class="auto-copy-hint">(无编码，将自动补全)</span>
+            </template>
+          </div>
+        </div>
+        <div v-else-if="codeEquivTargetRoot && codeEquivTargetIndex !== null" class="code-index-selected">
+          目标码位：<strong>第{{ codeEquivTargetIndex + 1 }}码</strong>
+          <button class="btn btn-xs btn-ghost" @click="showCodeEquivTargetIndexPicker = true">修改</button>
         </div>
         
         <div class="merge-form-row">
-          <label>来源码位（格式：字根 或 字根.索引）</label>
-          <input
-            v-model="codeEquivForm.sourceRef"
-            type="text"
-            placeholder="如：日 或 日.1（表示日的第2码）"
-            class="merge-input"
-          />
-          <span class="merge-hint">来源字根必须有编码</span>
+          <label>来源字根（已有编码）</label>
+          <div class="merge-search-wrapper">
+            <input
+              v-model="codeEquivSourceQuery"
+              type="search"
+              placeholder="输入名称或笔顺（12345）检索"
+              class="merge-input"
+              @input="onCodeEquivSourceInput"
+            />
+            <div v-if="codeEquivSourceResults.length > 0" class="merge-search-results">
+              <div 
+                v-for="item in codeEquivSourceResults" 
+                :key="item.root" 
+                class="merge-search-item"
+                @click="selectCodeEquivSource(item.root)"
+              >
+                <span class="item-root">{{ item.root }}</span>
+                <span class="item-code">{{ item.code.toUpperCase() }}</span>
+                <span v-if="item.strokeCode" class="item-stroke">{{ item.strokeCode }}</span>
+              </div>
+            </div>
+          </div>
+          <div v-if="codeEquivSourceRoot" class="merge-selected">
+            已选择：<strong>{{ codeEquivSourceRoot }}</strong>
+            <span class="selected-code">
+              ({{ codeToString(engine.rootCodes.get(codeEquivSourceRoot)!).toUpperCase() }})
+            </span>
+          </div>
+          <span class="merge-hint">可搜索当前方案中已添加并已有编码的字根</span>
+        </div>
+        
+        <!-- 来源码位选择器 -->
+        <div v-if="codeEquivSourceRoot && showCodeEquivSourceIndexPicker" class="code-index-picker">
+          <label>选择来源码位：</label>
+          <div class="code-index-buttons">
+            <button 
+              v-for="pos in getCodePositions(codeEquivSourceRoot)" 
+              :key="pos.index"
+              class="btn btn-sm"
+              :class="{ 'btn-primary': codeEquivSourceIndex === pos.index }"
+              @click="selectSourceCodeIndex(pos.index)"
+            >
+              第{{ pos.index + 1 }}码 ({{ pos.char.toUpperCase() }})
+            </button>
+          </div>
+        </div>
+        <div v-else-if="codeEquivSourceRoot && codeEquivSourceIndex !== null" class="code-index-selected">
+          来源码位：<strong>第{{ codeEquivSourceIndex + 1 }}码 ({{ engine.getRootCodeAt(codeEquivSourceRoot, codeEquivSourceIndex)?.toUpperCase() || '?' }})</strong>
+          <button class="btn btn-xs btn-ghost" @click="showCodeEquivSourceIndexPicker = true">修改</button>
         </div>
 
         <!-- 码位等值预览 -->
-        <div v-if="codeEquivForm.sourceRef" class="merge-preview">
-          <template v-if="engine.parseCodeRef(codeEquivForm.sourceRef)">
-            <span class="preview-label">来源码位值：</span>
-            <span class="preview-code">{{ engine.getRootCodeAt(engine.parseCodeRef(codeEquivForm.sourceRef)!.root, engine.parseCodeRef(codeEquivForm.sourceRef)!.codeIndex)?.toUpperCase() || '不存在' }}</span>
-          </template>
-          <span v-else class="preview-error">格式错误</span>
+        <div v-if="codeEquivTargetRoot && codeEquivSourceRoot && codeEquivTargetIndex !== null && codeEquivSourceIndex !== null" class="merge-preview">
+          <span class="preview-label">设置：</span>
+          <span class="preview-code">{{ codeEquivTargetRoot }}.{{ codeEquivTargetIndex }} = {{ codeEquivSourceRoot }}.{{ codeEquivSourceIndex }}</span>
+          <span v-if="!engine.rootCodes.get(codeEquivTargetRoot)?.main" class="preview-hint">
+            （「{{ codeEquivTargetRoot }}」无编码，将自动复制「{{ codeEquivSourceRoot }}」的完整编码）
+          </span>
         </div>
 
         <!-- 已设置的码位等值列表 -->
@@ -3094,6 +3702,52 @@ async function exportKeyboardPng() {
   font-size: 13px;
 }
 
+.preview-hint {
+  font-size: 12px;
+  color: var(--text3);
+  margin-left: 8px;
+}
+
+/* 码位选择器样式 */
+.code-index-picker {
+  background: var(--bg3);
+  border-radius: 6px;
+  padding: 12px;
+  margin-top: 8px;
+}
+
+.code-index-picker label {
+  font-size: 12px;
+  color: var(--text2);
+  display: block;
+  margin-bottom: 8px;
+}
+
+.code-index-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.code-index-selected {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.code-index-selected strong {
+  color: var(--primary);
+}
+
+.auto-copy-hint {
+  font-size: 12px;
+  color: var(--text3);
+  margin-left: 8px;
+}
+
 /* 标签页样式 */
 .merge-tabs {
   display: flex;
@@ -3188,5 +3842,89 @@ async function exportKeyboardPng() {
 /* PUA 字体样式 - 用于显示花括号字根 */
 .pua-font {
   font-family: 'CHS-PUA', 'Noto Sans SC', 'Microsoft YaHei', 'PingFang SC', sans-serif !important;
+}
+
+/* 归并搜索相关样式 */
+.merge-search-wrapper {
+  position: relative;
+}
+
+.merge-search-results {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  margin-top: 4px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: var(--shadow2);
+  z-index: 100;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.merge-search-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.merge-search-item:hover {
+  background: var(--bg3);
+}
+
+.merge-search-item .item-root {
+  font-size: 16px;
+  font-weight: 500;
+}
+
+.merge-search-item .item-code {
+  font-family: monospace;
+  font-size: 12px;
+  color: var(--primary);
+  background: var(--primary-bg);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.merge-search-item .item-tag {
+  font-size: 10px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-weight: 500;
+}
+
+.merge-search-item .item-tag.tag-atomic {
+  background: rgba(19, 194, 194, 0.15);
+  color: #13c2c2;
+}
+
+.merge-search-item .item-stroke {
+  font-size: 11px;
+  color: var(--text2);
+  font-family: monospace;
+}
+
+.merge-selected {
+  margin-top: 8px;
+  padding: 8px 12px;
+  background: var(--primary-bg);
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+.merge-selected strong {
+  font-size: 16px;
+  color: var(--primary);
+}
+
+.merge-selected .selected-code {
+  font-family: monospace;
+  color: var(--primary);
+  margin-left: 4px;
 }
 </style>

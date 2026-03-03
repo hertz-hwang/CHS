@@ -88,10 +88,9 @@ function addRoot() {
 
   const root = addForm.value.root
   const code = addForm.value.code || 'd'
-  const parsed = parseCode(code)
 
-  engine.rootCodes.set(root, { root, ...parsed })
-  engine.roots.add(root)
+  // 使用 setRootCode 方法设置编码，自动同步归并字根编码
+  engine.setRootCode(root, code)
 
   showAddRoot.value = false
   addForm.value = { root: '', code: 'd' }
@@ -104,7 +103,8 @@ function setDefaultCodes() {
   let count = 0
   for (const root of engine.roots) {
     if (!engine.rootCodes.has(root)) {
-      engine.rootCodes.set(root, { root, main: 'd' })
+      // 使用 setRootCode 方法设置编码，自动同步归并字根编码
+      engine.setRootCode(root, 'd')
       count++
     }
   }

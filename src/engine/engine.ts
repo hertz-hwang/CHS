@@ -42,7 +42,7 @@ export const GB_STROKE_EQUIVALENT_ROOTS: Record<string, string[]> = {
   "一": ["㇀"],
   "丨": ["亅"],
   "丶": ["㇏", "乀"],
-  "乛": ["㇇", "㇂", "𠃊", "㇅", "𠃌", "乚", "𠃍", "㇉", "⺄", "𠄎", "𠃋", "𠄌", "㇎", "𠃑", "㇌", "㇋", "㇁", "𡿨", "乙", "〇"]
+  "乛": ["㇇", "㇂", "𠃊", "㇅", "𠃌", "乚", "𠃍", "㇉", "⺄", "𠄎", "𠃋", "𠄌", "㇎", "𠃑", "㇌", "㇋", "㇁", "𡿨", "乙", "〇", "α", "ℓ"]
 }
 
 function parseRootsFromText(text: string): Set<string> {
@@ -465,8 +465,40 @@ export class CharsHijack {
     this.rootCodes.set(root, { root, ...parsed })
     // 同时将字根加入 roots
     this.roots.add(root)
+    
+    // 同步更新所有归并到该字根的归并字根编码
+    this._syncMergedRootCodes(root)
+    
+    // 同步更新所有依赖该字根的码位等值
+    this._syncCodeEquivalences(root)
+    
     this._cache.clear()
     this._saveRoots()
+  }
+
+  // 同步更新归并字根的编码（当来源字根编码更新时调用）
+  private _syncMergedRootCodes(sourceRoot: string): void {
+    const sourceCode = this.rootCodes.get(sourceRoot)
+    if (!sourceCode) return
+    
+    // 找到所有归并到该来源字根的归并字根
+    const mergedTargets = this.getMergedToRoots(sourceRoot)
+    for (const targetRoot of mergedTargets) {
+      // 更新归并字根的编码（复制来源字根的新编码）
+      this.rootCodes.set(targetRoot, { ...sourceCode, root: targetRoot, mergedFrom: sourceRoot })
+    }
+  }
+
+  // 同步更新码位等值（当来源字根编码更新时调用）
+  private _syncCodeEquivalences(sourceRoot: string): void {
+    // 遍历所有码位等值关系，找出依赖该字根的目标字根
+    for (const [targetRef, sourceRef] of this.codeEquivalences) {
+      const source = this.parseCodeRef(sourceRef)
+      if (source && source.root === sourceRoot) {
+        // 重新应用码位等值，更新目标字根的编码
+        this.applyCodeEquivalence(targetRef, sourceRef)
+      }
+    }
   }
 
   // 获取字的根编码字符串（用于显示）
@@ -647,57 +679,49 @@ export class CharsHijack {
       return false
     }
     
-    // 获取来源字根的编码
     const sourceCode = this.rootCodes.get(source.root)
-    if (!sourceCode) {
+    if (!sourceCode || !sourceCode.main) {
       console.warn(`Source root "${source.root}" has no code`)
       return false
     }
     
-    // 获取来源码位
-    // 注意：getRootCodeAt 可能返回空字符串 ''（表示该位置可设置），这是有效值
     const sourceCodeChar = this.getRootCodeAt(source.root, source.codeIndex)
-    if (sourceCodeChar === undefined) {
-      // 来源字根没有编码
-      console.warn(`Source root "${source.root}" has no code`)
+    if (!sourceCodeChar) {
+      console.warn(`Source root "${source.root}" has no code at index ${source.codeIndex}`)
       return false
     }
-    // 空字符串 '' 是有效的（表示来源字根有编码但该位置为空，可以设置）
     
-    // 获取或创建目标字根的编码
     let targetCode = this.rootCodes.get(target.root)
-    if (!targetCode) {
-      // 如果目标字根没有编码，创建一个空的编码结构
-      targetCode = { root: target.root, main: '' }
+    
+    if (!targetCode || !targetCode.main) {
+      targetCode = { 
+        root: target.root, 
+        main: sourceCode.main,
+        sub: sourceCode.sub,
+        supplement: sourceCode.supplement
+      }
+      this.rootCodes.set(target.root, targetCode)
     }
     
-    // 构建新的编码字符串
     const targetFullCode = (targetCode.main || '') + (targetCode.sub || '') + (targetCode.supplement || '')
     const codeChars = targetFullCode.split('')
     
-    // 确保数组足够长
     while (codeChars.length <= target.codeIndex) {
       codeChars.push('')
     }
     
-    // 设置目标码位
     codeChars[target.codeIndex] = sourceCodeChar
     
-    // 重新构建编码
     const newCode = codeChars.join('')
     const parsed = parseCode(newCode)
     
-    // 更新目标字根的编码
     this.rootCodes.set(target.root, { 
       root: target.root, 
       ...parsed,
-      codeEquivFrom: `${sourceRef}` 
+      codeEquivFrom: sourceRef 
     })
     
-    // 记录等值关系
     this.codeEquivalences.set(targetRef, sourceRef)
-    
-    // 确保目标字根在 roots 集合中
     this.roots.add(target.root)
     this._cache.clear()
     
