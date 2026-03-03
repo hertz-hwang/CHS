@@ -2426,7 +2426,7 @@ async function exportKeyboardPng() {
             @drop="onDropToMain(item.mainRoot)"
           >
             <div class="main-root">
-              <span class="root-char">{{ item.mainRoot }}</span>
+              <span class="root-char" :class="getRootFontClass(item.mainRoot)">{{ displayRoot(item.mainRoot) }}</span>
               <template v-if="editingEquivRoot === item.mainRoot">
                 <input 
                   v-model="editingEquivCode"
@@ -2445,12 +2445,12 @@ async function exportKeyboardPng() {
               </span>
             </div>
             <div class="equiv-roots">
-              <span 
-                v-for="equiv in item.equivalents" 
-                :key="equiv" 
+              <span
+                v-for="equiv in item.equivalents"
+                :key="equiv"
                 class="equiv-tag"
               >
-                {{ equiv }}
+                <span :class="getRootFontClass(equiv)">{{ displayRoot(equiv) }}</span>
                 <button class="remove-btn" @click.stop="removeFromEquivRoots(item.mainRoot, equiv)">×</button>
               </span>
               <span v-if="item.equivalents.length === 0" class="empty-hint">拖拽添加</span>
@@ -2490,7 +2490,7 @@ async function exportKeyboardPng() {
             @dragstart="onDragStart(comp.char)"
             @dragend="onDragEnd"
           >
-            {{ comp.char }}
+            <span :class="getRootFontClass(comp.char)">{{ displayRoot(comp.char) }}</span>
           </div>
         </div>
         <div class="components-hint">
