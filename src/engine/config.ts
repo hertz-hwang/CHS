@@ -8,7 +8,7 @@ export interface RootCode {
   sub?: string           // 小码（第2字符，可选）
   supplement?: string    // 补码（第3字符起，可选）
   mergedFrom?: string    // 归并来源字根（表示此字根的编码与来源字根相同）
-  codeEquivFrom?: string // 码位等值来源，如 "日.1" 表示此字根的某码来自日.1
+  codeEquivFrom?: string // 字根半归并来源，如 "日.1" 表示此字根的某码来自日.1
 }
 
 export interface VisualRuleConfig {
@@ -60,7 +60,7 @@ export interface UserConfig {
   named_roots: Record<string, string> // 命名字根名 -> IDS
   equivalent_roots: Record<string, string[]> // 主字根 -> 等效字根列表
   merged_roots: Record<string, string>  // 归并字根 -> 来源字根（编码相同）
-  code_equivalences: Record<string, string>  // 码位等值: "目.1" = "日.1" 表示目的第2码等于日的第2码
+  code_equivalences: Record<string, string>  // 字根半归并: "目.1" = "日.1" 表示目的第2码等于日的第2码
   rules: TransformRuleConfig[]        // IDS 转换规则
   code_rules: CodeRuleNode[]          // 取码规则
 }
@@ -185,7 +185,7 @@ export function exportConfig(config: UserConfig): string {
     lines.push('')
   }
 
-  // code_equivalences (码位等值)
+  // code_equivalences (字根半归并)
   if (Object.keys(config.code_equivalences).length > 0) {
     lines.push('[code_equivalences]')
     for (const [target, source] of Object.entries(config.code_equivalences)) {

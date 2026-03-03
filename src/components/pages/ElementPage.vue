@@ -233,14 +233,14 @@ function selectMergeSource(root: string) {
   mergeSourceDebounced.value = ''
 }
 
-// 码位等值相关状态
+// 字根半归并相关状态
 const mergeModalTab = ref<'merge' | 'codeEquiv'>('merge')
 const codeEquivForm = ref({
   targetRef: '',  // 如 "目.1"
   sourceRef: '',  // 如 "日.1"
 })
 
-// 码位等值搜索相关状态
+// 字根半归并搜索相关状态
 const codeEquivTargetQuery = ref('')
 const codeEquivSourceQuery = ref('')
 const codeEquivTargetDebounced = ref('')
@@ -252,11 +252,11 @@ const codeEquivSourceIndex = ref<number | null>(null)  // 来源码位索引
 const showCodeEquivTargetIndexPicker = ref(false)  // 显示目标码位选择器
 const showCodeEquivSourceIndexPicker = ref(false)  // 显示来源码位选择器
 
-// 码位等值搜索防抖定时器
+// 字根半归并搜索防抖定时器
 let codeEquivTargetTimer: ReturnType<typeof setTimeout> | null = null
 let codeEquivSourceTimer: ReturnType<typeof setTimeout> | null = null
 
-// 监听码位等值目标输入变化，防抖更新
+// 监听字根半归并目标输入变化，防抖更新
 function onCodeEquivTargetInput() {
   if (codeEquivTargetTimer) clearTimeout(codeEquivTargetTimer)
   codeEquivTargetTimer = setTimeout(() => {
@@ -264,7 +264,7 @@ function onCodeEquivTargetInput() {
   }, 300)
 }
 
-// 监听码位等值来源输入变化，防抖更新
+// 监听字根半归并来源输入变化，防抖更新
 function onCodeEquivSourceInput() {
   if (codeEquivSourceTimer) clearTimeout(codeEquivSourceTimer)
   codeEquivSourceTimer = setTimeout(() => {
@@ -272,7 +272,7 @@ function onCodeEquivSourceInput() {
   }, 300)
 }
 
-// 码位等值目标字根搜索结果（所有汉字及IDS原子字根）
+// 字根半归并目标字根搜索结果（所有汉字及IDS原子字根）
 const codeEquivTargetResults = computed(() => {
   rootsVersion.value
   const query = codeEquivTargetDebounced.value.trim()
@@ -399,7 +399,7 @@ const codeEquivTargetResults = computed(() => {
   return results.slice(0, 30)
 })
 
-// 码位等值来源字根搜索结果（当前方案中已添加并已有编码的字根）
+// 字根半归并来源字根搜索结果（当前方案中已添加并已有编码的字根）
 const codeEquivSourceResults = computed(() => {
   rootsVersion.value
   const query = codeEquivSourceDebounced.value.trim()
@@ -446,7 +446,7 @@ const codeEquivSourceResults = computed(() => {
   return results.slice(0, 30)
 })
 
-// 选择码位等值目标字根
+// 选择字根半归并目标字根
 function selectCodeEquivTarget(root: string) {
   codeEquivTargetRoot.value = root
   codeEquivTargetQuery.value = ''
@@ -457,7 +457,7 @@ function selectCodeEquivTarget(root: string) {
   showCodeEquivTargetIndexPicker.value = true
 }
 
-// 选择码位等值来源字根
+// 选择字根半归并来源字根
 function selectCodeEquivSource(root: string) {
   codeEquivSourceRoot.value = root
   codeEquivSourceQuery.value = ''
@@ -489,7 +489,7 @@ function getCodePositions(root: string): { index: number; char: string }[] {
   return fullCode.split('').map((char, index) => ({ index, char }))
 }
 
-// 重置码位等值表单
+// 重置字根半归并表单
 function resetCodeEquivForm() {
   codeEquivTargetRoot.value = null
   codeEquivSourceRoot.value = null
@@ -549,7 +549,7 @@ const allRootsList = computed(() => {
   const query = rootListQuery.value.trim()
   const strokeSearch = isStrokeCodeQueryForRoot(query)
   
-  const list: { root: string; code: RootCode; codeStr: string; strokeCode: string; isEquiv: boolean; isMerged: boolean; mainRoot?: string; mergedFrom?: string }[] = []
+  const list: { root: string; code: RootCode; codeStr: string; strokeCode: string; isEquiv: boolean; isMerged: boolean; isCodeEquiv: boolean; mainRoot?: string; mergedFrom?: string; codeEquivSource?: string }[] = []
   
   for (const root of engine.roots) {
     // 如果有检索词，进行过滤
@@ -577,6 +577,10 @@ const allRootsList = computed(() => {
     const isMerged = engine.isMergedRoot(root)
     const mergedFrom = isMerged ? engine.mergedRoots.get(root) : undefined
     
+    // 检查是否有字根半归并设置（半归并）
+    const isCodeEquiv = engine.hasCodeEquivalence(root)
+    const codeEquivSource = isCodeEquiv ? engine.getCodeEquivalenceSource(root) : undefined
+    
     list.push({
       root,
       code: code || { root, main: '' },
@@ -584,8 +588,10 @@ const allRootsList = computed(() => {
       strokeCode: strokes.length > 0 ? strokes[0] : '',
       isEquiv,
       isMerged,
+      isCodeEquiv,
       mainRoot,
-      mergedFrom
+      mergedFrom,
+      codeEquivSource
     })
   }
   
@@ -651,19 +657,19 @@ function deleteSelectedRoots() {
 
 // 点击字根编辑编码
 function clickRootToEdit(root: string) {
-  // 检查是否可以编辑（整字归并检查）
+  // 检查是否可以编辑（字根归并检查）
   const editCheck = canEditRoot(root)
   if (!editCheck.canEdit) {
     toast(editCheck.reason)
     return
   }
   
-  // 检查是否有码位等值限制
+  // 检查是否有字根半归并限制
   const restrictedIndices = getRestrictedCodeIndices(root)
   if (restrictedIndices.length > 0) {
     // 允许编辑，但提示用户有码位限制
     const positions = restrictedIndices.map(i => formatCodeIndex(i)).join('、')
-    toast(`注意：${positions}已设置码位等值，修改将被阻止`)
+    toast(`注意：${positions}已设置字根半归并，修改将被阻止`)
   }
   
   editingRoot.value = root
@@ -894,7 +900,7 @@ function addRoot() {
 
 // 开始编辑
 function startEdit(root: string) {
-  // 检查是否可以编辑（整字归并检查）
+  // 检查是否可以编辑（字根归并检查）
   const editCheck = canEditRoot(root)
   if (!editCheck.canEdit) {
     toast(editCheck.reason)
@@ -912,7 +918,7 @@ function saveEdit() {
   
   const root = editingRoot.value
   
-  // 检查整字归并限制
+  // 检查字根归并限制
   const editCheck = canEditRoot(root)
   if (!editCheck.canEdit) {
     toast(editCheck.reason)
@@ -929,7 +935,7 @@ function saveEdit() {
     return
   }
   
-  // 检查码位等值限制
+  // 检查字根半归并限制
   const restrictedPositions = getRestrictedPositions(root, editCode.value.length)
   if (restrictedPositions.length > 0) {
     // 获取旧编码
@@ -942,7 +948,7 @@ function saveEdit() {
       const newChar = editCode.value[pos.index] || ''
       
       if (oldChar !== newChar) {
-        toast(`${formatCodeIndex(pos.index)}已设置为等于「${pos.source}」，无法修改。如需修改，请先取消码位等值设置。`)
+        toast(`${formatCodeIndex(pos.index)}已设置为等于「${pos.source}」，无法修改。如需修改，请先取消字根半归并设置。`)
         return
       }
     }
@@ -984,7 +990,7 @@ function initAtomic() {
 function clickSearchResult(root: string, isAdded: boolean) {
   if (isAdded) {
     // 已添加的字根，打开编辑弹窗
-    // 检查是否可以编辑（整字归并检查）
+    // 检查是否可以编辑（字根归并检查）
     const editCheck = canEditRoot(root)
     if (!editCheck.canEdit) {
       toast(editCheck.reason)
@@ -1277,7 +1283,7 @@ const mergedRootsOnKey = computed(() => {
   return result.sort((a, b) => a.target.localeCompare(b.target))
 })
 
-// 当前键位的码位等值列表（只显示当前键位相关的）
+// 当前键位的字根半归并列表（只显示当前键位相关的）
 const codeEquivalencesOnKey = computed(() => {
   rootsVersion.value  // 触发响应式更新
   if (!selectedKey.value) return []
@@ -1292,7 +1298,7 @@ const codeEquivalencesOnKey = computed(() => {
       // 获取目标字根的编码（首码）
       const targetRootCode = engine.rootCodes.get(targetParsed.root)
       if (targetRootCode && targetRootCode.main) {
-        // 只显示首码与当前选中键位匹配的码位等值
+        // 只显示首码与当前选中键位匹配的字根半归并
         if (targetRootCode.main.toLowerCase() === key) {
           const targetCode = engine.getRootCodeAt(targetParsed.root, targetParsed.codeIndex) || ''
           const sourceCode = engine.getRootCodeAt(sourceParsed.root, sourceParsed.codeIndex) || ''
@@ -1364,7 +1370,7 @@ const allRootsForMerge = computed(() => {
 
 // ============ 编辑限制相关方法 ============
 
-// 检查字根是否被整字归并
+// 检查字根是否被字根归并
 function isMergedRoot(root: string): boolean {
   return engine.mergedRoots.has(root)
 }
@@ -1374,7 +1380,7 @@ function getMergedSource(root: string): string | undefined {
   return engine.mergedRoots.get(root)
 }
 
-// 获取字根被限制编辑的码位索引列表（由于码位等值）
+// 获取字根被限制编辑的码位索引列表（由于字根半归并）
 function getRestrictedCodeIndices(root: string): number[] {
   const indices: number[] = []
   for (const [targetRef] of engine.codeEquivalences) {
@@ -1386,9 +1392,9 @@ function getRestrictedCodeIndices(root: string): number[] {
   return indices
 }
 
-// 检查字根是否可以编辑（考虑整字归并和码位等值）
+// 检查字根是否可以编辑（考虑字根归并和字根半归并）
 function canEditRoot(root: string): { canEdit: boolean; reason: string } {
-  // 检查整字归并
+  // 检查字根归并
   if (isMergedRoot(root)) {
     const source = getMergedSource(root)
     return { 
@@ -1419,9 +1425,9 @@ function formatCodeIndex(index: number): string {
   return `第${index + 1}码`
 }
 
-// ============ 码位等值相关方法 ============
+// ============ 字根半归并相关方法 ============
 
-// 码位等值列表（用于显示）
+// 字根半归并列表（用于显示）
 const codeEquivalencesList = computed(() => {
   rootsVersion.value
   const result: { targetRef: string; sourceRef: string; targetCode: string; sourceCode: string }[] = []
@@ -1438,7 +1444,7 @@ const codeEquivalencesList = computed(() => {
   return result.sort((a, b) => a.targetRef.localeCompare(b.targetRef))
 })
 
-// 执行码位等值
+// 执行字根半归并
 function applyCodeEquiv() {
   // 验证是否已选择目标字根和来源字根
   if (!codeEquivTargetRoot.value) {
@@ -1465,7 +1471,7 @@ function applyCodeEquiv() {
   // 检查目标字根是否已有编码
   const targetHasCode = engine.rootCodes.get(codeEquivTargetRoot.value)?.main
   
-  // 执行码位等值
+  // 执行字根半归并
   const success = engine.setCodeEquivalence(targetRef, sourceRef)
   
   if (success) {
@@ -1486,12 +1492,12 @@ function applyCodeEquiv() {
   }
 }
 
-// 取消码位等值
+// 取消字根半归并
 function removeCodeEquiv(targetRef: string) {
   engine.removeCodeEquivalence(targetRef)
   saveCurrentConfig()
   refreshStats()
-  toast(`已取消「${targetRef}」的码位等值`)
+  toast(`已取消「${targetRef}」的字根半归并`)
 }
 
 // ============ 导出字根图 PNG ============
@@ -1980,6 +1986,7 @@ async function exportKeyboardPng() {
               <span class="root-char" :class="getRootFontClass(item.root)" @click="clickRootToEdit(item.root)">{{ displayRoot(item.root) }}</span>
               <span v-if="item.isEquiv" class="root-tag tag-equiv" :title="`等效于 ${item.mainRoot}`">等效</span>
               <span v-if="item.isMerged" class="root-tag tag-merged" :title="`归并于 ${item.mergedFrom}`">归并</span>
+              <span v-if="item.isCodeEquiv" class="root-tag tag-code-equiv" :title="`字根半归并于 ${item.codeEquivSource}`">半归并</span>
               <template v-if="editingRoot === item.root">
                 <input 
                   v-model="editCode"
@@ -2030,10 +2037,10 @@ async function exportKeyboardPng() {
           </div>
         </div>
         
-        <!-- 码位等值列表（只显示当前键位相关） -->
+        <!-- 字根半归并列表（只显示当前键位相关） -->
         <div v-if="codeEquivalencesOnKey.length > 0" class="code-equiv-section">
           <div class="code-equiv-header">
-            <span class="code-equiv-label">码位等值</span>
+            <span class="code-equiv-label">字根半归并</span>
             <span class="code-equiv-count">{{ codeEquivalencesOnKey.length }} 个</span>
           </div>
           <div class="code-equiv-list">
@@ -2121,20 +2128,20 @@ async function exportKeyboardPng() {
           :class="{ active: mergeModalTab === 'merge' }"
           @click="mergeModalTab = 'merge'"
         >
-          整字归并
+          字根归并
         </button>
         <button 
           class="merge-tab" 
           :class="{ active: mergeModalTab === 'codeEquiv' }"
           @click="mergeModalTab = 'codeEquiv'"
         >
-          码位等值
+          字根半归并
         </button>
       </div>
 
-      <!-- 整字归并标签页 -->
+      <!-- 字根归并标签页 -->
       <div v-if="mergeModalTab === 'merge'" class="merge-tab-content">
-        <p class="merge-desc">将一个字根的编码设置为与另一个字根相同。归并后，两个字根将拥有相同的编码。</p>
+        <p class="merge-desc">将一个字根的编码设置为与另一个字根相同。</p>
         
         <div class="merge-form-row">
           <label>要归并的字根</label>
@@ -2219,9 +2226,9 @@ async function exportKeyboardPng() {
         </div>
       </div>
 
-      <!-- 码位等值标签页 -->
+      <!-- 字根半归并标签页 -->
       <div v-if="mergeModalTab === 'codeEquiv'" class="merge-tab-content">
-        <p class="merge-desc">设置某字根的第 N 码等于另一字根的第 N 码。例如：「目.1」=「日.1」表示目的第2码等于日的第2码。如果目标字根没有编码，将自动复制来源字根的完整编码。</p>
+        <p class="merge-desc">设置某字根的第 N 码等于另一字根的第 N 码。</p>
         
         <div class="merge-form-row">
           <label>目标字根</label>
@@ -2343,7 +2350,7 @@ async function exportKeyboardPng() {
           <button class="btn btn-xs btn-ghost" @click="showCodeEquivSourceIndexPicker = true">修改</button>
         </div>
 
-        <!-- 码位等值预览 -->
+        <!-- 字根半归并预览 -->
         <div v-if="codeEquivTargetRoot && codeEquivSourceRoot && codeEquivTargetIndex !== null && codeEquivSourceIndex !== null" class="merge-preview">
           <span class="preview-label">设置：</span>
           <span class="preview-code">{{ codeEquivTargetRoot }}.{{ codeEquivTargetIndex }} = {{ codeEquivSourceRoot }}.{{ codeEquivSourceIndex }}</span>
@@ -2352,10 +2359,10 @@ async function exportKeyboardPng() {
           </span>
         </div>
 
-        <!-- 已设置的码位等值列表 -->
+        <!-- 已设置的字根半归并列表 -->
         <div v-if="codeEquivalencesList.length > 0" class="merge-list-section">
           <div class="merge-list-header">
-            <span>已设置的码位等值 ({{ codeEquivalencesList.length }})</span>
+            <span>已设置的字根半归并 ({{ codeEquivalencesList.length }})</span>
           </div>
           <div class="merge-list-body">
             <div v-for="item in codeEquivalencesList" :key="item.targetRef" class="merge-list-item">
@@ -3151,6 +3158,11 @@ async function exportKeyboardPng() {
   color: #722ed1;
 }
 
+.root-tag.tag-code-equiv {
+  background: rgba(245, 166, 35, 0.15);
+  color: #f5a623;
+}
+
 .edit-code-input {
   width: 60px;
   font-family: monospace;
@@ -3556,7 +3568,7 @@ async function exportKeyboardPng() {
   margin-left: 4px;
 }
 
-/* 码位等值区块 */
+/* 字根半归并区块 */
 .code-equiv-section {
   background: var(--bg3);
   border-bottom: 1px solid var(--border);

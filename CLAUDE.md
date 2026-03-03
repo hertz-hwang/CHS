@@ -12,7 +12,7 @@
 - **字根管理**：定义字根集、设置字根编码
 - **转换规则**：支持可视化模式和正则模式的 IDS 转换规则
 - **覆盖率分析**：统计字集内汉字的字根覆盖情况
-- **编码设计**：设计输入法编码方案，支持等效字根、归并字根、码位等值
+- **编码设计**：设计输入法编码方案，支持等效字根、归并字根、字根半归并
 
 ## 开发命令
 
@@ -141,7 +141,7 @@ Unicode 标准定义的汉字结构描述方式，使用结构操作符描述汉
 
 编码完全复制自另一个字根的字根。存储在 `engine.mergedRoots`（Map<string, string>）中，键为归并字根，值为来源字根。
 
-### 码位等值
+### 字根半归并
 
 设置某一字根的某个码位等于另一字根的码位，如 `"目.1" = "日.1"` 表示「目」的第2码等于「日」的第2码。存储在 `engine.codeEquivalences`（Map<string, string>）中。
 
@@ -174,7 +174,7 @@ interface UserConfig {
   named_roots: Record<string, string> // 命名字根 { "{落字框}": "⿱艹氵" }
   equivalent_roots: Record<string, string[]>  // 等效字根
   merged_roots: Record<string, string>         // 归并字根
-  code_equivalences: Record<string, string>    // 码位等值
+  code_equivalences: Record<string, string>    // 字根半归并
   rules: TransformRuleConfig[]        // IDS 转换规则
   code_rules: CodeRuleNode[]          // 取码规则
 }

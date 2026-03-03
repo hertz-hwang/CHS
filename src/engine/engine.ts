@@ -94,7 +94,7 @@ export class CharsHijack {
   // 归并字根 { 归并字根 -> 来源字根 }（编码相同）
   mergedRoots = new Map<string, string>()
 
-  // 码位等值 { "目.1" => "日.1" } 表示目的第2码等于日的第2码
+  // 字根半归并 { "目.1" => "日.1" } 表示目的第2码等于日的第2码
   codeEquivalences = new Map<string, string>()
 
   // 配置元信息
@@ -399,7 +399,7 @@ export class CharsHijack {
       }
     }
 
-    // 设置码位等值
+    // 设置字根半归并
     if (config.code_equivalences) {
       this.setCodeEquivalencesMap(config.code_equivalences)
     }
@@ -469,7 +469,7 @@ export class CharsHijack {
     // 同步更新所有归并到该字根的归并字根编码
     this._syncMergedRootCodes(root)
     
-    // 同步更新所有依赖该字根的码位等值
+    // 同步更新所有依赖该字根的字根半归并
     this._syncCodeEquivalences(root)
     
     this._cache.clear()
@@ -489,13 +489,13 @@ export class CharsHijack {
     }
   }
 
-  // 同步更新码位等值（当来源字根编码更新时调用）
+  // 同步更新字根半归并（当来源字根编码更新时调用）
   private _syncCodeEquivalences(sourceRoot: string): void {
-    // 遍历所有码位等值关系，找出依赖该字根的目标字根
+    // 遍历所有字根半归并关系，找出依赖该字根的目标字根
     for (const [targetRef, sourceRef] of this.codeEquivalences) {
       const source = this.parseCodeRef(sourceRef)
       if (source && source.root === sourceRoot) {
-        // 重新应用码位等值，更新目标字根的编码
+        // 重新应用字根半归并，更新目标字根的编码
         this.applyCodeEquivalence(targetRef, sourceRef)
       }
     }
@@ -637,7 +637,7 @@ export class CharsHijack {
     this._cache.clear()
   }
 
-  // ============ 码位等值方法 ============
+  // ============ 字根半归并方法 ============
 
   // 解析码位引用 "目.1" => { root: "目", codeIndex: 1 }
   // 支持简写格式 "目" => { root: "目", codeIndex: 0 }（默认第1码）
@@ -656,7 +656,7 @@ export class CharsHijack {
   }
 
   // 获取字根的第 N 码（0-indexed）
-  // 如果索引越界，返回空字符串（而不是 undefined，以便于码位等值设置）
+  // 如果索引越界，返回空字符串（而不是 undefined，以便于字根半归并设置）
   getRootCodeAt(root: string, index: number): string | undefined {
     const code = this.rootCodes.get(root)
     if (!code) return undefined
@@ -669,7 +669,7 @@ export class CharsHijack {
     return fullCode[index]
   }
 
-  // 设置码位等值 "目.1" = "日.1"
+  // 设置字根半归并 "目.1" = "日.1"
   setCodeEquivalence(targetRef: string, sourceRef: string): boolean {
     const target = this.parseCodeRef(targetRef)
     const source = this.parseCodeRef(sourceRef)
@@ -728,28 +728,50 @@ export class CharsHijack {
     return true
   }
 
-  // 移除码位等值
+  // 移除字根半归并
   removeCodeEquivalence(targetRef: string): void {
     this.codeEquivalences.delete(targetRef)
     this._cache.clear()
   }
 
-  // 获取码位等值
+  // 检查字根是否有字根半归并设置（作为目标字根）
+  hasCodeEquivalence(root: string): boolean {
+    for (const targetRef of this.codeEquivalences.keys()) {
+      const parsed = this.parseCodeRef(targetRef)
+      if (parsed && parsed.root === root) {
+        return true
+      }
+    }
+    return false
+  }
+
+  // 获取字根的字根半归并来源信息
+  getCodeEquivalenceSource(root: string): string | undefined {
+    for (const [targetRef, sourceRef] of this.codeEquivalences) {
+      const parsed = this.parseCodeRef(targetRef)
+      if (parsed && parsed.root === root) {
+        return sourceRef
+      }
+    }
+    return undefined
+  }
+
+  // 获取字根半归并
   getCodeEquivalence(targetRef: string): string | undefined {
     return this.codeEquivalences.get(targetRef)
   }
 
-  // 批量设置码位等值
+  // 批量设置字根半归并
   setCodeEquivalencesMap(codeEquivalences: Record<string, string>): void {
     this.codeEquivalences = new Map(Object.entries(codeEquivalences))
-    // 应用所有码位等值
+    // 应用所有字根半归并
     for (const [targetRef, sourceRef] of this.codeEquivalences) {
       this.applyCodeEquivalence(targetRef, sourceRef)
     }
     this._cache.clear()
   }
 
-  // 应用单个码位等值（内部方法）
+  // 应用单个字根半归并（内部方法）
   private applyCodeEquivalence(targetRef: string, sourceRef: string): void {
     const target = this.parseCodeRef(targetRef)
     const source = this.parseCodeRef(sourceRef)
