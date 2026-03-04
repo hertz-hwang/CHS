@@ -265,16 +265,22 @@ function getSchemes(): ConfigScheme[] {
 // 切换方案
 async function switchScheme(id: string): Promise<boolean> {
   try {
+    // 如果当前有方案且不是示例方案，先保存当前配置到该方案
+    // 示例方案是只读的，不需要保存
+    if (currentSchemeId.value && currentSchemeId.value !== id && !currentSchemeId.value.startsWith('example_')) {
+      saveCurrentToScheme(currentSchemeId.value)
+    }
+
     // 尝试加载示例配置
     let schemeData = await loadExampleScheme(id)
-    
+
     // 如果不是示例或加载失败，尝试从 localStorage 加载
     if (!schemeData) {
       schemeData = loadScheme(id)
     }
-    
+
     if (!schemeData) return false
-    
+
     applyConfig(schemeData.config)
     currentSchemeId.value = id
     setCurrentSchemeId(id)
