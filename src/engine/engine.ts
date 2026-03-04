@@ -460,8 +460,9 @@ export class CharsHijack {
     this._rootToChars = null
   }
 
-  // 重新排序字根：将 draggedRoot 移动到 targetRoot 前面（同一键位内）
-  reorderRootOnKey(draggedRoot: string, targetRoot: string): boolean {
+  // 重新排序字根：将 draggedRoot 移动到 targetRoot 的指定位置（同一键位内）
+  // position: 'before' 表示插入到目标前面，'after' 表示插入到目标后面
+  reorderRootOnKey(draggedRoot: string, targetRoot: string, position: 'before' | 'after' = 'after'): boolean {
     const draggedCode = this.rootCodes.get(draggedRoot)
     const targetCode = this.rootCodes.get(targetRoot)
     
@@ -471,6 +472,11 @@ export class CharsHijack {
     
     // 确保两个字根在同一个键位上
     if (draggedCode.main.toLowerCase() !== targetCode.main.toLowerCase()) {
+      return false
+    }
+    
+    // 不能拖到自己
+    if (draggedRoot === targetRoot) {
       return false
     }
     
@@ -486,26 +492,25 @@ export class CharsHijack {
     }
     
     // 然后按新顺序添加当前键位的字根
-    let inserted = false
     for (const [root, code] of this.rootCodes) {
       if (this.isMergedRoot(root)) continue
       if (code.main?.toLowerCase() !== targetKey) continue
       
-      if (root === targetRoot) {
-        // 在目标字根前插入拖拽的字根
-        newRootCodes.set(draggedRoot, draggedCode)
-        inserted = true
-      }
-      
-      // 跳过拖拽的字根（它已经被插入到新位置）
+      // 跳过拖拽的字根（它将被插入到目标位置）
       if (root === draggedRoot) continue
       
+      // 如果是 before 模式且当前字根是目标字根，先插入拖拽的字根
+      if (position === 'before' && root === targetRoot) {
+        newRootCodes.set(draggedRoot, draggedCode)
+      }
+      
+      // 添加当前字根
       newRootCodes.set(root, code)
-    }
-    
-    // 如果目标字根是最后一个，需要单独处理
-    if (!inserted) {
-      newRootCodes.set(draggedRoot, draggedCode)
+      
+      // 如果是 after 模式且当前字根是目标字根，在它后面插入拖拽的字根
+      if (position === 'after' && root === targetRoot) {
+        newRootCodes.set(draggedRoot, draggedCode)
+      }
     }
     
     this.rootCodes = newRootCodes
@@ -649,6 +654,9 @@ export class CharsHijack {
       return
     }
 
+    // 清除该字根的所有半归并关系（归并和半归并互斥）
+    this._clearCodeEquivalencesForRoot(targetRoot)
+
     // 设置归并关系
     this.mergedRoots.set(targetRoot, sourceRoot)
     
@@ -658,6 +666,20 @@ export class CharsHijack {
     // 确保目标字根在 roots 集合中
     this.roots.add(targetRoot)
     this._cache.clear()
+  }
+
+  // 清除字根的所有半归并关系
+  private _clearCodeEquivalencesForRoot(root: string): void {
+    const toDelete: string[] = []
+    for (const targetRef of this.codeEquivalences.keys()) {
+      const parsed = this.parseCodeRef(targetRef)
+      if (parsed && parsed.root === root) {
+        toDelete.push(targetRef)
+      }
+    }
+    for (const ref of toDelete) {
+      this.codeEquivalences.delete(ref)
+    }
   }
 
   // 移除归并字根关系
@@ -763,6 +785,11 @@ export class CharsHijack {
       return false
     }
     
+    // 清除该字根的归并关系（归并和半归并互斥）
+    if (this.mergedRoots.has(target.root)) {
+      this.mergedRoots.delete(target.root)
+    }
+    
     let targetCode = this.rootCodes.get(target.root)
     
     if (!targetCode || !targetCode.main) {
@@ -826,6 +853,20 @@ export class CharsHijack {
       }
     }
     return undefined
+  }
+
+  // 获取字根的所有半归并引用（返回每个码位的引用）
+  // 例如：「的」有「的.0」=「白.0」,「的.1」=「勹.1」,「的.2」=「丶.2」
+  // 返回：{ 0: "白.0", 1: "勹.1", 2: "丶.2" }
+  getCodeEquivalencesForRoot(root: string): Map<number, string> {
+    const result = new Map<number, string>()
+    for (const [targetRef, sourceRef] of this.codeEquivalences) {
+      const parsed = this.parseCodeRef(targetRef)
+      if (parsed && parsed.root === root) {
+        result.set(parsed.codeIndex, sourceRef)
+      }
+    }
+    return result
   }
 
   // 获取字根半归并
