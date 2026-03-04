@@ -99,6 +99,9 @@ export class CharsHijack {
 
   // 配置元信息
   private _meta: UserConfig['meta'] = { version: '1.0' }
+  
+  // 当前字集ID
+  private _charset: string = 'all'
 
   private _pickG(variants: string[]): string | null {
     let universal: string | null = null
@@ -404,6 +407,9 @@ export class CharsHijack {
       this.setCodeEquivalencesMap(config.code_equivalences)
     }
 
+    // 设置字集（如果配置中没有指定，使用默认值 'all'）
+    this._charset = config.charset || 'all'
+
     // 保存字根到 localStorage（包括转换器生成的命名字根）
     this._saveRoots()
     this._cache.clear()
@@ -429,6 +435,7 @@ export class CharsHijack {
     }
     return {
       meta: this._meta,
+      charset: this._charset,
       roots: rootCodesToRecord(this.rootCodes),
       named_roots: namedRootsObj,
       equivalent_roots: equivalentRootsObj,
@@ -442,6 +449,11 @@ export class CharsHijack {
   // 设置取码规则
   setCodeRules(rules: CodeRuleNode[]): void {
     this.codeRules = rules
+  }
+
+  // 设置当前字集
+  setCharset(charsetId: string): void {
+    this._charset = charsetId
   }
 
   // 重新排序字根：将 draggedRoot 移动到 targetRoot 前面（同一键位内）

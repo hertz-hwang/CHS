@@ -29,11 +29,11 @@ const showDetailPages = ['data', 'split', 'code', 'coverage', 'suggest']
 const showDetailPanel = computed(() => showDetailPages.includes(currentPage.value))
 
 onMounted(async () => {
-  // 自动加载默认数据
+  // 自动加载默认数据，加载成功不提示
   const { loaded, failed } = await loadDefaultData()
-  if (loaded.length > 0) {
-    toast(`已加载: ${loaded.join(', ')}`)
-  }
+  //if (loaded.length > 0) {
+  //  toast(`已加载: ${loaded.join(', ')}`)
+  //}
   if (failed.length > 0) {
     toast(`加载失败: ${failed.join(', ')}`, 4000)
   }
@@ -51,8 +51,14 @@ onMounted(async () => {
     <div class="main-layout" :class="{ 'no-detail': !showDetailPanel, 'nav-collapsed': navCollapsed }">
       <SideNav />
       <main class="center">
+        <!-- 加载中状态 -->
+        <div v-if="isLoading" class="loading-page">
+          <div class="loading-spinner"></div>
+          <p>正在加载数据...</p>
+        </div>
+        
         <!-- 新页面 -->
-        <DataPage v-if="currentPage === 'data'" />
+        <DataPage v-else-if="currentPage === 'data'" />
         <ElementPage v-else-if="currentPage === 'element'" />
         <SplitPage v-else-if="currentPage === 'split'" />
         <RulePage v-else-if="currentPage === 'rule'" />
@@ -106,6 +112,34 @@ onMounted(async () => {
   height: 100%;
   color: var(--text2);
   font-size: 16px;
+}
+
+.loading-page {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--text2);
+  gap: 16px;
+}
+
+.loading-spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid var(--border);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.loading-page p {
+  font-size: 14px;
+  color: var(--text3);
 }
 
 @media (max-width: 900px) {

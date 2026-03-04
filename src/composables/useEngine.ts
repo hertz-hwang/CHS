@@ -1,6 +1,11 @@
 import { reactive, ref, readonly, computed } from 'vue'
 import { CharsHijack } from '@/engine/engine'
-import { UserConfig, parseConfig, exportConfig, saveConfigToStorage, loadConfigFromStorage } from '@/engine/config'
+import { 
+  UserConfig, parseConfig, exportConfig, saveConfigToStorage, loadConfigFromStorage,
+  ConfigScheme, ConfigSchemeWithData, listSchemes, loadScheme, saveScheme, deleteScheme, 
+  renameScheme, createScheme, importSchemeFromToml, exportSchemeToToml, duplicateScheme,
+  getCurrentSchemeId, setCurrentSchemeId, initExampleSchemes, loadExampleScheme
+} from '@/engine/config'
 import { loadRoots2PuaMap, bracedRootToPua, convertBracedRootsToPua, isBracedRoot, needsPuaFont, getPuaFontName } from '@/utils/pua'
 
 // 字集选项定义
@@ -27,9 +32,10 @@ const currentCharsetId = ref<string>('all')
 const savedConfig = loadConfigFromStorage()
 if (savedConfig) {
   engine.applyConfig(savedConfig)
-  // 恢复字集设置
-  if (savedConfig.charset) {
-    currentCharsetId.value = savedConfig.charset
+  // 恢复字集设置（从 engine 的内部状态获取，确保同步）
+  const charset = engine.getConfig().charset || 'all'
+  if (CHARSET_OPTIONS.some(o => o.id === charset)) {
+    currentCharsetId.value = charset
   }
 }
 
@@ -161,9 +167,11 @@ function setCharset(charsetId: string): boolean {
   currentCharsetId.value = charsetId
   charsetVersion.value++ // 触发字集相关更新
   
+  // 同步更新 engine 内部的字集设置
+  engine.setCharset(charsetId)
+  
   // 保存字集设置到配置
   const config = engine.getConfig()
-  config.charset = charsetId
   saveConfigToStorage(config)
   
   return true
@@ -185,19 +193,17 @@ function getCurrentCharset(): string[] {
 
 function applyConfig(config: UserConfig): void {
   engine.applyConfig(config)
-  // 恢复字集设置
-  if (config.charset && CHARSET_OPTIONS.some(o => o.id === config.charset)) {
-    currentCharsetId.value = config.charset
+  // 恢复字集设置（优先使用配置中的字集，否则使用默认值 'all'）
+  const charsetId = config.charset || 'all'
+  if (CHARSET_OPTIONS.some(o => o.id === charsetId)) {
+    currentCharsetId.value = charsetId
     charsetVersion.value++
   }
   refreshStats()
 }
 
 function getConfig(): UserConfig {
-  const config = engine.getConfig()
-  // 包含当前字集信息
-  config.charset = currentCharsetId.value
-  return config
+  return engine.getConfig()
 }
 
 function importConfigFromToml(toml: string): boolean {
@@ -232,6 +238,236 @@ function toggleNavCollapsed() {
   navCollapsed.value = !navCollapsed.value
 }
 
+// ============ 配置方案管理方法 ============
+
+// 当前方案ID
+const currentSchemeId = ref<string | null>(null)
+
+// 方案列表版本号（用于触发更新）
+const schemesVersion = ref(0)
+
+// 初始化配置方案系统
+async function initSchemes(): Promise<void> {
+  await initExampleSchemes()
+  const savedId = getCurrentSchemeId()
+  if (savedId) {
+    currentSchemeId.value = savedId
+  }
+  schemesVersion.value++
+}
+
+// 获取所有方案列表
+function getSchemes(): ConfigScheme[] {
+  schemesVersion.value // 依赖触发
+  return listSchemes()
+}
+
+// 切换方案
+async function switchScheme(id: string): Promise<boolean> {
+  try {
+    // 尝试加载示例配置
+    let schemeData = await loadExampleScheme(id)
+    
+    // 如果不是示例或加载失败，尝试从 localStorage 加载
+    if (!schemeData) {
+      schemeData = loadScheme(id)
+    }
+    
+    if (!schemeData) return false
+    
+    applyConfig(schemeData.config)
+    currentSchemeId.value = id
+    setCurrentSchemeId(id)
+    // 保存配置到 localStorage，确保刷新后能恢复
+    saveConfigToStorage(getConfig())
+    schemesVersion.value++
+    return true
+  } catch (e) {
+    console.error('Failed to switch scheme:', e)
+    return false
+  }
+}
+
+// 保存当前配置到方案
+function saveCurrentToScheme(id: string): boolean {
+  const schemes = listSchemes()
+  const scheme = schemes.find(s => s.id === id)
+  if (!scheme) return false
+  
+  const config = getConfig()
+  
+  // 更新方案的更新时间
+  scheme.updated = new Date().toISOString().split('T')[0]
+  
+  // 同步 meta 信息
+  config.meta = {
+    ...config.meta,
+    name: scheme.name,
+    author: scheme.author,
+    description: scheme.description,
+  }
+  
+  saveScheme(scheme, config)
+  schemesVersion.value++
+  return true
+}
+
+// 创建新方案
+function createNewScheme(name: string, author: string, description: string = ''): ConfigScheme {
+  const scheme = createScheme(name, author, description)
+  const config = getConfig()
+  
+  // 使用当前配置作为新方案的配置
+  config.meta = {
+    version: '1.0',
+    name,
+    author,
+    created: scheme.created,
+    description,
+  }
+  
+  saveScheme(scheme, config)
+  schemesVersion.value++
+  return scheme
+}
+
+// 导入方案
+function importScheme(toml: string, name?: string, author?: string): ConfigSchemeWithData | null {
+  const schemeData = importSchemeFromToml(toml, name, author)
+  if (!schemeData) return null
+  
+  saveScheme(schemeData, schemeData.config)
+  schemesVersion.value++
+  return schemeData
+}
+
+// 导出方案
+function exportScheme(id: string): string | null {
+  // 先检查是否为示例
+  if (id.startsWith('example_')) {
+    // 示例需要异步加载，这里返回 null，需要用 exportSchemeAsync
+    return null
+  }
+  
+  const schemeData = loadScheme(id)
+  if (!schemeData) return null
+  
+  return exportSchemeToToml(schemeData)
+}
+
+// 异步导出方案（支持示例）
+async function exportSchemeAsync(id: string): Promise<string | null> {
+  let schemeData = await loadExampleScheme(id)
+  if (!schemeData) {
+    schemeData = loadScheme(id)
+  }
+  if (!schemeData) return null
+  
+  return exportSchemeToToml(schemeData)
+}
+
+// 删除方案
+function removeScheme(id: string): boolean {
+  const result = deleteScheme(id)
+  if (result) {
+    schemesVersion.value++
+    // 如果删除的是当前方案，清除标记
+    if (currentSchemeId.value === id) {
+      currentSchemeId.value = null
+    }
+  }
+  return result
+}
+
+// 重命名方案
+function renameSchemeById(id: string, newName: string, newAuthor?: string, newDescription?: string): boolean {
+  const result = renameScheme(id, newName, newAuthor, newDescription)
+  if (result) {
+    schemesVersion.value++
+  }
+  return result
+}
+
+// 复制方案
+function copyScheme(id: string, newName?: string): ConfigSchemeWithData | null {
+  // 对于示例方案，需要异步加载
+  if (id.startsWith('example_')) {
+    // 这里需要特殊处理，返回 null，需要用 copySchemeAsync
+    return null
+  }
+  
+  const result = duplicateScheme(id, newName)
+  if (result) {
+    schemesVersion.value++
+  }
+  return result
+}
+
+// 异步复制方案（支持示例）
+async function copySchemeAsync(id: string, newName?: string): Promise<ConfigSchemeWithData | null> {
+  let schemeData = await loadExampleScheme(id)
+  if (!schemeData) {
+    schemeData = loadScheme(id)
+  }
+  if (!schemeData) return null
+  
+  const now = new Date().toISOString().split('T')[0]
+  const scheme: ConfigScheme = {
+    id: `scheme_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+    name: newName || `${schemeData.name} (副本)`,
+    author: schemeData.author,
+    created: now,
+    updated: now,
+    description: schemeData.description,
+  }
+  
+  const config = { ...schemeData.config }
+  config.meta = {
+    ...config.meta,
+    name: scheme.name,
+    author: scheme.author,
+    created: scheme.created,
+    description: scheme.description,
+  }
+  
+  saveScheme(scheme, config)
+  schemesVersion.value++
+  return { ...scheme, config }
+}
+
+// 应用方案到当前配置（不切换方案ID）
+function applySchemeToCurrent(id: string): boolean {
+  // 对于示例方案需要异步处理
+  if (id.startsWith('example_')) {
+    return false
+  }
+  
+  const schemeData = loadScheme(id)
+  if (!schemeData) return false
+  
+  applyConfig(schemeData.config)
+  return true
+}
+
+// 异步应用方案到当前配置（支持示例）
+async function applySchemeToCurrentAsync(id: string): Promise<boolean> {
+  let schemeData = await loadExampleScheme(id)
+  if (!schemeData) {
+    schemeData = loadScheme(id)
+  }
+  if (!schemeData) return false
+  
+  applyConfig(schemeData.config)
+  return true
+}
+
+// 获取当前方案信息
+function getCurrentScheme(): ConfigScheme | null {
+  if (!currentSchemeId.value) return null
+  const schemes = listSchemes()
+  return schemes.find(s => s.id === currentSchemeId.value) || null
+}
+
 export function useEngine() {
   return {
     engine, stats: readonly(stats), refreshStats, rootsVersion, configVersion,
@@ -255,5 +491,23 @@ export function useEngine() {
     isBracedRoot,
     needsPuaFont,
     getPuaFontName,
+    // 配置方案管理
+    currentSchemeId: readonly(currentSchemeId),
+    schemesVersion,
+    initSchemes,
+    getSchemes,
+    switchScheme,
+    saveCurrentToScheme,
+    createNewScheme,
+    importScheme,
+    exportScheme,
+    exportSchemeAsync,
+    removeScheme,
+    renameSchemeById,
+    copyScheme,
+    copySchemeAsync,
+    applySchemeToCurrent,
+    applySchemeToCurrentAsync,
+    getCurrentScheme,
   }
 }

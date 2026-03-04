@@ -256,6 +256,323 @@ export function saveConfigToStorage(config: UserConfig): void {
   }
 }
 
+// ============ 多配置方案管理 ============
+
+const SCHEMES_KEY = 'chars_hijack_schemes'
+const CURRENT_SCHEME_KEY = 'chars_hijack_current_scheme'
+
+// 配置方案元信息
+export interface ConfigScheme {
+  id: string           // 唯一标识
+  name: string         // 方案名称
+  author: string       // 作者
+  created: string      // 创建时间
+  updated: string      // 更新时间
+  description: string  // 描述
+  isExample?: boolean  // 是否为官方示例
+}
+
+// 带元信息的完整配置方案
+export interface ConfigSchemeWithData extends ConfigScheme {
+  config: UserConfig
+}
+
+// 获取所有配置方案列表
+export function listSchemes(): ConfigScheme[] {
+  try {
+    const data = localStorage.getItem(SCHEMES_KEY)
+    if (!data) return []
+    return JSON.parse(data) as ConfigScheme[]
+  } catch {
+    return []
+  }
+}
+
+// 保存配置方案列表
+function saveSchemesList(schemes: ConfigScheme[]): void {
+  localStorage.setItem(SCHEMES_KEY, JSON.stringify(schemes))
+}
+
+// 获取当前激活的方案ID
+export function getCurrentSchemeId(): string | null {
+  return localStorage.getItem(CURRENT_SCHEME_KEY)
+}
+
+// 设置当前激活的方案ID
+export function setCurrentSchemeId(id: string): void {
+  localStorage.setItem(CURRENT_SCHEME_KEY, id)
+}
+
+// 生成唯一ID
+function generateId(): string {
+  return `scheme_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+}
+
+// 获取方案存储键
+function getSchemeKey(id: string): string {
+  return `chars_hijack_scheme_${id}`
+}
+
+// 保存配置方案
+export function saveScheme(scheme: ConfigScheme, config: UserConfig): void {
+  // 保存方案数据
+  const key = getSchemeKey(scheme.id)
+  localStorage.setItem(key, JSON.stringify(config))
+  
+  // 更新方案列表
+  const schemes = listSchemes()
+  const index = schemes.findIndex(s => s.id === scheme.id)
+  if (index >= 0) {
+    schemes[index] = scheme
+  } else {
+    schemes.push(scheme)
+  }
+  saveSchemesList(schemes)
+}
+
+// 加载配置方案（同步版本，仅用于用户方案）
+export function loadScheme(id: string): ConfigSchemeWithData | null {
+  try {
+    // 示例方案需要用 loadExampleScheme 异步加载
+    if (id.startsWith('example_')) return null
+    
+    const schemes = listSchemes()
+    const scheme = schemes.find(s => s.id === id)
+    if (!scheme) return null
+    
+    const key = getSchemeKey(id)
+    const data = localStorage.getItem(key)
+    if (!data) return null
+    
+    const config = JSON.parse(data) as UserConfig
+    return { ...scheme, config }
+  } catch {
+    return null
+  }
+}
+
+// 删除配置方案
+export function deleteScheme(id: string): boolean {
+  try {
+    // 不允许删除官方示例
+    if (id.startsWith('example_')) return false
+    
+    const schemes = listSchemes()
+    const index = schemes.findIndex(s => s.id === id)
+    if (index < 0) return false
+    
+    // 删除方案数据
+    const key = getSchemeKey(id)
+    localStorage.removeItem(key)
+    
+    // 从列表中移除
+    schemes.splice(index, 1)
+    saveSchemesList(schemes)
+    
+    // 如果删除的是当前方案，清除当前方案标记
+    if (getCurrentSchemeId() === id) {
+      localStorage.removeItem(CURRENT_SCHEME_KEY)
+    }
+    
+    return true
+  } catch {
+    return false
+  }
+}
+
+// 重命名配置方案
+export function renameScheme(id: string, newName: string, newAuthor?: string, newDescription?: string): boolean {
+  try {
+    const schemes = listSchemes()
+    const scheme = schemes.find(s => s.id === id)
+    if (!scheme) return false
+    
+    scheme.name = newName
+    if (newAuthor !== undefined) scheme.author = newAuthor
+    if (newDescription !== undefined) scheme.description = newDescription
+    scheme.updated = new Date().toISOString().split('T')[0]
+    
+    saveSchemesList(schemes)
+    return true
+  } catch {
+    return false
+  }
+}
+
+// 创建新配置方案
+export function createScheme(name: string, author: string, description: string = ''): ConfigScheme {
+  const now = new Date().toISOString().split('T')[0]
+  const scheme: ConfigScheme = {
+    id: generateId(),
+    name,
+    author,
+    created: now,
+    updated: now,
+    description,
+  }
+  return scheme
+}
+
+// 从 TOML 导入创建配置方案
+export function importSchemeFromToml(toml: string, name?: string, author?: string): ConfigSchemeWithData | null {
+  try {
+    const config = parseConfig(toml)
+    const schemeName = name || config.meta?.name || '导入配置'
+    const schemeAuthor = author || config.meta?.author || '未知作者'
+    const now = new Date().toISOString().split('T')[0]
+    
+    const scheme: ConfigScheme = {
+      id: generateId(),
+      name: schemeName,
+      author: schemeAuthor,
+      created: config.meta?.created || now,
+      updated: now,
+      description: config.meta?.description || '',
+    }
+    
+    // 更新 config 的 meta 信息
+    config.meta = {
+      version: config.meta?.version || '1.0',
+      name: schemeName,
+      author: schemeAuthor,
+      created: scheme.created,
+      description: scheme.description,
+    }
+    
+    return { ...scheme, config }
+  } catch (e) {
+    console.error('Failed to import scheme:', e)
+    return null
+  }
+}
+
+// 导出配置方案为 TOML
+export function exportSchemeToToml(scheme: ConfigSchemeWithData): string {
+  // 确保 meta 信息同步
+  const config = { ...scheme.config }
+  config.meta = {
+    version: scheme.config.meta?.version || '1.0',
+    name: scheme.name,
+    author: scheme.author,
+    created: scheme.created,
+    description: scheme.description,
+  }
+  return exportConfig(config)
+}
+
+// 复制配置方案
+export function duplicateScheme(id: string, newName?: string): ConfigSchemeWithData | null {
+  const original = loadScheme(id)
+  if (!original) return null
+  
+  const now = new Date().toISOString().split('T')[0]
+  const scheme: ConfigScheme = {
+    id: generateId(),
+    name: newName || `${original.name} (副本)`,
+    author: original.author,
+    created: now,
+    updated: now,
+    description: original.description,
+  }
+  
+  const config = { ...original.config }
+  config.meta = {
+    ...config.meta,
+    name: scheme.name,
+    author: scheme.author,
+    created: scheme.created,
+    description: scheme.description,
+  }
+  
+  saveScheme(scheme, config)
+  return { ...scheme, config }
+}
+
+// ============ 官方示例配置 ============
+
+// 示例配置文件定义（只定义文件路径，元信息从文件读取）
+const EXAMPLE_FILES: { id: string; file: string }[] = [
+  { id: 'example_hakimi', file: '/data/examples/哈基米_字劫.toml' },
+]
+
+// 示例配置缓存
+let exampleSchemesCache: ConfigScheme[] | null = null
+let exampleTomlCache: Map<string, string> = new Map()
+let exampleConfigCache: Map<string, UserConfig> = new Map()
+
+// 加载所有示例配置的元信息
+async function loadExampleMeta(): Promise<ConfigScheme[]> {
+  if (exampleSchemesCache) return exampleSchemesCache
+  
+  const schemes: ConfigScheme[] = []
+  
+  for (const { id, file } of EXAMPLE_FILES) {
+    try {
+      const res = await fetch(file)
+      if (res.ok) {
+        const toml = await res.text()
+        exampleTomlCache.set(id, toml)
+        
+        const config = parseConfig(toml)
+        exampleConfigCache.set(id, config)
+        
+        const now = new Date().toISOString().split('T')[0]
+        schemes.push({
+          id,
+          name: config.meta?.name || '未命名方案',
+          author: config.meta?.author || '未知作者',
+          created: config.meta?.created || now,
+          updated: config.meta?.created || now,
+          description: config.meta?.description || '',
+          isExample: true,
+        })
+      }
+    } catch (e) {
+      console.error(`Failed to load example ${id}:`, e)
+    }
+  }
+  
+  exampleSchemesCache = schemes
+  return schemes
+}
+
+// 获取所有示例方案列表（同步版本，返回缓存或空数组）
+export function getExampleSchemes(): ConfigScheme[] {
+  return exampleSchemesCache || []
+}
+
+// 异步加载示例方案列表
+export async function loadExampleSchemes(): Promise<ConfigScheme[]> {
+  return loadExampleMeta()
+}
+
+export async function loadExampleScheme(id: string): Promise<ConfigSchemeWithData | null> {
+  // 确保已加载元信息
+  await loadExampleMeta()
+  
+  const config = exampleConfigCache.get(id)
+  const schemes = exampleSchemesCache || []
+  const scheme = schemes.find(s => s.id === id)
+  
+  if (!config || !scheme) return null
+  
+  return { ...scheme, config }
+}
+
+// 初始化示例配置（将示例添加到方案列表中显示）
+export async function initExampleSchemes(): Promise<void> {
+  const exampleSchemes = await loadExampleMeta()
+  const schemes = listSchemes()
+  
+  for (const example of exampleSchemes) {
+    if (!schemes.find(s => s.id === example.id)) {
+      schemes.push(example)
+    }
+  }
+  
+  saveSchemesList(schemes)
+}
+
 // ============ 默认配置 ============
 
 export function createDefaultConfig(name?: string, author?: string): UserConfig {

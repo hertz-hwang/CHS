@@ -4,8 +4,9 @@ import { useEngine, CHARSET_OPTIONS, CharsetOption } from "../composables/useEng
 import { useTheme } from "../composables/useTheme"
 import { exportConfig, parseConfig, saveConfigToStorage, createDefaultConfig } from "../engine/config"
 import Icon from './Icon.vue'
+import ConfigManager from './ConfigManager.vue'
 
-const { engine, refreshStats, toast, stats, configVersion, getConfig, applyConfig, currentCharsetId, setCharset, getCurrentCharsetName } = useEngine()
+const { engine, refreshStats, toast, stats, configVersion, getConfig, applyConfig, currentCharsetId, setCharset, getCurrentCharsetName, initSchemes, getCurrentScheme } = useEngine()
 const { theme, toggleTheme, isDark } = useTheme()
 
 const fileInput = ref<HTMLInputElement>()
@@ -25,10 +26,14 @@ const showNewConfigDialog = ref(false)
 const newConfigName = ref('')
 const newConfigAuthor = ref('')
 
-// 编辑配置信息对话框
+// 编辑方案信息对话框
 const showEditMetaDialog = ref(false)
 const editConfigName = ref('')
 const editConfigAuthor = ref('')
+const editConfigDesc = ref('')
+
+// 配置方案管理对话框
+const showConfigManager = ref(false)
 
 // 打开新建配置对话框
 function openNewConfigDialog() {
@@ -95,20 +100,22 @@ function triggerFileInput() {
   fileInput.value?.click()
 }
 
-// 打开编辑配置信息对话框
+// 打开编辑方案信息对话框
 function openEditMetaDialog() {
   const config = getConfig()
   editConfigName.value = config.meta?.name || ''
   editConfigAuthor.value = config.meta?.author || ''
+  editConfigDesc.value = config.meta?.description || ''
   showEditMetaDialog.value = true
 }
 
-// 确认编辑配置信息
+// 确认编辑方案信息
 function confirmEditMeta() {
   const config = getConfig()
   config.meta = config.meta || { version: '1.0' }
   config.meta.name = editConfigName.value.trim() || '未命名配置'
   config.meta.author = editConfigAuthor.value.trim() || '未知作者'
+  config.meta.description = editConfigDesc.value.trim()
   applyConfig(config)
   saveConfigToStorage(config)
   showEditMetaDialog.value = false
@@ -136,13 +143,13 @@ function onCharsetChange(event: Event) {
   <Teleport to="body">
     <div class="overlay" :class="{ show: showNewConfigDialog }" @click.self="showNewConfigDialog = false">
       <div class="modal">
-        <h2>新建配置</h2>
+        <h2>新建方案</h2>
         <div class="form-group">
-          <label>配置名称</label>
+          <label>方案名称</label>
           <input 
             type="text" 
             v-model="newConfigName" 
-            placeholder="请输入配置名称"
+            placeholder="请输入方案名称"
             @keydown.enter="confirmNewConfig"
           />
         </div>
@@ -163,17 +170,17 @@ function onCharsetChange(event: Event) {
     </div>
   </Teleport>
 
-  <!-- 编辑配置信息对话框 -->
+  <!-- 编辑方案信息对话框 -->
   <Teleport to="body">
     <div class="overlay" :class="{ show: showEditMetaDialog }" @click.self="showEditMetaDialog = false">
       <div class="modal">
-        <h2>编辑配置信息</h2>
+        <h2>编辑方案信息</h2>
         <div class="form-group">
-          <label>配置名称</label>
+          <label>方案名称</label>
           <input 
             type="text" 
             v-model="editConfigName" 
-            placeholder="请输入配置名称"
+            placeholder="请输入方案名称"
             @keydown.enter="confirmEditMeta"
           />
         </div>
@@ -186,6 +193,14 @@ function onCharsetChange(event: Event) {
             @keydown.enter="confirmEditMeta"
           />
         </div>
+        <div class="form-group">
+          <label>描述</label>
+          <textarea 
+            v-model="editConfigDesc" 
+            placeholder="请输入配置描述（可选）"
+            rows="3"
+          ></textarea>
+        </div>
         <div class="actions">
           <button class="btn btn-ghost" @click="showEditMetaDialog = false">取消</button>
           <button class="btn btn-primary" @click="confirmEditMeta">保存</button>
@@ -197,8 +212,25 @@ function onCharsetChange(event: Event) {
   <header class="header">
     <div class="header-left">
       <div class="title">
-        <h1>字劫 <span class="title-suffix">CHS</span><span class="ver">v0.1.5</span></h1>
+        <h1>字劫 <span class="title-suffix">CHS</span><span class="ver">v0.1.6</span></h1>
       </div>
+      
+      <!-- 配置操作 -->
+      <div class="config-actions">
+        <button class="btn btn-sm btn-primary" @click="showConfigManager = true" title="配置方案管理">
+          <Icon name="folder" :size="16" class="btn-icon" />
+          <span class="btn-text">方案</span>
+        </button>
+      </div>
+      
+      <!-- 配置信息展示 -->
+      <div class="config-info" @click="openEditMetaDialog" title="点击编辑方案信息">
+        <span class="config-name">{{ configName }}</span>
+        <span class="config-author">{{ configAuthor }}</span>
+      </div>
+    </div>
+    
+    <div class="header-right">
       <div class="stats">
         <div class="stat-item">
           <span class="stat-label">拆分</span>
@@ -219,9 +251,10 @@ function onCharsetChange(event: Event) {
       </div>
       
       <!-- 字集选择器 -->
-      <div class="charset-selector">
+      <div class="stat-item charset-item">
+        <span class="stat-label">字集</span>
         <select 
-          class="charset-select" 
+          class="stat-value charset-select" 
           :value="currentCharsetId" 
           @change="onCharsetChange($event)"
           title="选择字集"
@@ -232,33 +265,10 @@ function onCharsetChange(event: Event) {
         </select>
       </div>
     </div>
-    
-    <div class="header-right">
-      <!-- 配置信息展示 -->
-      <div class="config-info" @click="openEditMetaDialog" title="点击编辑配置信息">
-        <span class="config-name">{{ configName }}</span>
-        <span class="config-author">{{ configAuthor }}</span>
-      </div>
-      
-      <!-- 配置操作 -->
-      <div class="config-actions">
-        <input ref="fileInput" type="file" accept=".toml" style="display:none" @change="importConfig" />
-        <button class="btn btn-sm btn-ghost" @click="newConfig" title="新建配置">
-          <Icon name="new" :size="16" class="btn-icon" />
-          <span class="btn-text">新建</span>
-        </button>
-        <button class="btn btn-sm btn-ghost" @click="triggerFileInput" title="导入配置">
-          <Icon name="import" :size="16" class="btn-icon" />
-          <span class="btn-text">导入</span>
-        </button>
-        <button class="btn btn-sm btn-ghost" @click="exportConfigFile" title="导出配置">
-          <Icon name="export" :size="16" class="btn-icon" />
-          <span class="btn-text">导出</span>
-        </button>
-      </div>
-      
-    </div>
   </header>
+  
+  <!-- 配置方案管理对话框 -->
+  <ConfigManager v-model="showConfigManager" />
 </template>
 
 <style scoped>
@@ -390,6 +400,38 @@ h1 {
   gap: 4px;
 }
 
+.btn-sm {
+  padding: 6px 12px;
+  font-size: 13px;
+  border-radius: 6px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-family: inherit;
+}
+
+.btn-sm.btn-primary {
+  background: var(--primary);
+  color: white;
+  border: none;
+}
+
+.btn-sm.btn-primary:hover {
+  background: var(--primary-light);
+  transform: translateY(-1px);
+}
+
+.btn-sm.btn-ghost {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+
+.btn-sm.btn-ghost:hover {
+  background: var(--bg3);
+  border-color: var(--primary);
+}
+
 .btn-icon {
   font-size: 14px;
 }
@@ -499,7 +541,8 @@ h1 {
   margin-bottom: 6px;
 }
 
-.form-group input {
+.form-group input,
+.form-group textarea {
   width: 100%;
   padding: 8px 12px;
   font-size: 14px;
@@ -510,14 +553,22 @@ h1 {
   outline: none;
   transition: border-color 0.2s ease;
   box-sizing: border-box;
+  font-family: inherit;
 }
 
-.form-group input:focus {
+.form-group input:focus,
+.form-group textarea:focus {
   border-color: var(--primary);
 }
 
-.form-group input::placeholder {
+.form-group input::placeholder,
+.form-group textarea::placeholder {
   color: var(--text3);
+}
+
+.form-group textarea {
+  resize: vertical;
+  min-height: 60px;
 }
 
 .actions {
@@ -528,23 +579,23 @@ h1 {
 }
 
 /* 字集选择器样式 */
-.charset-selector {
-  display: flex;
-  align-items: center;
+.charset-item {
+  margin-left: 8px;
 }
 
 .charset-select {
-  padding: 6px 12px;
-  font-size: 13px;
-  font-weight: 500;
+  padding: 2px 8px;
+  font-size: 14px;
+  font-weight: 600;
   color: var(--primary);
   background: var(--primary-bg);
   border: 1px solid var(--primary);
-  border-radius: 6px;
+  border-radius: 4px;
   cursor: pointer;
   outline: none;
   transition: all 0.2s ease;
-  min-width: 90px;
+  min-width: 70px;
+  text-align: center;
 }
 
 .charset-select:hover {
@@ -557,14 +608,8 @@ h1 {
 }
 
 @media (max-width: 900px) {
-  .charset-selector {
-    order: -1;
-  }
-  
-  .charset-select {
-    font-size: 12px;
-    padding: 4px 8px;
-    min-width: 70px;
+  .charset-item {
+    display: none;
   }
 }
 </style>
