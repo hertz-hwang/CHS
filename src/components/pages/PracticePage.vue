@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, watch, onMounted, shallowRef } from 'vue'
+import { computed, watch, onMounted, onUnmounted, shallowRef } from 'vue'
 import { useEngine } from '../../composables/useEngine'
 import Icon from '../Icon.vue'
 
@@ -73,6 +73,9 @@ const showHint = shallowRef(true)  // 是否显示答案提示
 const userKeys = shallowRef('')
 const isCorrect = shallowRef(true)
 const showComplete = shallowRef(false)
+const spaceForHint = shallowRef(true)  // 空格键提示编码（默认勾选）
+const usedHint = shallowRef(false)     // 当前卡片是否使用了提示
+const isHintRequested = shallowRef(false)  // 用户主动请求提示
 
 // 初始化记录
 function initRecords() {
@@ -115,8 +118,19 @@ function updateCurrentCard() {
 
   const idx = records.value[0][1]
   currentCard.value = cards[idx]
+
+  // 如果上一张卡片用户使用了提示，新卡片不自动显示提示
+  // 把新卡片标记为已见过
+  if (usedHint.value && records.value[0][0] === -1) {
+    records.value[0][0] = 0
+  }
+
   // 新卡片（count === -1）时显示提示，否则不显示
   showHint.value = records.value[0][0] === -1
+  // 重置状态
+  usedHint.value = false
+  isHintRequested.value = false
+  isCorrect.value = true
 }
 
 // 保存记录
@@ -136,38 +150,54 @@ const moveSteps = [3, 9, 21, 36, 60, 100]
 
 function answer(correct: boolean) {
   if (!correct) {
-    if (records.value[0][0] > 1) {
+    const currentCount = records.value[0][0]
+    // 如果卡片已完成（count >= 2 表示已计入进度），需要减少进度
+    if (currentCount >= 2 && currentCount < 8) {
       progress.value -= 1
+    } else if (currentCount === 8) {
+      // 已标记为完成的卡片答错，减少进度并重置计数
+      progress.value -= 1
+      records.value[0][0] = 0
     }
-    records.value[0][0] = 0  // 答错后设为0，不再是新卡片
-    showHint.value = false   // 答错后不再显示提示
+    // 答错后显示编码提示，标记使用了提示
+    showHint.value = true
+    usedHint.value = true
     saveRecords()
     return
   }
 
   const firstRecord = records.value[0]
-  const firstCount = ++firstRecord[0]
 
-  if (firstCount === 2) {
-    progress.value += 1
-  }
+  // 如果使用了提示，这次练习不计入 count，只移动卡片
+  if (!usedHint.value) {
+    const firstCount = ++firstRecord[0]
 
-  const maxIndex = allCards.value.length - 1
-  const maxMoveStepsIndex = moveSteps.length - 1
+    if (firstCount === 2) {
+      progress.value += 1
+    }
 
-  // 计算移动步数
-  let step = 0
-  if (firstCount > maxMoveStepsIndex) {
-    firstRecord[0] = 8
-    step = maxIndex
+    const maxIndex = allCards.value.length - 1
+    const maxMoveStepsIndex = moveSteps.length - 1
+
+    // 计算移动步数
+    let step = 0
+    if (firstCount > maxMoveStepsIndex) {
+      firstRecord[0] = 8
+      step = maxIndex
+    } else {
+      step = moveSteps[firstCount]
+      if (step > maxIndex) step = maxIndex
+    }
+
+    // 移动卡片
+    records.value.copyWithin(0, 1, step + 1)
+    records.value[step] = firstRecord
   } else {
-    step = moveSteps[firstCount]
-    if (step > maxIndex) step = maxIndex
+    // 使用了提示，只移动到后面几个位置
+    const step = Math.min(3, allCards.value.length - 1)
+    records.value.copyWithin(0, 1, step + 1)
+    records.value[step] = firstRecord
   }
-
-  // 移动卡片
-  records.value.copyWithin(0, 1, step + 1)
-  records.value[step] = firstRecord
 
   saveRecords()
   updateCurrentCard()
@@ -178,6 +208,39 @@ function answer(correct: boolean) {
   }
 }
 
+// 处理键盘事件
+function handleKeydown(e: KeyboardEvent) {
+  if (e.key === ' ' && spaceForHint.value) {
+    // 空格键提示编码模式：表示用户忘记编码，显示提示
+    e.preventDefault()
+
+    if (!currentCard.value) return
+
+    // 标记使用了提示，这次练习不计入 count
+    usedHint.value = true
+    // 标记用户主动请求提示，显示黄色状态
+    isHintRequested.value = true
+
+    const currentCount = records.value[0][0]
+    // 如果是新卡片（count === -1），标记为已见过
+    if (currentCount === -1) {
+      records.value[0][0] = 0
+    }
+    // 如果是已完成的卡片（count >= 2），减少进度并重置
+    if (currentCount >= 2 && currentCount < 8) {
+      progress.value -= 1
+    } else if (currentCount === 8) {
+      progress.value -= 1
+      records.value[0][0] = 0
+    }
+
+    // 显示编码提示
+    showHint.value = true
+    saveRecords()
+  }
+  // 如果未勾选空格提示，空格键作为编码输入，显示为 "_"
+}
+
 // 监听用户输入
 watch(userKeys, (newKeys) => {
   if (!currentCard.value) return
@@ -185,8 +248,11 @@ watch(userKeys, (newKeys) => {
   // 编码长度不足时不判断
   if (newKeys.length < currentCard.value.code.length) return
 
-  // 检查答案
-  if (newKeys === currentCard.value.code) {
+  // 检查答案（将 "_" 视为空格）
+  const normalizedInput = newKeys.replace(/_/g, ' ')
+  const normalizedCode = currentCard.value.code
+
+  if (normalizedInput === normalizedCode) {
     answer(true)
     isCorrect.value = true
   } else {
@@ -232,6 +298,13 @@ onMounted(() => {
   initRecords()
   progress.value = scanProgress()
   focusInput()
+  // 添加全局键盘事件监听
+  document.addEventListener('keydown', handleKeydown)
+})
+
+// 清理
+onUnmounted(() => {
+  document.removeEventListener('keydown', handleKeydown)
 })
 
 // 监听字根变化
@@ -248,16 +321,22 @@ watch(allCards, () => {
       <div class="progress-info">
         <span class="progress-text">{{ progress }} / {{ allCards.length }}</span>
       </div>
-      <button class="reset-btn" @click="restart" title="重置进度">
-        <Icon name="refresh" :size="14" />
-      </button>
+      <div class="header-actions">
+        <label class="hint-toggle">
+          <input type="checkbox" v-model="spaceForHint" />
+          <span>空格提示</span>
+        </label>
+        <button class="reset-btn" @click="restart" title="重置进度">
+          <Icon name="refresh" :size="14" />
+        </button>
+      </div>
     </div>
     <div class="progress-bar">
       <div class="progress-fill" :style="{ width: `${(progress / allCards.length) * 100}%` }"></div>
     </div>
 
     <!-- 主练习区域 -->
-    <div v-if="currentCard && !showComplete" class="practice-area" :class="{ 'wrong': !isCorrect }">
+    <div v-if="currentCard && !showComplete" class="practice-area" :class="{ 'wrong': !isCorrect, 'hint-mode': isHintRequested }">
       <!-- 字根展示 -->
       <div class="card-display">
         <div
@@ -332,6 +411,33 @@ watch(allCards, () => {
   gap: 8px;
 }
 
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.hint-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text3);
+  cursor: pointer;
+  user-select: none;
+}
+
+.hint-toggle input {
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+  accent-color: var(--primary);
+}
+
+.hint-toggle:hover {
+  color: var(--text2);
+}
+
 .progress-text {
   font-size: 13px;
   font-weight: 500;
@@ -390,6 +496,11 @@ watch(allCards, () => {
 .practice-area.wrong {
   background: color-mix(in srgb, var(--danger) 4%, var(--bg2));
   border-color: color-mix(in srgb, var(--danger) 20%, var(--border));
+}
+
+.practice-area.hint-mode {
+  background: color-mix(in srgb, #f59e0b 4%, var(--bg2));
+  border-color: color-mix(in srgb, #f59e0b 20%, var(--border));
 }
 
 /* 字根展示 */

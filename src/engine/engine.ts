@@ -99,9 +99,12 @@ export class CharsHijack {
 
   // 配置元信息
   private _meta: UserConfig['meta'] = { version: '1.0' }
-  
+
   // 当前字集ID
   private _charset: string = 'all'
+
+  // 字根到汉字的反向索引（预计算，用于加速 findCharsDeep）
+  private _rootToChars: Map<string, string[]> | null = null
 
   private _pickG(variants: string[]): string | null {
     let universal: string | null = null
@@ -454,6 +457,7 @@ export class CharsHijack {
   // 设置当前字集
   setCharset(charsetId: string): void {
     this._charset = charsetId
+    this._rootToChars = null
   }
 
   // 重新排序字根：将 draggedRoot 移动到 targetRoot 前面（同一键位内）
@@ -519,6 +523,7 @@ export class CharsHijack {
   // 清除缓存（当字根或规则变更时调用）
   clearCache(): void {
     this._cache.clear()
+    this._rootToChars = null
   }
 
   // 获取字的根编码
@@ -977,12 +982,34 @@ export class CharsHijack {
   }
 
   findCharsDeep(comp: string): string[] {
-    const res: string[] = []
+    // 使用预计算的反向索引
+    const index = this._getRootToCharsIndex()
+    return index.get(comp) || []
+  }
+
+  // 获取字根到汉字的反向索引（延迟构建）
+  private _getRootToCharsIndex(): Map<string, string[]> {
+    // 延迟构建：首次访问或清除后重建
+    if (!this._rootToChars) {
+      this._rootToChars = new Map()
+      this._rebuildRootToCharsIndex()
+    }
+    return this._rootToChars
+  }
+
+  // 重建字根到汉字的反向索引
+  private _rebuildRootToCharsIndex(): void {
+    if (!this._rootToChars) this._rootToChars = new Map()
+    this._rootToChars.clear()
     for (const ch of this.getCharset()) {
       const { leaves } = this.decompose(ch)
-      if (leaves.includes(comp)) res.push(ch)
+      for (const root of leaves) {
+        if (!this._rootToChars.has(root)) {
+          this._rootToChars.set(root, [])
+        }
+        this._rootToChars.get(root)!.push(ch)
+      }
     }
-    return res
   }
 
   coverage(charsetName?: string | null): CoverageResult {
