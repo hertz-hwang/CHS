@@ -38,8 +38,9 @@ export interface CodeRuleNode {
   label: string
   rootIndex?: number
   codeIndex?: number
+  charIndex?: number      // 多字词取码：第几个字（1-indexed）
   nextNode?: string       // 取码节点的下一节点
-  conditionType?: 'root_exists' | 'root_has_code' | 'root_count'
+  conditionType?: 'root_exists' | 'root_has_code' | 'root_count' | 'char_exists'
   conditionValue?: number
   conditionCodeIndex?: number  // 用于 root_has_code 条件
   trueBranch?: string
@@ -62,7 +63,8 @@ export interface UserConfig {
   merged_roots: Record<string, string>  // 归并字根 -> 来源字根（编码相同）
   code_equivalences: Record<string, string>  // 字根半归并: "目.1" = "日.1" 表示目的第2码等于日的第2码
   rules: TransformRuleConfig[]        // IDS 转换规则
-  code_rules: CodeRuleNode[]          // 取码规则
+  code_rules: CodeRuleNode[]          // 单字取码规则
+  word_code_rules?: CodeRuleNode[]    // 多字词取码规则
 }
 
 // ============ 编码解析 ============
@@ -114,6 +116,7 @@ export function parseConfig(toml: string): UserConfig {
       code_equivalences: parsed.code_equivalences || {},
       rules: parsed.rules || [],
       code_rules: parsed.code_rules || [],
+      word_code_rules: parsed.word_code_rules || [],
     }
   } catch (e) {
     console.error('TOML parse error:', e)
@@ -126,6 +129,7 @@ export function parseConfig(toml: string): UserConfig {
       code_equivalences: {},
       rules: [],
       code_rules: [],
+      word_code_rules: [],
     }
   }
 }
@@ -213,7 +217,7 @@ export function exportConfig(config: UserConfig): string {
     lines.push('')
   }
 
-  // code_rules (取码规则)
+  // code_rules (单字取码规则)
   for (const codeRule of config.code_rules) {
     lines.push('[[code_rules]]')
     lines.push(`id = "${codeRule.id}"`)
@@ -221,6 +225,7 @@ export function exportConfig(config: UserConfig): string {
     lines.push(`label = "${codeRule.label}"`)
     if (codeRule.rootIndex !== undefined) lines.push(`rootIndex = ${codeRule.rootIndex}`)
     if (codeRule.codeIndex !== undefined) lines.push(`codeIndex = ${codeRule.codeIndex}`)
+    if (codeRule.charIndex !== undefined) lines.push(`charIndex = ${codeRule.charIndex}`)
     if (codeRule.nextNode !== undefined) lines.push(`nextNode = "${codeRule.nextNode}"`)
     if (codeRule.conditionType !== undefined) lines.push(`conditionType = "${codeRule.conditionType}"`)
     if (codeRule.conditionValue !== undefined) lines.push(`conditionValue = ${codeRule.conditionValue}`)
@@ -231,6 +236,29 @@ export function exportConfig(config: UserConfig): string {
       lines.push(`position = { x = ${codeRule.position.x}, y = ${codeRule.position.y} }`)
     }
     lines.push('')
+  }
+
+  // word_code_rules (多字词取码规则)
+  if (config.word_code_rules && config.word_code_rules.length > 0) {
+    for (const codeRule of config.word_code_rules) {
+      lines.push('[[word_code_rules]]')
+      lines.push(`id = "${codeRule.id}"`)
+      lines.push(`type = "${codeRule.type}"`)
+      lines.push(`label = "${codeRule.label}"`)
+      if (codeRule.rootIndex !== undefined) lines.push(`rootIndex = ${codeRule.rootIndex}`)
+      if (codeRule.codeIndex !== undefined) lines.push(`codeIndex = ${codeRule.codeIndex}`)
+      if (codeRule.charIndex !== undefined) lines.push(`charIndex = ${codeRule.charIndex}`)
+      if (codeRule.nextNode !== undefined) lines.push(`nextNode = "${codeRule.nextNode}"`)
+      if (codeRule.conditionType !== undefined) lines.push(`conditionType = "${codeRule.conditionType}"`)
+      if (codeRule.conditionValue !== undefined) lines.push(`conditionValue = ${codeRule.conditionValue}`)
+      if (codeRule.conditionCodeIndex !== undefined) lines.push(`conditionCodeIndex = ${codeRule.conditionCodeIndex}`)
+      if (codeRule.trueBranch !== undefined) lines.push(`trueBranch = "${codeRule.trueBranch}"`)
+      if (codeRule.falseBranch !== undefined) lines.push(`falseBranch = "${codeRule.falseBranch}"`)
+      if (codeRule.position !== undefined) {
+        lines.push(`position = { x = ${codeRule.position.x}, y = ${codeRule.position.y} }`)
+      }
+      lines.push('')
+    }
   }
 
   return lines.join('\n')
@@ -591,6 +619,7 @@ export function createDefaultConfig(name?: string, author?: string): UserConfig 
     code_equivalences: {},
     rules: [],
     code_rules: [],
+    word_code_rules: [],
   }
 }
 
@@ -600,5 +629,25 @@ export function createDefaultCodeRules(): CodeRuleNode[] {
   return [
     { id: 'start', type: 'start', label: '开始' },
     { id: 'end', type: 'end', label: '结束' },
+  ]
+}
+
+// ============ 默认多字词取码规则 ============
+
+export function createDefaultWordCodeRules(): CodeRuleNode[] {
+  return [
+    { id: 'start', type: 'start', label: '开始', nextNode: 'c0' },
+    { id: 'end', type: 'end', label: '结束', position: { x: 384, y: 924 } },
+    { id: 'c0', type: 'condition', label: '存在第3字？', conditionType: 'char_exists', conditionValue: 3, trueBranch: 's0', falseBranch: 's9', position: { x: 223, y: 154 } },
+    { id: 's0', type: 'pick', label: '取第1字第1根首码', rootIndex: 1, codeIndex: 1, charIndex: 1, nextNode: 's5', position: { x: 136, y: 260 } },
+    { id: 's1', type: 'pick', label: '取第1字第2根首码', rootIndex: 2, codeIndex: 1, charIndex: 1, nextNode: 's2', position: { x: 395, y: 385 } },
+    { id: 's2', type: 'pick', label: '取第2字第1根首码', rootIndex: 1, codeIndex: 1, charIndex: 2, nextNode: 's3', position: { x: 399, y: 491 } },
+    { id: 's3', type: 'pick', label: '取第2字第2根首码', rootIndex: 2, codeIndex: 1, charIndex: 2, nextNode: 'end', position: { x: 401, y: 589 } },
+    { id: 's5', type: 'pick', label: '取第2字第1根首码', rootIndex: 1, codeIndex: 1, charIndex: 2, nextNode: 's6', position: { x: 140, y: 379 } },
+    { id: 's6', type: 'pick', label: '取第3字第1根首码', rootIndex: 1, codeIndex: 1, charIndex: 3, nextNode: 'c1', position: { x: 144, y: 486 } },
+    { id: 's4', type: 'pick', label: '取第3字第2根首码', rootIndex: 2, codeIndex: 1, charIndex: 3, nextNode: 'end', position: { x: 247, y: 711 } },
+    { id: 's7', type: 'pick', label: '取末字第1根首码', rootIndex: 1, codeIndex: 1, charIndex: -1, nextNode: 'end', position: { x: 11, y: 719 } },
+    { id: 's9', type: 'pick', label: '取第1字第1根首码', rootIndex: 1, codeIndex: 1, charIndex: 1, nextNode: 's1', position: { x: 381, y: 269 } },
+    { id: 'c1', type: 'condition', label: '存在第4字？', conditionType: 'char_exists', conditionValue: 4, trueBranch: 's7', falseBranch: 's4', position: { x: 125, y: 610 } },
   ]
 }

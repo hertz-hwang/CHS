@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { VueFlow, useVueFlow, Position, MarkerType, Handle, type NodeMouseEvent, type NodeDragEvent } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
@@ -44,6 +44,10 @@ type FlowEdge = {
   markerEnd?: { type: MarkerType; color?: string }
 }
 
+// ============ 标签切换 ============
+
+const activeTab = ref<'char' | 'word'>('char')
+
 // ============ 节点面板类型 ============
 
 interface NodeTemplate {
@@ -54,42 +58,84 @@ interface NodeTemplate {
   color: string
 }
 
-const nodeTemplates: NodeTemplate[] = [
+const nodeTemplatesChar: NodeTemplate[] = [
   { type: 'start', label: '开始节点', icon: '▶', description: '流程起点（仅一个）', color: 'var(--success)' },
   { type: 'end', label: '结束节点', icon: '⏹', description: '流程终点（仅一个）', color: 'var(--danger)' },
   { type: 'pick', label: '取码节点', icon: '📝', description: '取指定字根的码', color: 'var(--primary)' },
   { type: 'condition', label: '条件节点', icon: '❓', description: '条件判断分支', color: 'var(--purple)' },
 ]
 
+const nodeTemplatesWord: NodeTemplate[] = [
+  { type: 'start', label: '开始节点', icon: '▶', description: '流程起点（仅一个）', color: 'var(--success)' },
+  { type: 'end', label: '结束节点', icon: '⏹', description: '流程终点（仅一个）', color: 'var(--danger)' },
+  { type: 'pick', label: '取码节点', icon: '📝', description: '取指定字的字根码', color: 'var(--primary)' },
+  { type: 'condition', label: '条件节点', icon: '❓', description: '条件判断分支', color: 'var(--purple)' },
+]
+
 // ============ 规则数据 ============
 
 const codeRules = ref<CodeRuleNode[]>([])
+const wordCodeRules = ref<CodeRuleNode[]>([])
 const selectedRule = ref<CodeRuleNode | null>(null)
 
 const { fitView, addNodes, addEdges, onConnect } = useVueFlow()
 
 // ============ 规则加载 ============
 
-function loadRulesFromEngine(): CodeRuleNode[] {
-  const rules = engine.getCodeRules()
-  if (rules.length > 0) return rules
-  return [
-    { id: 's0', type: 'start', label: '开始' },
-    { id: 's1', type: 'end', label: '结束' },
-  ]
+function loadRulesFromEngine(): { charRules: CodeRuleNode[]; wordRules: CodeRuleNode[] } {
+  const charRules = engine.getCodeRules()
+  const wordRules = engine.getWordCodeRules()
+  return {
+    charRules: charRules.length > 0 ? charRules : createDefaultRules(),
+    wordRules: wordRules.length > 0 ? wordRules : createDefaultWordRules(),
+  }
 }
 
 function createDefaultRules(): CodeRuleNode[] {
   return [
-    { id: 's0', type: 'start', label: '开始' },
-    { id: 's1', type: 'end', label: '结束' },
+    { id: 'start', type: 'start', label: '开始' },
+    { id: 'end', type: 'end', label: '结束' },
   ]
 }
+
+function createDefaultWordRules(): CodeRuleNode[] {
+  // 返回默认的多字词取码规则
+  return [
+    { id: 'start', type: 'start', label: '开始', nextNode: 'c0' },
+    { id: 'end', type: 'end', label: '结束', position: { x: 384, y: 924 } },
+    { id: 'c0', type: 'condition', label: '存在第3字？', conditionType: 'char_exists', conditionValue: 3, trueBranch: 's0', falseBranch: 's9', position: { x: 223, y: 154 } },
+    { id: 's0', type: 'pick', label: '取第1字第1根首码', rootIndex: 1, codeIndex: 1, charIndex: 1, nextNode: 's5', position: { x: 136, y: 260 } },
+    { id: 's1', type: 'pick', label: '取第1字第2根首码', rootIndex: 2, codeIndex: 1, charIndex: 1, nextNode: 's2', position: { x: 395, y: 385 } },
+    { id: 's2', type: 'pick', label: '取第2字第1根首码', rootIndex: 1, codeIndex: 1, charIndex: 2, nextNode: 's3', position: { x: 399, y: 491 } },
+    { id: 's3', type: 'pick', label: '取第2字第2根首码', rootIndex: 2, codeIndex: 1, charIndex: 2, nextNode: 'end', position: { x: 401, y: 589 } },
+    { id: 's5', type: 'pick', label: '取第2字第1根首码', rootIndex: 1, codeIndex: 1, charIndex: 2, nextNode: 's6', position: { x: 140, y: 379 } },
+    { id: 's6', type: 'pick', label: '取第3字第1根首码', rootIndex: 1, codeIndex: 1, charIndex: 3, nextNode: 'c1', position: { x: 144, y: 486 } },
+    { id: 's4', type: 'pick', label: '取第3字第2根首码', rootIndex: 2, codeIndex: 1, charIndex: 3, nextNode: 'end', position: { x: 247, y: 711 } },
+    { id: 's7', type: 'pick', label: '取末字第1根首码', rootIndex: 1, codeIndex: 1, charIndex: -1, nextNode: 'end', position: { x: 11, y: 719 } },
+    { id: 's9', type: 'pick', label: '取第1字第1根首码', rootIndex: 1, codeIndex: 1, charIndex: 1, nextNode: 's1', position: { x: 381, y: 269 } },
+    { id: 'c1', type: 'condition', label: '存在第4字？', conditionType: 'char_exists', conditionValue: 4, trueBranch: 's7', falseBranch: 's4', position: { x: 125, y: 610 } },
+  ]
+}
+
+// ============ 当前规则（根据标签） ============
+
+const currentRules = computed({
+  get: () => activeTab.value === 'char' ? codeRules.value : wordCodeRules.value,
+  set: (val) => {
+    if (activeTab.value === 'char') {
+      codeRules.value = val
+    } else {
+      wordCodeRules.value = val
+    }
+  }
+})
+
+const currentNodeTemplates = computed(() => activeTab.value === 'char' ? nodeTemplatesChar : nodeTemplatesWord)
 
 // ============ 检查节点数量 ============
 
 function getNodeCount(type: 'start' | 'end' | 'pick' | 'condition'): number {
-  return codeRules.value.filter(r => r.type === type).length
+  return currentRules.value.filter(r => r.type === type).length
 }
 
 function canAddNode(type: 'start' | 'end' | 'pick' | 'condition'): boolean {
@@ -103,7 +149,7 @@ function canAddNode(type: 'start' | 'end' | 'pick' | 'condition'): boolean {
 function getNewId(type: 's' | 'c'): string {
   let newId = 0
   const prefix = type
-  const existingIds = codeRules.value
+  const existingIds = currentRules.value
     .filter(r => r.id.startsWith(prefix))
     .map(r => parseInt(r.id.slice(1), 10))
     .filter(n => !isNaN(n))
@@ -130,28 +176,49 @@ function addNodeFromTemplate(template: NodeTemplate) {
   let newRule: CodeRuleNode
 
   if (template.type === 'start') {
-    newRule = { id: 's0', type: 'start', label: '开始' }
+    newRule = { id: 'start', type: 'start', label: '开始' }
   } else if (template.type === 'end') {
-    newRule = { id: 's1', type: 'end', label: '结束' }
+    newRule = { id: 'end', type: 'end', label: '结束' }
   } else if (template.type === 'pick') {
-    newRule = {
-      id,
-      type: 'pick',
-      label: '取第1根首码',
-      rootIndex: 1,
-      codeIndex: 1,
+    if (activeTab.value === 'word') {
+      newRule = {
+        id,
+        type: 'pick',
+        label: '取第1字第1根首码',
+        charIndex: 1,
+        rootIndex: 1,
+        codeIndex: 1,
+      }
+    } else {
+      newRule = {
+        id,
+        type: 'pick',
+        label: '取第1根首码',
+        rootIndex: 1,
+        codeIndex: 1,
+      }
     }
   } else {
-    newRule = {
-      id,
-      type: 'condition',
-      label: '存在第1根？',
-      conditionType: 'root_exists',
-      conditionValue: 1,
+    if (activeTab.value === 'word') {
+      newRule = {
+        id,
+        type: 'condition',
+        label: '存在第1字？',
+        conditionType: 'char_exists',
+        conditionValue: 1,
+      }
+    } else {
+      newRule = {
+        id,
+        type: 'condition',
+        label: '存在第1根？',
+        conditionType: 'root_exists',
+        conditionValue: 1,
+      }
     }
   }
 
-  codeRules.value = [...codeRules.value, newRule]
+  currentRules.value = [...currentRules.value, newRule]
   saveRules()
   toast(`已添加${template.label}`)
 }
@@ -188,7 +255,7 @@ function onDrop(event: DragEvent) {
     return
   }
 
-  addNodeFromTemplate(nodeTemplates.find(t => t.type === type)!)
+  addNodeFromTemplate(currentNodeTemplates.value.find(t => t.type === type)!)
 }
 
 function onDragOver(event: DragEvent) {
@@ -202,7 +269,7 @@ function onDragOver(event: DragEvent) {
 
 // 检查是否所有节点都有保存的位置
 function allNodesHavePositions(): boolean {
-  return codeRules.value.every(rule => rule.position !== undefined)
+  return currentRules.value.every(rule => rule.position !== undefined)
 }
 
 function layoutNodes(): Map<string, { x: number; y: number }> {
@@ -210,7 +277,7 @@ function layoutNodes(): Map<string, { x: number; y: number }> {
   
   // 如果所有节点都已有位置，直接使用保存的位置
   if (allNodesHavePositions()) {
-    for (const rule of codeRules.value) {
+    for (const rule of currentRules.value) {
       if (rule.position) {
         positions.set(rule.id, rule.position)
       }
@@ -225,12 +292,12 @@ function layoutNodes(): Map<string, { x: number; y: number }> {
   const adj = new Map<string, string[]>()
   const reverseAdj = new Map<string, string[]>()
   
-  for (const rule of codeRules.value) {
+  for (const rule of currentRules.value) {
     adj.set(rule.id, [])
     reverseAdj.set(rule.id, [])
   }
   
-  for (const rule of codeRules.value) {
+  for (const rule of currentRules.value) {
     if (rule.nextNode) {
       adj.get(rule.id)?.push(rule.nextNode)
       reverseAdj.get(rule.nextNode)?.push(rule.id)
@@ -246,11 +313,11 @@ function layoutNodes(): Map<string, { x: number; y: number }> {
   }
   
   // 找到开始节点
-  const startRule = codeRules.value.find(r => r.type === 'start')
+  const startRule = currentRules.value.find(r => r.type === 'start')
   if (!startRule) {
     // 没有开始节点，按 ID 顺序排列
     let y = 50
-    for (const rule of codeRules.value) {
+    for (const rule of currentRules.value) {
       // 优先使用保存的位置
       if (rule.position) {
         positions.set(rule.id, rule.position)
@@ -291,7 +358,7 @@ function layoutNodes(): Map<string, { x: number; y: number }> {
     let x = 300 - totalWidth / 2
     
     for (const nodeId of nodes) {
-      const rule = codeRules.value.find(r => r.id === nodeId)
+      const rule = currentRules.value.find(r => r.id === nodeId)
       // 优先使用保存的位置
       if (rule?.position) {
         positions.set(nodeId, rule.position)
@@ -305,7 +372,7 @@ function layoutNodes(): Map<string, { x: number; y: number }> {
   
   // 处理未访问的节点（孤立节点）
   let orphanY = y + 50
-  for (const rule of codeRules.value) {
+  for (const rule of currentRules.value) {
     if (!visited.has(rule.id)) {
       // 优先使用保存的位置
       if (rule.position) {
@@ -325,7 +392,7 @@ function layoutNodes(): Map<string, { x: number; y: number }> {
 const flowNodes = computed<FlowNode[]>(() => {
   const positions = layoutNodes()
   
-  return codeRules.value.map((rule) => {
+  return currentRules.value.map((rule) => {
     const pos = positions.get(rule.id) || rule.position || { x: 0, y: 0 }
     const nodeType = rule.type === 'condition' ? 'condition' : 'source'
     
@@ -345,7 +412,7 @@ const flowNodes = computed<FlowNode[]>(() => {
 const flowEdges = computed<FlowEdge[]>(() => {
   const edges: FlowEdge[] = []
   
-  for (const rule of codeRules.value) {
+  for (const rule of currentRules.value) {
     if (rule.type === 'condition') {
       if (rule.trueBranch) {
         edges.push({
@@ -388,7 +455,7 @@ const flowEdges = computed<FlowEdge[]>(() => {
 
 function onNodeClick(event: NodeMouseEvent) {
   const nodeId = event.node.id
-  const rule = codeRules.value.find(r => r.id === nodeId)
+  const rule = currentRules.value.find(r => r.id === nodeId)
   if (rule && rule.type !== 'start' && rule.type !== 'end') {
     selectedRule.value = { ...rule }
   } else {
@@ -405,7 +472,7 @@ function onPaneClick() {
 onConnect((params) => {
   const { source, target, sourceHandle } = params
   
-  const sourceRule = codeRules.value.find(r => r.id === source)
+  const sourceRule = currentRules.value.find(r => r.id === source)
   if (!sourceRule) return
   
   if (sourceRule.type === 'condition') {
@@ -439,7 +506,7 @@ const contextMenu = ref<{
 
 function showContextMenu(event: MouseEvent, nodeId: string) {
   event.preventDefault()
-  const rule = codeRules.value.find(r => r.id === nodeId)
+  const rule = currentRules.value.find(r => r.id === nodeId)
   if (!rule) return
   
   // 开始和结束节点不能删除
@@ -458,17 +525,17 @@ function hideContextMenu() {
 }
 
 function deleteNode(nodeId: string) {
-  const rule = codeRules.value.find(r => r.id === nodeId)
+  const rule = currentRules.value.find(r => r.id === nodeId)
   if (!rule) return
   
   // 清除指向该节点的引用
-  for (const r of codeRules.value) {
+  for (const r of currentRules.value) {
     if (r.nextNode === nodeId) r.nextNode = undefined
     if (r.trueBranch === nodeId) r.trueBranch = undefined
     if (r.falseBranch === nodeId) r.falseBranch = undefined
   }
   
-  codeRules.value = codeRules.value.filter(r => r.id !== nodeId)
+  currentRules.value = currentRules.value.filter(r => r.id !== nodeId)
   selectedRule.value = null
   saveRules()
   toast('已删除节点')
@@ -491,28 +558,48 @@ function getRootLabel(rootIndex: number | undefined): string {
   return `第${rootIndex}根`
 }
 
+function getCharLabel(charIndex: number | undefined): string {
+  if (charIndex === undefined || charIndex === null) return '第1字'
+  if (charIndex === -1) return '末字'
+  if (charIndex === -2) return '末2字'
+  return `第${charIndex}字`
+}
+
 function onRuleChange() {
   if (!selectedRule.value) return
   
   // 更新标签
   if (selectedRule.value.type === 'pick') {
-    const rootLabel = getRootLabel(selectedRule.value.rootIndex)
-    const codeLabel = getCodeLabel(selectedRule.value.codeIndex)
-    selectedRule.value.label = `取${rootLabel}${codeLabel}`
+    if (activeTab.value === 'word') {
+      const charLabel = getCharLabel(selectedRule.value.charIndex)
+      const rootLabel = getRootLabel(selectedRule.value.rootIndex)
+      const codeLabel = getCodeLabel(selectedRule.value.codeIndex)
+      selectedRule.value.label = `取${charLabel}${rootLabel}${codeLabel}`
+    } else {
+      const rootLabel = getRootLabel(selectedRule.value.rootIndex)
+      const codeLabel = getCodeLabel(selectedRule.value.codeIndex)
+      selectedRule.value.label = `取${rootLabel}${codeLabel}`
+    }
   } else if (selectedRule.value.type === 'condition') {
-    if (selectedRule.value.conditionType === 'root_exists') {
-      selectedRule.value.label = `存在第${selectedRule.value.conditionValue}根？`
-    } else if (selectedRule.value.conditionType === 'root_has_code') {
-      selectedRule.value.label = `第${selectedRule.value.conditionValue}根有第${selectedRule.value.conditionCodeIndex}码？`
-    } else if (selectedRule.value.conditionType === 'root_count') {
-      selectedRule.value.label = `字根数≥${selectedRule.value.conditionValue}？`
+    if (activeTab.value === 'word') {
+      if (selectedRule.value.conditionType === 'char_exists') {
+        selectedRule.value.label = `存在第${selectedRule.value.conditionValue}字？`
+      }
+    } else {
+      if (selectedRule.value.conditionType === 'root_exists') {
+        selectedRule.value.label = `存在第${selectedRule.value.conditionValue}根？`
+      } else if (selectedRule.value.conditionType === 'root_has_code') {
+        selectedRule.value.label = `第${selectedRule.value.conditionValue}根有第${selectedRule.value.conditionCodeIndex}码？`
+      } else if (selectedRule.value.conditionType === 'root_count') {
+        selectedRule.value.label = `字根数≥${selectedRule.value.conditionValue}？`
+      }
     }
   }
   
   // 实时保存
-  const index = codeRules.value.findIndex(r => r.id === selectedRule.value!.id)
+  const index = currentRules.value.findIndex(r => r.id === selectedRule.value!.id)
   if (index >= 0) {
-    codeRules.value[index] = { ...selectedRule.value }
+    currentRules.value[index] = { ...selectedRule.value }
     saveRules()
   }
 }
@@ -520,8 +607,12 @@ function onRuleChange() {
 // ============ 保存规则 ============
 
 function saveRules() {
-  console.log('保存规则，当前规则:', JSON.parse(JSON.stringify(codeRules.value)))
-  engine.setCodeRules(codeRules.value)
+  console.log('保存规则，当前规则:', JSON.parse(JSON.stringify(currentRules.value)))
+  if (activeTab.value === 'char') {
+    engine.setCodeRules(codeRules.value)
+  } else {
+    engine.setWordCodeRules(wordCodeRules.value)
+  }
   saveCurrentConfig()
   console.log('配置已保存到 localStorage')
 }
@@ -538,20 +629,20 @@ function handleNodeDragEnd(event: NodeDragEvent) {
   
   console.log('节点信息:', node.id, '位置:', node.position)
   
-  const ruleIndex = codeRules.value.findIndex(r => r.id === node.id)
+  const ruleIndex = currentRules.value.findIndex(r => r.id === node.id)
   console.log('规则索引:', ruleIndex)
   
   if (ruleIndex >= 0) {
     // 创建新的规则对象以触发 Vue 响应式更新
     const updatedRule = {
-      ...codeRules.value[ruleIndex],
+      ...currentRules.value[ruleIndex],
       position: { x: Math.round(node.position.x), y: Math.round(node.position.y) }
     }
     // 替换数组中的元素
-    codeRules.value = [
-      ...codeRules.value.slice(0, ruleIndex),
+    currentRules.value = [
+      ...currentRules.value.slice(0, ruleIndex),
       updatedRule,
-      ...codeRules.value.slice(ruleIndex + 1)
+      ...currentRules.value.slice(ruleIndex + 1)
     ]
     // 保存到 localStorage
     saveRules()
@@ -559,10 +650,23 @@ function handleNodeDragEnd(event: NodeDragEvent) {
   }
 }
 
+// ============ 切换标签时清除选中 ============
+
+watch(activeTab, () => {
+  selectedRule.value = null
+})
+
 // ============ 初始化 ============
 
 onMounted(() => {
-  codeRules.value = loadRulesFromEngine()
+  const { charRules, wordRules } = loadRulesFromEngine()
+  codeRules.value = charRules
+  wordCodeRules.value = wordRules
+  
+  // 同步到 engine
+  engine.setCodeRules(charRules)
+  engine.setWordCodeRules(wordRules)
+  
   setTimeout(() => fitView({ padding: 0.2 }), 100)
 })
 </script>
@@ -573,7 +677,26 @@ onMounted(() => {
     <div class="toolbar">
       <div class="toolbar-left">
         <span class="title"><Icon name="rule" :size="18" /> 取码规则</span>
-        <span class="count">{{ codeRules.length }} 个节点</span>
+        
+        <!-- 标签切换 -->
+        <div class="tab-switch">
+          <button 
+            class="tab-btn" 
+            :class="{ active: activeTab === 'char' }"
+            @click="activeTab = 'char'"
+          >
+            单字
+          </button>
+          <button 
+            class="tab-btn" 
+            :class="{ active: activeTab === 'word' }"
+            @click="activeTab = 'word'"
+          >
+            多字词
+          </button>
+        </div>
+        
+        <span class="count">{{ currentRules.length }} 个节点</span>
       </div>
       <div class="toolbar-right">
         <button class="btn btn-sm" @click="() => fitView({ padding: 0.2 })">自适应</button>
@@ -586,7 +709,7 @@ onMounted(() => {
         <div class="panel-title">节点类型</div>
         <div class="node-list">
           <div
-            v-for="template in nodeTemplates"
+            v-for="template in currentNodeTemplates"
             :key="template.type"
             class="node-template"
             :class="{ disabled: !canAddNode(template.type) }"
@@ -678,6 +801,19 @@ onMounted(() => {
           <div class="edit-panel-body">
             <!-- 取码节点编辑 -->
             <template v-if="selectedRule.type === 'pick'">
+              <!-- 多字词模式：显示字位置选择 -->
+              <div v-if="activeTab === 'word'" class="form-row">
+                <label>字位置</label>
+                <select v-model="selectedRule.charIndex" @change="onRuleChange">
+                  <option :value="1">第1字</option>
+                  <option :value="2">第2字</option>
+                  <option :value="3">第3字</option>
+                  <option :value="4">第4字</option>
+                  <option :value="5">第5字</option>
+                  <option :value="-1">末字</option>
+                  <option :value="-2">末2字</option>
+                </select>
+              </div>
               <div class="form-row">
                 <label>字根位置</label>
                 <select v-model="selectedRule.rootIndex" @change="onRuleChange">
@@ -702,22 +838,38 @@ onMounted(() => {
             
             <!-- 条件节点编辑 -->
             <template v-if="selectedRule.type === 'condition'">
-              <div class="form-row">
-                <label>条件类型</label>
-                <select v-model="selectedRule.conditionType" @change="onRuleChange">
-                  <option value="root_exists">存在第N个根</option>
-                  <option value="root_has_code">第N个根存在第M码</option>
-                  <option value="root_count">字根数量≥N</option>
-                </select>
-              </div>
-              <div class="form-row">
-                <label>N值（字根位置）</label>
-                <input type="number" v-model.number="selectedRule.conditionValue" min="1" max="10" @change="onRuleChange" />
-              </div>
-              <div v-if="selectedRule.conditionType === 'root_has_code'" class="form-row">
-                <label>M值（码位位置）</label>
-                <input type="number" v-model.number="selectedRule.conditionCodeIndex" min="1" max="4" @change="onRuleChange" />
-              </div>
+              <!-- 多字词模式：只有"存在第N个字"条件 -->
+              <template v-if="activeTab === 'word'">
+                <div class="form-row">
+                  <label>条件类型</label>
+                  <select v-model="selectedRule.conditionType" @change="onRuleChange">
+                    <option value="char_exists">存在第N个字</option>
+                  </select>
+                </div>
+                <div class="form-row">
+                  <label>N值（字位置）</label>
+                  <input type="number" v-model.number="selectedRule.conditionValue" min="1" max="10" @change="onRuleChange" />
+                </div>
+              </template>
+              <!-- 单字模式：原有条件 -->
+              <template v-else>
+                <div class="form-row">
+                  <label>条件类型</label>
+                  <select v-model="selectedRule.conditionType" @change="onRuleChange">
+                    <option value="root_exists">存在第N个根</option>
+                    <option value="root_has_code">第N个根存在第M码</option>
+                    <option value="root_count">字根数量≥N</option>
+                  </select>
+                </div>
+                <div class="form-row">
+                  <label>N值（字根位置）</label>
+                  <input type="number" v-model.number="selectedRule.conditionValue" min="1" max="10" @change="onRuleChange" />
+                </div>
+                <div v-if="selectedRule.conditionType === 'root_has_code'" class="form-row">
+                  <label>M值（码位位置）</label>
+                  <input type="number" v-model.number="selectedRule.conditionCodeIndex" min="1" max="4" @change="onRuleChange" />
+                </div>
+              </template>
             </template>
           </div>
         </div>
@@ -766,6 +918,35 @@ onMounted(() => {
 .title {
   font-size: 16px;
   font-weight: 600;
+}
+
+/* 标签切换 */
+.tab-switch {
+  display: flex;
+  background: var(--bg3);
+  border-radius: 6px;
+  padding: 2px;
+}
+
+.tab-btn {
+  padding: 6px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: var(--text2);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.tab-btn:hover {
+  color: var(--text);
+}
+
+.tab-btn.active {
+  background: var(--primary);
+  color: white;
 }
 
 .count {

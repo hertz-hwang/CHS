@@ -9,6 +9,10 @@ const {
   bracedRootToPua, isBracedRoot 
 } = useEngine()
 
+// ============ 标签切换 ============
+
+const activeTab = ref<'char' | 'word'>('char')
+
 // 显示字根（花括号字根转为 PUA 字符）
 function displayRoot(root: string): string {
   return bracedRootToPua(root)
@@ -53,7 +57,7 @@ function getRootFullCode(root: string): string {
   return ''
 }
 
-// 根据用户定义的规则计算编码
+// 根据用户定义的规则计算单字编码
 function calculateCharCode(char: string): string {
   // 触发 configVersion 依赖，确保规则变更时重新计算
   configVersion.value
@@ -72,6 +76,11 @@ function calculateCharCode(char: string): string {
   
   if (!roots.length) return ''
   
+  return executeCodeRules(rules, [roots])
+}
+
+// 执行编码规则（通用函数，支持多字词）
+function executeCodeRules(rules: ReturnType<typeof engine.getCodeRules>, charsRoots: string[][]): string {
   let code = ''
   let currentNodeId = 'start'
   const visited = new Set<string>()
@@ -92,14 +101,28 @@ function calculateCharCode(char: string): string {
       }
     } else if (node.type === 'pick') {
       // 取码节点
+      const charIdx = node.charIndex || 1
       const rootIdx = node.rootIndex || 1
       const codeIdx = node.codeIndex || 1
       
-      // 计算实际字根索引（-1 表示末根）
-      const actualRootIdx = rootIdx === -1 ? roots.length - 1 : rootIdx - 1
+      // 计算实际字索引（-1 表示末字，-2 表示末2字）
+      let actualCharIdx: number
+      if (charIdx === -1) {
+        actualCharIdx = charsRoots.length - 1
+      } else if (charIdx === -2) {
+        actualCharIdx = charsRoots.length - 2
+      } else {
+        actualCharIdx = charIdx - 1
+      }
       
-      if (actualRootIdx >= 0 && actualRootIdx < roots.length) {
-        const root = roots[actualRootIdx]
+      // 获取该字的字根列表
+      const charRoots = charsRoots[actualCharIdx] || []
+      
+      // 计算实际字根索引（-1 表示末根）
+      const actualRootIdx = rootIdx === -1 ? charRoots.length - 1 : rootIdx - 1
+      
+      if (actualRootIdx >= 0 && actualRootIdx < charRoots.length) {
+        const root = charRoots[actualRootIdx]
         const fullCode = getRootFullCode(root)
         
         if (fullCode) {
@@ -116,34 +139,36 @@ function calculateCharCode(char: string): string {
       if (node.nextNode) {
         currentNodeId = node.nextNode
       } else {
-        // 找当前节点的下一个节点
-        const currentIdx = rules.findIndex(r => r.id === node.id)
-        if (currentIdx >= 0 && currentIdx < rules.length - 1) {
-          currentNodeId = rules[currentIdx + 1].id
-        } else {
-          break
-        }
+        break
       }
     } else if (node.type === 'condition') {
       // 条件判断节点
       let conditionMet = false
       
-      if (node.conditionType === 'root_exists') {
-        // 判断第N个根是否存在
+      if (node.conditionType === 'char_exists') {
+        // 多字词条件：判断第N个字是否存在
         const idx = (node.conditionValue || 1) - 1
+        conditionMet = idx >= 0 && idx < charsRoots.length
+      } else if (node.conditionType === 'root_exists') {
+        // 单字条件：判断第N个根是否存在
+        const idx = (node.conditionValue || 1) - 1
+        // 对于多字词，这里取第一个字的字根（兼容）
+        const roots = charsRoots[0] || []
         conditionMet = idx >= 0 && idx < roots.length
       } else if (node.conditionType === 'root_has_code') {
-        // 判断第N个根是否有第M码
+        // 单字条件：判断第N个根是否有第M码
         const rootIdx = (node.conditionValue || 1) - 1
         const codeIdx = (node.conditionCodeIndex || 1) - 1
         
+        const roots = charsRoots[0] || []
         if (rootIdx >= 0 && rootIdx < roots.length) {
           const root = roots[rootIdx]
           const fullCode = getRootFullCode(root)
           conditionMet = codeIdx >= 0 && codeIdx < fullCode.length
         }
       } else if (node.conditionType === 'root_count') {
-        // 判断字根数量是否 >= N
+        // 单字条件：判断字根数量是否 >= N
+        const roots = charsRoots[0] || []
         conditionMet = roots.length >= (node.conditionValue || 1)
       }
       
@@ -171,6 +196,161 @@ function calculateCharCode(char: string): string {
   return code
 }
 
+// 计算多字词编码，同时收集取码过程中使用的字根和码位索引
+function calculateWordCodeWithRoots(word: string): { code: string; usedRoots: { charIndex: number; root: string; codeIndex: number }[] } {
+  configVersion.value
+  
+  const rules = engine.getWordCodeRules()
+  
+  if (rules.length < 2) return { code: '', usedRoots: [] }
+  
+  const hasActualRules = rules.some(r => r.type !== 'start' && r.type !== 'end')
+  if (!hasActualRules) return { code: '', usedRoots: [] }
+  
+  // 获取每个字的字根
+  const charsRoots: string[][] = []
+  for (const char of word) {
+    const decomp = engine.decompose(char)
+    charsRoots.push(decomp.leaves)
+  }
+  
+  // 执行规则并收集使用的字根和码位索引（使用数组保持顺序，用复合键去重）
+  const usedRootsList: { charIndex: number; root: string; codeIndex: number }[] = []
+  const usedRootsSet = new Set<string>()
+  let code = ''
+  let currentNodeId = 'start'
+  const visited = new Set<string>()
+  const maxIterations = 100
+  
+  while (currentNodeId !== 'end' && !visited.has(currentNodeId) && visited.size < maxIterations) {
+    visited.add(currentNodeId)
+    
+    const node = rules.find(r => r.id === currentNodeId)
+    if (!node) break
+    
+    if (node.type === 'start') {
+      if (node.nextNode) {
+        currentNodeId = node.nextNode
+      } else {
+        break
+      }
+    } else if (node.type === 'pick') {
+      const charIdx = node.charIndex || 1
+      const rootIdx = node.rootIndex || 1
+      const codeIdx = node.codeIndex || 1
+      
+      // 计算实际字索引
+      let actualCharIdx: number
+      if (charIdx === -1) {
+        actualCharIdx = charsRoots.length - 1
+      } else if (charIdx === -2) {
+        actualCharIdx = charsRoots.length - 2
+      } else {
+        actualCharIdx = charIdx - 1
+      }
+      
+      const charRoots = charsRoots[actualCharIdx] || []
+      
+      // 计算实际字根索引和码位索引
+      // -1 表示末根，如果请求的字根索引超出范围，回退到末根并调整码位索引
+      let actualRootIdx: number
+      let adjustedCodeIdx: number = codeIdx // 调整后的码位索引（1-indexed）
+      
+      if (rootIdx === -1) {
+        actualRootIdx = charRoots.length - 1
+      } else if (rootIdx > charRoots.length) {
+        // 如果请求的字根不存在，回退到末根
+        actualRootIdx = charRoots.length - 1
+        // 调整码位索引：加上 (请求的字根索引 - 实际字根数) 的差值
+        // 例如：请求第2根首码，只有1根，则取第1根的第(1 + 2 - 1) = 第2码
+        adjustedCodeIdx = codeIdx + (rootIdx - charRoots.length)
+      } else {
+        actualRootIdx = rootIdx - 1
+      }
+      
+      if (actualRootIdx >= 0 && actualRootIdx < charRoots.length) {
+        const root = charRoots[actualRootIdx]
+        const fullCode = getRootFullCode(root)
+        
+        // 计算实际码位索引（使用调整后的码位索引）
+        const actualCodeIdx = adjustedCodeIdx === -1 ? (fullCode ? fullCode.length - 1 : 0) : adjustedCodeIdx - 1
+        
+        // 记录使用的字根和码位索引（使用复合键去重，但保持顺序）
+        const key = `${actualCharIdx}-${actualRootIdx}-${actualCodeIdx}`
+        if (!usedRootsSet.has(key)) {
+          usedRootsSet.add(key)
+          usedRootsList.push({ 
+            charIndex: actualCharIdx, 
+            root, 
+            codeIndex: actualCodeIdx // 码位索引（0-indexed）
+          })
+        }
+        
+        if (fullCode) {
+          if (actualCodeIdx >= 0 && actualCodeIdx < fullCode.length) {
+            code += fullCode[actualCodeIdx]
+          }
+        }
+      }
+      
+      if (node.nextNode) {
+        currentNodeId = node.nextNode
+      } else {
+        break
+      }
+    } else if (node.type === 'condition') {
+      let conditionMet = false
+      
+      if (node.conditionType === 'char_exists') {
+        const idx = (node.conditionValue || 1) - 1
+        conditionMet = idx >= 0 && idx < charsRoots.length
+      } else if (node.conditionType === 'root_exists') {
+        const idx = (node.conditionValue || 1) - 1
+        const roots = charsRoots[0] || []
+        conditionMet = idx >= 0 && idx < roots.length
+      } else if (node.conditionType === 'root_has_code') {
+        const rootIdx = (node.conditionValue || 1) - 1
+        const codeIdx = (node.conditionCodeIndex || 1) - 1
+        const roots = charsRoots[0] || []
+        if (rootIdx >= 0 && rootIdx < roots.length) {
+          const root = roots[rootIdx]
+          const fullCode = getRootFullCode(root)
+          conditionMet = codeIdx >= 0 && codeIdx < fullCode.length
+        }
+      } else if (node.conditionType === 'root_count') {
+        const roots = charsRoots[0] || []
+        conditionMet = roots.length >= (node.conditionValue || 1)
+      }
+      
+      if (conditionMet && node.trueBranch) {
+        currentNodeId = node.trueBranch
+      } else if (!conditionMet && node.falseBranch) {
+        currentNodeId = node.falseBranch
+      } else {
+        const currentIdx = rules.findIndex(r => r.id === node.id)
+        if (currentIdx >= 0 && currentIdx < rules.length - 1) {
+          currentNodeId = rules[currentIdx + 1].id
+        } else {
+          break
+        }
+      }
+    } else if (node.type === 'end') {
+      break
+    } else {
+      break
+    }
+  }
+  
+  return { code, usedRoots: usedRootsList }
+}
+
+// 计算多字词编码
+function calculateWordCode(word: string): string {
+  return calculateWordCodeWithRoots(word).code
+}
+
+// ============ 单字数据 ============
+
 // 获取所有汉字并按字频降序排序（根据当前选择的字集）
 const sortedChars = computed(() => {
   rootsVersion.value
@@ -185,22 +365,95 @@ const sortedChars = computed(() => {
   })
 })
 
+// ============ 多字词数据 ============
+
+// 获取所有多字词（2字及以上）并按词频降序排序
+const sortedWords = computed(() => {
+  rootsVersion.value
+  configVersion.value
+  
+  const words: string[] = []
+  
+  // 从词频数据中获取多字词
+  for (const [word, freq] of engine.freq) {
+    if (word.length >= 2) {
+      words.push(word)
+    }
+  }
+  
+  // 按词频降序排序
+  return words.sort((a, b) => {
+    const freqA = engine.freq.get(a) || 0
+    const freqB = engine.freq.get(b) || 0
+    return freqB - freqA
+  })
+})
+
+// 当前数据列表（根据标签）
+const currentItems = computed(() => {
+  return activeTab.value === 'char' ? sortedChars.value : sortedWords.value
+})
+
+// 检查单字编码状态
+function getCharCodeStatus(char: string): '完整' | '缺失' {
+  const decomp = engine.decompose(char)
+  const roots = decomp.leaves
+  
+  if (!roots.length) return '缺失'
+  
+  for (const root of roots) {
+    const fullCode = getRootFullCode(root)
+    if (!fullCode) return '缺失'
+  }
+  
+  const code = calculateCharCode(char)
+  if (!code) return '缺失'
+  
+  return '完整'
+}
+
+// 检查多字词编码状态
+function getWordCodeStatus(word: string): '完整' | '缺失' {
+  // 检查每个字的字根是否都有编码
+  for (const char of word) {
+    const decomp = engine.decompose(char)
+    const roots = decomp.leaves
+    
+    if (!roots.length) return '缺失'
+    
+    for (const root of roots) {
+      const fullCode = getRootFullCode(root)
+      if (!fullCode) return '缺失'
+    }
+  }
+  
+  const code = calculateWordCode(word)
+  if (!code) return '缺失'
+  
+  return '完整'
+}
+
+// 获取编码状态（通用）
+function getCodeStatus(item: string): '完整' | '缺失' {
+  return activeTab.value === 'char' ? getCharCodeStatus(item) : getWordCodeStatus(item)
+}
+
 // 搜索和状态过滤
-const filteredChars = computed(() => {
+const filteredItems = computed(() => {
   const query = searchQuery.value.trim().toLowerCase()
   const status = statusFilter.value
   
-  return sortedChars.value.filter(char => {
+  return currentItems.value.filter(item => {
     // 状态筛选
     if (status !== 'all') {
-      const charStatus = getCodeStatus(char)
-      if (charStatus !== status) return false
+      const itemStatus = getCodeStatus(item)
+      if (itemStatus !== status) return false
     }
     
     // 搜索筛选
     if (query) {
-      const code = calculateCharCode(char)
-      if (!char.includes(searchQuery.value) && !code.toLowerCase().includes(query)) {
+      const code = activeTab.value === 'char' ? calculateCharCode(item) : calculateWordCode(item)
+      if (!item.includes(searchQuery.value) && !code.toLowerCase().includes(query)) {
         return false
       }
     }
@@ -210,46 +463,21 @@ const filteredChars = computed(() => {
 })
 
 // 分页
-const totalPages = computed(() => Math.ceil(filteredChars.value.length / pageSize))
-const pagedChars = computed(() => {
+const totalPages = computed(() => Math.ceil(filteredItems.value.length / pageSize))
+const pagedItems = computed(() => {
   const start = (currentPage.value - 1) * pageSize
-  return filteredChars.value.slice(start, start + pageSize)
+  return filteredItems.value.slice(start, start + pageSize)
 })
 
-// 检查编码状态：是否有字根缺失编码
-function getCodeStatus(char: string): '完整' | '缺失' {
-  const decomp = engine.decompose(char)
-  const roots = decomp.leaves
-  
-  // 如果没有字根，无法判断，返回缺失
-  if (!roots.length) return '缺失'
-  
-  // 检查每个字根是否有编码
-  for (const root of roots) {
-    const fullCode = getRootFullCode(root)
-    if (!fullCode) {
-      return '缺失'
-    }
-  }
-  
-  // 所有字根都有编码，检查最终编码是否生成
-  const code = calculateCharCode(char)
-  if (!code) return '缺失'
-  
-  return '完整'
-}
-
-// 获取字的完整信息
+// 获取单字完整信息
 function getCharInfo(char: string) {
   const decomp = engine.decompose(char)
   const code = calculateCharCode(char)
   const pyList = engine.getPinyinList(char)
   const freq = engine.freq.get(char) || 0
   
-  // 按降频显示所有拼音
   const allPinyin = pyList.map(p => p.py).join(' ')
   
-  // 获取每个部件及其编码状态
   const roots = decomp.leaves
   const rootInfos = roots.map(root => ({
     root,
@@ -264,7 +492,62 @@ function getCharInfo(char: string) {
     code,
     codeLength: code.length,
     freq,
-    status: getCodeStatus(char),
+    status: getCharCodeStatus(char),
+  }
+}
+
+// 获取多字词完整信息
+function getWordInfo(word: string) {
+  const { code, usedRoots } = calculateWordCodeWithRoots(word)
+  const freq = engine.freq.get(word) || 0
+  
+  // 获取每个字的拆分（所有字根）
+  const allCharsRoots: string[][] = []
+  for (const char of word) {
+    const decomp = engine.decompose(char)
+    allCharsRoots.push(decomp.leaves)
+  }
+  
+  // 构建每个字的信息，显示被使用的字根及其码位索引
+  const charInfos = []
+  for (let i = 0; i < allCharsRoots.length; i++) {
+    const char = word[i]
+    const allRoots = allCharsRoots[i]
+    
+    // 获取该字被使用的字根（按使用顺序）
+    const usedRootsForChar = usedRoots.filter(ur => ur.charIndex === i)
+    
+    // 如果有被使用的字根，只显示这些；否则显示所有字根
+    // 使用 usedRoots 中的 codeIndex 来显示码位索引
+    const rootInfosToShow = usedRootsForChar.length > 0 
+      ? usedRootsForChar.map(ur => ({
+          root: ur.root,
+          codeIndex: ur.codeIndex, // 码位索引（0-indexed）
+          hasCode: !!getRootFullCode(ur.root),
+          isUsed: true
+        }))
+      : allRoots.map((root, idx) => ({
+          root,
+          codeIndex: 0, // 默认显示第1码
+          hasCode: !!getRootFullCode(root),
+          isUsed: false
+        }))
+    
+    charInfos.push({
+      char,
+      rootInfos: rootInfosToShow
+    })
+  }
+  
+  return {
+    word,
+    length: word.length,
+    charInfos,
+    code,
+    codeLength: code.length,
+    freq,
+    status: getWordCodeStatus(word),
+    usedRoots,
   }
 }
 
@@ -272,15 +555,15 @@ function getCharInfo(char: string) {
 const statsInfo = computed(() => {
   let encoded = 0
   let total = 0
-  let encodedWeight = 0  // 已编码字的字频总和
-  let totalWeight = 0    // 所有字的字频总和
+  let encodedWeight = 0
+  let totalWeight = 0
   
-  for (const char of sortedChars.value) {
+  for (const item of currentItems.value) {
     total++
-    const freq = engine.freq.get(char) || 0
+    const freq = engine.freq.get(item) || 0
     totalWeight += freq
     
-    if (getCodeStatus(char) === '完整') {
+    if (getCodeStatus(item) === '完整') {
       encoded++
       encodedWeight += freq
     }
@@ -294,12 +577,58 @@ const statsInfo = computed(() => {
 })
 
 // 重置页码
-watch([searchQuery, statusFilter], () => {
+watch([searchQuery, statusFilter, activeTab], () => {
   currentPage.value = 1
 })
 
 function goToPage(page: number) {
   currentPage.value = Math.max(1, Math.min(page, totalPages.value))
+}
+
+// 导出单字码表
+function exportCharCodeTable() {
+  const chars = sortedChars.value
+  const lines: string[] = []
+  
+  for (const char of chars) {
+    const code = calculateCharCode(char)
+    if (code) {
+      const freq = engine.freq.get(char) || 0
+      lines.push(`${char}\t${code}\t${freq}`)
+    }
+  }
+  
+  if (lines.length === 0) {
+    toast('没有可导出的数据')
+    return
+  }
+  
+  const content = lines.join('\n')
+  downloadFile(content, 'char_code.txt')
+  toast(`已导出 ${lines.length} 条单字编码`)
+}
+
+// 导出多字词码表
+function exportWordCodeTable() {
+  const words = sortedWords.value
+  const lines: string[] = []
+  
+  for (const word of words) {
+    const code = calculateWordCode(word)
+    if (code) {
+      const freq = engine.freq.get(word) || 0
+      lines.push(`${word}\t${code}\t${freq}`)
+    }
+  }
+  
+  if (lines.length === 0) {
+    toast('没有可导出的数据')
+    return
+  }
+  
+  const content = lines.join('\n')
+  downloadFile(content, 'word_code.txt')
+  toast(`已导出 ${lines.length} 条多字词编码`)
 }
 
 // 计算元素序列（跟踪每个码对应的元素）
@@ -324,7 +653,7 @@ function calculateElementSequence(char: string): string[] {
   const elements: string[] = []
   let currentNodeId = 'start'
   const visited = new Set<string>()
-  const maxIterations = 100 // 防止无限循环
+  const maxIterations = 100
   
   while (currentNodeId !== 'end' && !visited.has(currentNodeId) && visited.size < maxIterations) {
     visited.add(currentNodeId)
@@ -333,55 +662,56 @@ function calculateElementSequence(char: string): string[] {
     if (!node) break
     
     if (node.type === 'start') {
-      // 开始节点：跳转到 nextNode 指定的节点
       if (node.nextNode) {
         currentNodeId = node.nextNode
       } else {
         break
       }
     } else if (node.type === 'pick') {
-      // 取码节点
       const rootIdx = node.rootIndex || 1
       const codeIdx = node.codeIndex || 1
       
-      // 计算实际字根索引（-1 表示末根）
-      const actualRootIdx = rootIdx === -1 ? roots.length - 1 : rootIdx - 1
+      // 计算实际字根索引和码位索引
+      // -1 表示末根，如果请求的字根索引超出范围，回退到末根并调整码位索引
+      let actualRootIdx: number
+      let adjustedCodeIdx: number = codeIdx // 调整后的码位索引（1-indexed）
+      
+      if (rootIdx === -1) {
+        actualRootIdx = roots.length - 1
+      } else if (rootIdx > roots.length) {
+        // 如果请求的字根不存在，回退到末根
+        actualRootIdx = roots.length - 1
+        // 调整码位索引
+        adjustedCodeIdx = codeIdx + (rootIdx - roots.length)
+      } else {
+        actualRootIdx = rootIdx - 1
+      }
       
       if (actualRootIdx >= 0 && actualRootIdx < roots.length) {
         const root = roots[actualRootIdx]
         const fullCode = getRootFullCode(root)
         
-        if (fullCode) {
-          // 计算实际码位索引（-1 表示末码）
-          const actualCodeIdx = codeIdx === -1 ? fullCode.length - 1 : codeIdx - 1
-          
-          if (actualCodeIdx >= 0 && actualCodeIdx < fullCode.length) {
-            // 记录元素：第1码直接记录字根名，其他码记录为"字根名.索引"
-            if (actualCodeIdx === 0) {
-              elements.push(root)
-            } else {
-              elements.push(`${root}.${actualCodeIdx}`)
-            }
-          }
+        // 计算实际码位索引（使用调整后的码位索引）
+        const actualCodeIdx = adjustedCodeIdx === -1 ? (fullCode ? fullCode.length - 1 : 0) : adjustedCodeIdx - 1
+        
+        if (fullCode && actualCodeIdx >= 0 && actualCodeIdx < fullCode.length) {
+          // 添加元素：字根 + 码位索引
+          elements.push(`${root}.${actualCodeIdx}`)
         }
       }
       
-      // 跳转到下一节点
       if (node.nextNode) {
         currentNodeId = node.nextNode
       } else {
         break
       }
     } else if (node.type === 'condition') {
-      // 条件判断节点
       let conditionMet = false
       
       if (node.conditionType === 'root_exists') {
-        // 判断第N个根是否存在
         const idx = (node.conditionValue || 1) - 1
         conditionMet = idx >= 0 && idx < roots.length
       } else if (node.conditionType === 'root_has_code') {
-        // 判断第N个根是否有第M码
         const rootIdx = (node.conditionValue || 1) - 1
         const codeIdx = (node.conditionCodeIndex || 1) - 1
         
@@ -391,17 +721,141 @@ function calculateElementSequence(char: string): string[] {
           conditionMet = codeIdx >= 0 && codeIdx < fullCode.length
         }
       } else if (node.conditionType === 'root_count') {
-        // 判断字根数量是否 >= N
         conditionMet = roots.length >= (node.conditionValue || 1)
       }
       
-      // 根据条件结果跳转
       if (conditionMet && node.trueBranch) {
         currentNodeId = node.trueBranch
       } else if (!conditionMet && node.falseBranch) {
         currentNodeId = node.falseBranch
       } else {
-        // 没有配置分支，跳到下一个节点
+        const currentIdx = rules.findIndex(r => r.id === node.id)
+        if (currentIdx >= 0 && currentIdx < rules.length - 1) {
+          currentNodeId = rules[currentIdx + 1].id
+        } else {
+          break
+        }
+      }
+    } else if (node.type === 'end') {
+      break
+    } else {
+      break
+    }
+  }
+  
+  return elements
+}
+
+// 计算多字词元素序列（跟踪每个码对应的元素）
+function calculateWordElementSequence(word: string): string[] {
+  configVersion.value
+  
+  const rules = engine.getWordCodeRules()
+  
+  if (rules.length < 2) return []
+  
+  const hasActualRules = rules.some(r => r.type !== 'start' && r.type !== 'end')
+  if (!hasActualRules) return []
+  
+  // 获取每个字的字根
+  const charsRoots: string[][] = []
+  for (const char of word) {
+    const decomp = engine.decompose(char)
+    charsRoots.push(decomp.leaves)
+  }
+  
+  const elements: string[] = []
+  let currentNodeId = 'start'
+  const visited = new Set<string>()
+  const maxIterations = 100
+  
+  while (currentNodeId !== 'end' && !visited.has(currentNodeId) && visited.size < maxIterations) {
+    visited.add(currentNodeId)
+    
+    const node = rules.find(r => r.id === currentNodeId)
+    if (!node) break
+    
+    if (node.type === 'start') {
+      if (node.nextNode) {
+        currentNodeId = node.nextNode
+      } else {
+        break
+      }
+    } else if (node.type === 'pick') {
+      const charIdx = node.charIndex || 1
+      const rootIdx = node.rootIndex || 1
+      const codeIdx = node.codeIndex || 1
+      
+      // 计算实际字索引
+      let actualCharIdx: number
+      if (charIdx === -1) {
+        actualCharIdx = charsRoots.length - 1
+      } else if (charIdx === -2) {
+        actualCharIdx = charsRoots.length - 2
+      } else {
+        actualCharIdx = charIdx - 1
+      }
+      
+      const charRoots = charsRoots[actualCharIdx] || []
+      
+      // 计算实际字根索引和码位索引
+      let actualRootIdx: number
+      let adjustedCodeIdx: number = codeIdx
+      
+      if (rootIdx === -1) {
+        actualRootIdx = charRoots.length - 1
+      } else if (rootIdx > charRoots.length) {
+        actualRootIdx = charRoots.length - 1
+        adjustedCodeIdx = codeIdx + (rootIdx - charRoots.length)
+      } else {
+        actualRootIdx = rootIdx - 1
+      }
+      
+      if (actualRootIdx >= 0 && actualRootIdx < charRoots.length) {
+        const root = charRoots[actualRootIdx]
+        const fullCode = getRootFullCode(root)
+        
+        const actualCodeIdx = adjustedCodeIdx === -1 ? (fullCode ? fullCode.length - 1 : 0) : adjustedCodeIdx - 1
+        
+        if (fullCode && actualCodeIdx >= 0 && actualCodeIdx < fullCode.length) {
+          elements.push(`${root}.${actualCodeIdx}`)
+        }
+      }
+      
+      if (node.nextNode) {
+        currentNodeId = node.nextNode
+      } else {
+        break
+      }
+    } else if (node.type === 'condition') {
+      let conditionMet = false
+      
+      if (node.conditionType === 'char_exists') {
+        const idx = (node.conditionValue || 1) - 1
+        conditionMet = idx >= 0 && idx < charsRoots.length
+      } else if (node.conditionType === 'root_exists') {
+        const idx = (node.conditionValue || 1) - 1
+        const roots = charsRoots[0] || []
+        conditionMet = idx >= 0 && idx < roots.length
+      } else if (node.conditionType === 'root_has_code') {
+        const rootIdx = (node.conditionValue || 1) - 1
+        const codeIdx = (node.conditionCodeIndex || 1) - 1
+        const roots = charsRoots[0] || []
+        if (rootIdx >= 0 && rootIdx < roots.length) {
+          const root = roots[rootIdx]
+          const fullCode = getRootFullCode(root)
+          conditionMet = codeIdx >= 0 && codeIdx < fullCode.length
+        }
+      } else if (node.conditionType === 'root_count') {
+        const roots = charsRoots[0] || []
+        conditionMet = roots.length >= (node.conditionValue || 1)
+      }
+      
+      if (conditionMet && node.trueBranch) {
+        currentNodeId = node.trueBranch
+      } else if (!conditionMet && node.falseBranch) {
+        currentNodeId = node.falseBranch
+      } else {
         const currentIdx = rules.findIndex(r => r.id === node.id)
         if (currentIdx >= 0 && currentIdx < rules.length - 1) {
           currentNodeId = rules[currentIdx + 1].id
@@ -421,14 +875,25 @@ function calculateElementSequence(char: string): string[] {
 
 // 导出元素序列
 function exportElementSequence() {
-  const chars = sortedChars.value
   const lines: string[] = []
   
-  for (const char of chars) {
-    const elements = calculateElementSequence(char)
-    if (elements.length > 0) {
-      const freq = engine.freq.get(char) || 0
-      lines.push(`${char}\t${elements.join(' ')}\t${freq}`)
+  if (activeTab.value === 'char') {
+    // 单字元素序列
+    for (const char of sortedChars.value) {
+      const elements = calculateElementSequence(char)
+      if (elements.length > 0) {
+        const freq = engine.freq.get(char) || 0
+        lines.push(`${char}\t${elements.join(' ')}\t${freq}`)
+      }
+    }
+  } else {
+    // 多字词元素序列
+    for (const word of sortedWords.value) {
+      const elements = calculateWordElementSequence(word)
+      if (elements.length > 0) {
+        const freq = engine.freq.get(word) || 0
+        lines.push(`${word}\t${elements.join(' ')}\t${freq}`)
+      }
     }
   }
   
@@ -437,32 +902,19 @@ function exportElementSequence() {
     return
   }
   
+  const filename = activeTab.value === 'char' ? 'char_input-division.txt' : 'word_input-division.txt'
   const content = lines.join('\n')
-  downloadFile(content, 'input-division.txt')
+  downloadFile(content, filename)
   toast(`已导出 ${lines.length} 条元素序列`)
 }
 
 // 导出码表
 function exportCodeTable() {
-  const chars = sortedChars.value
-  const lines: string[] = []
-  
-  for (const char of chars) {
-    const code = calculateCharCode(char)
-    if (code) {
-      const freq = engine.freq.get(char) || 0
-      lines.push(`${char}\t${code}\t${freq}`)
-    }
+  if (activeTab.value === 'char') {
+    exportCharCodeTable()
+  } else {
+    exportWordCodeTable()
   }
-  
-  if (lines.length === 0) {
-    toast('没有可导出的数据')
-    return
-  }
-  
-  const content = lines.join('\n')
-  downloadFile(content, 'code.txt')
-  toast(`已导出 ${lines.length} 条编码`)
 }
 </script>
 
@@ -471,8 +923,27 @@ function exportCodeTable() {
     <!-- 顶部工具栏 -->
     <div class="toolbar">
       <div class="toolbar-left">
-        <span class="title"><Icon name="code" :size="18" /> 汉字编码</span>
-        <span class="count">{{ statsInfo.total }} 字</span>
+        <span class="title"><Icon name="code" :size="18" /> 编码</span>
+        
+        <!-- 标签切换 -->
+        <div class="tab-switch">
+          <button 
+            class="tab-btn" 
+            :class="{ active: activeTab === 'char' }"
+            @click="activeTab = 'char'"
+          >
+            单字
+          </button>
+          <button 
+            class="tab-btn" 
+            :class="{ active: activeTab === 'word' }"
+            @click="activeTab = 'word'"
+          >
+            多字词
+          </button>
+        </div>
+        
+        <span class="count">{{ statsInfo.total }} {{ activeTab === 'char' ? '字' : '词' }}</span>
         <span class="encoded-info">已编码: {{ statsInfo.encoded }} ({{ statsInfo.rate }}%)</span>
       </div>
       <div class="toolbar-right">
@@ -491,7 +962,7 @@ function exportCodeTable() {
         v-model="searchQuery" 
         type="search" 
         class="search-input"
-        placeholder="搜索汉字或编码..."
+        :placeholder="activeTab === 'char' ? '搜索汉字或编码...' : '搜索词或编码...'"
       />
       <div class="filter-group">
         <span class="filter-label">状态筛选:</span>
@@ -519,8 +990,8 @@ function exportCodeTable() {
       </div>
     </div>
 
-    <!-- 编码结果表格 -->
-    <div class="table-container">
+    <!-- 单字编码表格 -->
+    <div v-if="activeTab === 'char'" class="table-container">
       <table class="data-table">
         <thead>
           <tr>
@@ -535,7 +1006,7 @@ function exportCodeTable() {
           </tr>
         </thead>
         <tbody>
-          <tr v-for="char in pagedChars" :key="char" @click="selectChar(char)" class="clickable-row">
+          <tr v-for="char in pagedItems" :key="char" @click="selectChar(char)" class="clickable-row">
             <td class="char-cell">{{ char }}</td>
             <td class="mono">{{ getCharInfo(char).unicode }}</td>
             <td>{{ getCharInfo(char).pinyin || '-' }}</td>
@@ -568,9 +1039,69 @@ function exportCodeTable() {
       </table>
 
       <!-- 空状态 -->
-      <div v-if="pagedChars.length === 0" class="empty-state">
+      <div v-if="pagedItems.length === 0" class="empty-state">
         <div class="empty-icon">🔍</div>
         <p>未找到匹配的汉字</p>
+      </div>
+    </div>
+
+    <!-- 多字词编码表格 -->
+    <div v-if="activeTab === 'word'" class="table-container">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th style="width: 120px">词</th>
+            <th style="width: 60px">字数</th>
+            <th>拆分</th>
+            <th style="width: 120px">编码</th>
+            <th style="width: 60px">码长</th>
+            <th style="width: 80px">词频</th>
+            <th style="width: 70px">状态</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="word in pagedItems" :key="word" class="clickable-row">
+            <td class="word-cell">{{ word }}</td>
+            <td>{{ getWordInfo(word).length }}</td>
+            <td class="split-cell">
+              <span 
+                v-for="(charInfo, cIdx) in getWordInfo(word).charInfos" 
+                :key="cIdx"
+                class="char-group"
+              >
+                <span 
+                  v-for="(rootInfo, rIdx) in charInfo.rootInfos" 
+                  :key="rIdx"
+                  class="root-part"
+                  :class="[
+                    rootInfo.hasCode ? 'root-has-code' : 'root-no-code',
+                    getRootFontClass(rootInfo.root)
+                  ]"
+                >{{ displayRoot(rootInfo.root) }}.{{ rootInfo.codeIndex }}</span>
+                <span v-if="cIdx < getWordInfo(word).charInfos.length - 1" class="char-sep">|</span>
+              </span>
+            </td>
+            <td class="code-cell">
+              <span v-if="getWordInfo(word).code" class="char-code">
+                {{ getWordInfo(word).code }}
+              </span>
+              <span v-else class="no-code">-</span>
+            </td>
+            <td>{{ getWordInfo(word).codeLength || '-' }}</td>
+            <td class="freq-cell">{{ getWordInfo(word).freq.toLocaleString() }}</td>
+            <td>
+              <span class="status-badge" :class="getWordInfo(word).status === '完整' ? 'status-complete' : 'status-missing'">
+                {{ getWordInfo(word).status }}
+              </span>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+
+      <!-- 空状态 -->
+      <div v-if="pagedItems.length === 0" class="empty-state">
+        <div class="empty-icon">🔍</div>
+        <p>未找到匹配的词</p>
       </div>
     </div>
 
@@ -626,6 +1157,35 @@ function exportCodeTable() {
   font-weight: 600;
 }
 
+/* 标签切换 */
+.tab-switch {
+  display: flex;
+  background: var(--bg3);
+  border-radius: 6px;
+  padding: 2px;
+}
+
+.tab-btn {
+  padding: 6px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: var(--text2);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.tab-btn:hover {
+  color: var(--text);
+}
+
+.tab-btn.active {
+  background: var(--primary);
+  color: white;
+}
+
 .count {
   font-size: 13px;
   color: var(--text2);
@@ -640,11 +1200,6 @@ function exportCodeTable() {
   background: rgba(0, 180, 42, 0.15);
   padding: 4px 10px;
   border-radius: 4px;
-}
-
-.hint {
-  font-size: 12px;
-  color: var(--text3);
 }
 
 .toolbar-right {
@@ -738,6 +1293,11 @@ function exportCodeTable() {
   font-weight: 500;
 }
 
+.word-cell {
+  font-size: 18px;
+  font-weight: 500;
+}
+
 .mono {
   font-family: 'SF Mono', 'Consolas', monospace;
   font-size: 12px;
@@ -745,6 +1305,16 @@ function exportCodeTable() {
 
 .split-cell {
   letter-spacing: 1px;
+}
+
+.char-group {
+  display: inline-flex;
+  align-items: center;
+}
+
+.char-sep {
+  color: var(--text3);
+  margin: 0 4px;
 }
 
 .root-part {

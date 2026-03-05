@@ -1,7 +1,7 @@
 import { IDSNode, parseIDS } from './ids'
 import { unicodeBlock, unicodeHex } from './unicode'
 import { IDSTransformer, TransformResult } from './transformer'
-import { UserConfig, RootCode, CodeRuleNode, parseRootCodes, rootCodesToRecord, createDefaultCodeRules, parseCode } from './config'
+import { UserConfig, RootCode, CodeRuleNode, parseRootCodes, rootCodesToRecord, createDefaultCodeRules, createDefaultWordCodeRules, parseCode } from './config'
 
 export interface DecompResult {
   leaves: string[]
@@ -87,6 +87,9 @@ export class CharsHijack {
 
   // 取码规则
   codeRules: CodeRuleNode[] = createDefaultCodeRules()
+  
+  // 多字词取码规则
+  wordCodeRules: CodeRuleNode[] = []
 
   // 等效字根 { 主字根 -> 等效字根列表 }
   equivalentRoots = new Map<string, string[]>()
@@ -447,6 +450,13 @@ export class CharsHijack {
       this.codeRules = createDefaultCodeRules()
     }
 
+    // 设置多字词取码规则
+    if (config.word_code_rules && config.word_code_rules.length > 0) {
+      this.wordCodeRules = config.word_code_rules
+    } else {
+      this.wordCodeRules = createDefaultWordCodeRules()
+    }
+
     // 设置等效字根
     if (config.equivalent_roots) {
       this.equivalentRoots = new Map(Object.entries(config.equivalent_roots))
@@ -506,6 +516,7 @@ export class CharsHijack {
       code_equivalences: codeEquivsObj,
       rules,
       code_rules: this.codeRules,
+      word_code_rules: this.wordCodeRules,
     }
   }
 
@@ -583,6 +594,16 @@ export class CharsHijack {
   // 获取取码规则
   getCodeRules(): CodeRuleNode[] {
     return this.codeRules
+  }
+
+  // 设置多字词取码规则
+  setWordCodeRules(rules: CodeRuleNode[]): void {
+    this.wordCodeRules = rules
+  }
+
+  // 获取多字词取码规则
+  getWordCodeRules(): CodeRuleNode[] {
+    return this.wordCodeRules
   }
 
   // 清除缓存（当字根或规则变更时调用）
