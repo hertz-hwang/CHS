@@ -696,10 +696,339 @@ export function calcFingerBalance(usage: Record<string, number>): number {
 export function toRelativeUsage(usage: Record<string, number>): Record<string, number> {
   const total = Object.values(usage).reduce((a, b) => a + b, 0)
   const result: Record<string, number> = {}
-  
+
   for (const [key, value] of Object.entries(usage)) {
     result[key] = total > 0 ? (value / total) * 100 : 0
   }
-  
+
   return result
+}
+
+// ============ 多字词测评 ============
+
+// 多字词测评项（非缺字）
+export interface EvaluateWordItem {
+  word: string       // 词
+  freq: number       // 词频
+  code: string       // 编码
+  codeLen: number    // 码长
+  collision: number  // 选重数
+
+  // 当量
+  eq: number         // 加权词均当量
+
+  // 手感指标（次数）
+  dh: number         // 左右互击
+  ms: number         // 同指大跨排
+  ss: number         // 同指小跨排
+  pd: number         // 小指干扰
+  lfd: number        // 错手
+  trible: number     // 三连击
+  overKey: number    // 超标键位
+  isLack: boolean    // 是否缺字
+}
+
+// 多字词每一行的测评结果
+export interface EvaluateWordLine {
+  items: EvaluateWordItem[]
+  start: number
+  end: number
+  totalFreq: number
+  usage: Record<string, number>
+}
+
+// 多字词完整测评结果
+export interface EvaluationWordResult {
+  lines: EvaluateWordLine[]
+  usage: Record<string, number>
+}
+
+/**
+ * 计算编码的当量
+ */
+function calcEquivalence(code: string): number {
+  if (code.length < 2) return 1
+  let eq = 0
+  for (let i = 1; i < code.length; i++) {
+    eq += getComboEquivalence(code[i - 1], code[i])
+  }
+  return eq
+}
+
+/**
+ * 多字词测评
+ * @param wordCodeMap 词语编码映射
+ * @param wordFreqMap 词频映射
+ */
+export function evaluateWords(
+  wordCodeMap: Map<string, string>,
+  wordFreqMap: Map<string, number>
+): EvaluationWordResult {
+  // 按词频排序（只取2字及以上的词）
+  const sortedWords = [...wordFreqMap.entries()]
+    .filter(([word]) => word.length >= 2)
+    .sort((a, b) => b[1] - a[1])
+
+  // 6个分区（参考 schema-box）
+  const sections = [
+    [0, 2000],
+    [2000, 5000],
+    [5000, 10000],
+    [10000, 20000],
+    [20000, 40000],
+    [40000, 60000],
+  ]
+
+  // 编码冲突计数器
+  const codeCollision = new Map<string, number>()
+
+  const lines: EvaluateWordLine[] = []
+  const totalUsage: Record<string, number> = {}
+
+  for (const [start, end] of sections) {
+    const line: EvaluateWordLine = {
+      items: [],
+      start,
+      end,
+      totalFreq: 0,
+      usage: {},
+    }
+
+    for (let i = start; i < Math.min(end, sortedWords.length); i++) {
+      const [word, freq] = sortedWords[i]
+      line.totalFreq += freq
+
+      // 检查码表中是否存在该词
+      const code = wordCodeMap.get(word)
+
+      // 缺字判断
+      if (!code) {
+        line.items.push({
+          word,
+          freq,
+          code: '',
+          codeLen: 0,
+          collision: 0,
+          eq: 0,
+          dh: 0,
+          ms: 0,
+          ss: 0,
+          pd: 0,
+          lfd: 0,
+          trible: 0,
+          overKey: 0,
+          isLack: true,
+        })
+        continue
+      }
+
+      const codeLen = code.length
+      const collision = (codeCollision.get(code) || 0) + 1
+      codeCollision.set(code, collision)
+
+      // 统计按键使用
+      for (const k of code) {
+        if (KEYS_46_SET.has(k)) {
+          line.usage[k] = (line.usage[k] || 0) + freq
+          totalUsage[k] = (totalUsage[k] || 0) + freq
+        }
+      }
+
+      // 检查超标键位
+      let overKey = 0
+      for (const k of code) {
+        if (!KEYS_46_SET.has(k)) overKey++
+      }
+
+      // 初始化测评项
+      const item: EvaluateWordItem = {
+        word,
+        freq,
+        code,
+        codeLen,
+        collision,
+        eq: 0,
+        dh: 0,
+        ms: 0,
+        ss: 0,
+        pd: 0,
+        lfd: 0,
+        trible: 0,
+        overKey,
+        isLack: false,
+      }
+
+      // 超标键位，跳过手感计算
+      if (overKey > 0) {
+        line.items.push(item)
+        continue
+      }
+
+      // 计算当量
+      item.eq = calcEquivalence(code) * freq
+
+      // 计算手感指标
+      for (let j = 1; j < code.length; j++) {
+        const feel = getComboFeel(code[j - 1], code[j])
+        item.dh += feel.dh
+        item.ms += feel.ms
+        item.ss += feel.ss
+        item.pd += feel.pd
+        item.lfd += feel.lfd
+      }
+
+      // 三连击
+      for (let j = 2; j < code.length; j++) {
+        if (code[j - 2] === code[j - 1] && code[j - 1] === code[j]) {
+          item.trible++
+        }
+      }
+
+      line.items.push(item)
+    }
+
+    lines.push(line)
+  }
+
+  return { lines, usage: totalUsage }
+}
+
+/**
+ * 汇总多个多字词分区
+ */
+export function zipWordLines(lines: EvaluateWordLine[]): EvaluateWordLine {
+  const result: EvaluateWordLine = {
+    items: [],
+    start: lines[0]?.start || 0,
+    end: lines[lines.length - 1]?.end || 0,
+    totalFreq: 0,
+    usage: {},
+  }
+
+  for (const line of lines) {
+    result.items.push(...line.items)
+    result.totalFreq += line.totalFreq
+    for (const [k, v] of Object.entries(line.usage)) {
+      result.usage[k] = (result.usage[k] || 0) + v
+    }
+  }
+
+  return result
+}
+
+/**
+ * 计算多字词某一列的统计值
+ */
+export function getWordColumnValue(
+  line: EvaluateWordLine,
+  column: string
+): { count: number; weight: number } {
+  let count = 0
+  let weight = 0
+
+  for (const item of line.items) {
+    if (item.isLack) {
+      if (column === 'lack') {
+        count++
+        weight += item.freq
+      }
+      continue
+    }
+
+    // 超标键位只统计特定列
+    if (item.overKey > 0 && !['overKey', 'lack'].includes(column)) continue
+
+    switch (column) {
+      case 'select':
+        if (item.collision > 1) { count++; weight += item.freq }
+        break
+      case 'lack':
+        break
+      case 'overKey':
+        count += item.overKey
+        weight += item.overKey * item.freq
+        break
+      case 'dh':
+        count += item.dh
+        weight += item.dh * item.freq
+        break
+      case 'ms':
+        count += item.ms
+        weight += item.ms * item.freq
+        break
+      case 'ss':
+        count += item.ss
+        weight += item.ss * item.freq
+        break
+      case 'pd':
+        count += item.pd
+        weight += item.pd * item.freq
+        break
+      case 'lfd':
+        count += item.lfd
+        weight += item.lfd * item.freq
+        break
+      case 'trible':
+        if (item.trible > 0) { count++; weight += item.freq }
+        break
+    }
+  }
+
+  return { count, weight }
+}
+
+/**
+ * 获取多字词加权当量值
+ */
+export function getWordWeightedEq(line: EvaluateWordLine): number {
+  let total = 0
+  for (const item of line.items) {
+    if (!item.isLack && item.overKey === 0) {
+      total += item.eq
+    }
+  }
+  return line.totalFreq > 0 ? total / line.totalFreq : 0
+}
+
+/**
+ * 获取多字词手感指标的加权百分比
+ */
+export function getWordComboWeightPercent(line: EvaluateWordLine, column: string): string {
+  let totalCombo = 0
+  let weightedValue = 0
+
+  for (const item of line.items) {
+    if (item.isLack || item.overKey > 0) continue
+    const comboCount = item.codeLen < 2 ? 1 : item.codeLen - 1
+    totalCombo += comboCount * item.freq
+
+    switch (column) {
+      case 'dh': weightedValue += item.dh * item.freq; break
+      case 'ms': weightedValue += item.ms * item.freq; break
+      case 'ss': weightedValue += item.ss * item.freq; break
+      case 'pd': weightedValue += item.pd * item.freq; break
+      case 'lfd': weightedValue += item.lfd * item.freq; break
+    }
+  }
+
+  return totalCombo > 0 ? (weightedValue / totalCombo * 100).toFixed(4) : '0.0000'
+}
+
+/**
+ * 获取多字词缺字标记的加权比重
+ */
+export function getWordLackWeightPercent(line: EvaluateWordLine): string {
+  let lackWeight = 0
+  for (const item of line.items) {
+    if (item.isLack) lackWeight += item.freq
+  }
+  return line.totalFreq > 0 ? (lackWeight / line.totalFreq * 100).toFixed(4) : '0.0000'
+}
+
+/**
+ * 获取多字词某一列的加权比重
+ */
+export function getWordWeightPercent(line: EvaluateWordLine, column: string): string {
+  const { weight } = getWordColumnValue(line, column)
+  return line.totalFreq > 0 ? (weight / line.totalFreq * 100).toFixed(4) : '0.0000'
 }

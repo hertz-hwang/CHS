@@ -5,30 +5,53 @@ import KeyboardHeatmap from '../shared/KeyboardHeatmap.vue'
 import Icon from '../Icon.vue'
 import {
   evaluateScheme,
+  evaluateWords,
   parseCodeTable,
   loadEquivalenceData,
   zipLines,
+  zipWordLines,
   getColumnValue,
+  getWordColumnValue,
   getWeightedValue,
+  getWordWeightedEq,
+  getWordComboWeightPercent,
+  getWordLackWeightPercent,
   calcFingerBalance,
   type EvaluationResult,
   type EvaluateLine,
   type EvaluateHanziItem,
+  type EvaluationWordResult,
+  type EvaluateWordLine,
+  type EvaluateWordItem,
 } from '../../utils/evaluate'
 
 const {
   engine, rootsVersion, configVersion, charsetVersion, toast,
 } = useEngine()
 
+// 主标签页
+const activeTab = ref<'single' | 'upload'>('single')
+
+// 子标签页（用于切换单字/词组测评结果）
+const subTab = ref<'char' | 'word'>('char')
+
 // 测评结果
 const evaluationResult = ref<EvaluationResult | null>(null)
+const wordEvaluationResult = ref<EvaluationWordResult | null>(null)
 const isEvaluating = ref(false)
-const activeTab = ref<'single' | 'upload'>('single')
 
 // 上传码表相关
 const uploadedCodeMap = ref<Map<string, string> | null>(null)
 const uploadedFileName = ref('')
 const uploadedResult = ref<EvaluationResult | null>(null)
+const uploadedWordResult = ref<EvaluationWordResult | null>(null)
+
+// 上传码表组词规则
+// 规则格式：大写字母表示字序(A=第1字,B=第2字...Z=末字)，小写字母表示码位(a=第1码,b=第2码...)
+// 例如：AaAbBaBb 表示取第1字前两码+第2字前两码
+const uploadedWord2Rule = ref('AaAbBaBb')  // 2字词规则
+const uploadedWord3Rule = ref('AaBaCaCb')  // 3字词规则
+const uploadedWord4Rule = ref('AaBaCaZa')  // 4字以上词规则
 
 // 方案名称
 const currentSchemeName = ref('当前方案')
@@ -215,19 +238,21 @@ function calculateCharCode(char: string): string {
 // 执行当前编码方案的测评
 async function runEvaluation() {
   isEvaluating.value = true
-  
+
   try {
     await loadEquivalenceData()
-    
+
+    // 加载字频数据（用于单字测评）
     const freqMap = await loadDefaultFreq()
     if (!freqMap) {
       toast('无法加载字频数据')
       return
     }
-    
+
+    // 单字测评
     const codeMap = new Map<string, string>()
     const missingSet = new Set<string>()
-    
+
     for (const [char] of freqMap) {
       if (isCharMissing(char)) {
         missingSet.add(char)
@@ -236,16 +261,201 @@ async function runEvaluation() {
         if (code) codeMap.set(char, code)
       }
     }
-    
+
     const result = evaluateScheme(codeMap, freqMap, selectKeys.value, maxCodeLength.value, missingSet)
     evaluationResult.value = result
-    
-    toast(`测评完成：共 ${freqMap.size} 字`)
+
+    // 词组测评
+    const wordFreqMap = await loadWordFreq()
+    if (wordFreqMap) {
+      const wordCodeMap = new Map<string, string>()
+
+      for (const [word, freq] of wordFreqMap) {
+        if (word.length >= 2) {
+          const code = calculateWordCode(word)
+          if (code) {
+            wordCodeMap.set(word, code)
+          }
+        }
+      }
+
+      const wordResult = evaluateWords(wordCodeMap, wordFreqMap)
+      wordEvaluationResult.value = wordResult
+    }
+
+    // 统计词数
+    let wordCount = 0
+    if (wordFreqMap) {
+      for (const [word] of wordFreqMap) {
+        if (word.length >= 2) wordCount++
+      }
+    }
+
+    toast(`测评完成：${freqMap.size} 字，${wordCount} 词`)
   } catch (e) {
     console.error('测评失败:', e)
     toast('测评失败: ' + (e as Error).message)
   } finally {
     isEvaluating.value = false
+  }
+}
+
+// 计算多字词编码
+function calculateWordCode(word: string): string {
+  configVersion.value
+  const rules = engine.getWordCodeRules()
+
+  if (rules.length < 2) return ''
+
+  const hasActualRules = rules.some(r => r.type !== 'start' && r.type !== 'end')
+  if (!hasActualRules) return ''
+
+  // 获取每个字的字根
+  const charsRoots: string[][] = []
+  for (const char of word) {
+    const decomp = engine.decompose(char)
+    charsRoots.push(decomp.leaves)
+  }
+
+  let code = ''
+  let currentNodeId = 'start'
+  const visited = new Set<string>()
+  const maxIterations = 100
+
+  while (currentNodeId !== 'end' && !visited.has(currentNodeId) && visited.size < maxIterations) {
+    visited.add(currentNodeId)
+    const node = rules.find(r => r.id === currentNodeId)
+    if (!node) break
+
+    if (node.type === 'start') {
+      if (node.nextNode) currentNodeId = node.nextNode
+      else break
+    } else if (node.type === 'pick') {
+      const charIdx = node.charIndex || 1
+      const rootIdx = node.rootIndex || 1
+      const codeIdx = node.codeIndex || 1
+
+      // 计算实际字索引
+      let actualCharIdx: number
+      if (charIdx === -1) {
+        actualCharIdx = charsRoots.length - 1
+      } else if (charIdx === -2) {
+        actualCharIdx = charsRoots.length - 2
+      } else {
+        actualCharIdx = charIdx - 1
+      }
+
+      const charRoots = charsRoots[actualCharIdx] || []
+
+      // 计算实际字根索引
+      let actualRootIdx: number
+      let adjustedCodeIdx: number = codeIdx
+
+      if (rootIdx === -1) {
+        actualRootIdx = charRoots.length - 1
+      } else if (rootIdx > charRoots.length) {
+        actualRootIdx = charRoots.length - 1
+        adjustedCodeIdx = codeIdx + (rootIdx - charRoots.length)
+      } else {
+        actualRootIdx = rootIdx - 1
+      }
+
+      if (actualRootIdx >= 0 && actualRootIdx < charRoots.length) {
+        const root = charRoots[actualRootIdx]
+        const fullCode = getRootFullCode(root)
+
+        if (fullCode) {
+          const actualCodeIdx = adjustedCodeIdx === -1 ? fullCode.length - 1 : adjustedCodeIdx - 1
+          if (actualCodeIdx >= 0 && actualCodeIdx < fullCode.length) {
+            code += fullCode[actualCodeIdx]
+          }
+        }
+      }
+
+      if (node.nextNode) currentNodeId = node.nextNode
+      else break
+    } else if (node.type === 'condition') {
+      let conditionMet = false
+
+      if (node.conditionType === 'char_exists') {
+        const idx = (node.conditionValue || 1) - 1
+        conditionMet = idx >= 0 && idx < charsRoots.length
+      } else if (node.conditionType === 'root_exists') {
+        const idx = (node.conditionValue || 1) - 1
+        const roots = charsRoots[0] || []
+        conditionMet = idx >= 0 && idx < roots.length
+      } else if (node.conditionType === 'root_count') {
+        const roots = charsRoots[0] || []
+        conditionMet = roots.length >= (node.conditionValue || 1)
+      }
+
+      if (conditionMet && node.trueBranch) currentNodeId = node.trueBranch
+      else if (!conditionMet && node.falseBranch) currentNodeId = node.falseBranch
+      else break
+    } else if (node.type === 'end') {
+      break
+    } else {
+      break
+    }
+  }
+
+  return code
+}
+
+// 检查多字词是否缺失
+function isWordMissing(word: string): boolean {
+  for (const char of word) {
+    const decomp = engine.decompose(char)
+    const roots = decomp.leaves
+
+    if (!roots.length) return true
+
+    for (const root of roots) {
+      const fullCode = getRootFullCode(root)
+      if (!fullCode) return true
+    }
+  }
+
+  const code = calculateWordCode(word)
+  return !code
+}
+
+// 默认词频数据
+const defaultWordFreqMap = ref<Map<string, number> | null>(null)
+
+// 加载词频数据（包含多字词）
+async function loadWordFreq(): Promise<Map<string, number> | null> {
+  if (defaultWordFreqMap.value) return defaultWordFreqMap.value
+
+  try {
+    const res = await fetch('/data/kc6000.txt')
+    if (!res.ok) throw new Error('加载词频数据失败')
+
+    const text = await res.text()
+    const freqMap = new Map<string, number>()
+    const lines = text.split('\n')
+
+    for (const line of lines) {
+      const trimmed = line.trim()
+      if (!trimmed) continue
+
+      const parts = trimmed.split('\t')
+      if (parts.length >= 2) {
+        const word = parts[0]
+        const freq = parseInt(parts[1], 10)
+        if (freq > 0) {
+          freqMap.set(word, freq)
+        }
+      }
+    }
+
+    defaultWordFreqMap.value = freqMap
+    console.log(`已加载词频数据：${freqMap.size} 条`)
+    return freqMap
+  } catch (e) {
+    console.error('加载词频数据失败:', e)
+    toast('加载词频数据失败')
+    return null
   }
 }
 
@@ -273,6 +483,86 @@ function handleFileUpload(event: Event) {
   reader.readAsText(file)
 }
 
+// 解析组词规则
+// 规则格式：大写字母表示字序(A=第1字,B=第2字...Z=末字)，小写字母表示码位(a=第1码,b=第2码...z=末码)
+// 例如：AaAbBaBb 表示取第1字前两码+第2字前两码
+interface RulePart {
+  charIndex: number  // 字索引（0-based，-1表示末字）
+  codeIndex: number  // 码位索引（0-based，-1表示末码）
+}
+
+function parseWordRule(rule: string): RulePart[] {
+  const parts: RulePart[] = []
+  
+  // 规则是成对的大写+小写字母
+  for (let i = 0; i < rule.length - 1; i += 2) {
+    const charLetter = rule[i]
+    const codeLetter = rule[i + 1]
+    
+    // 解析字序：A=0, B=1, ... Y=24, Z=-1(末字)
+    let charIndex: number
+    if (charLetter === 'Z') {
+      charIndex = -1  // 末字
+    } else {
+      charIndex = charLetter.charCodeAt(0) - 'A'.charCodeAt(0)
+    }
+    
+    // 解析码位：a=0, b=1, c=2, ..., z=-1(末码)
+    let codeIndex: number
+    if (codeLetter === 'z') {
+      codeIndex = -1  // 末码
+    } else {
+      codeIndex = codeLetter.charCodeAt(0) - 'a'.charCodeAt(0)
+    }
+    
+    parts.push({ charIndex, codeIndex })
+  }
+  
+  return parts
+}
+
+// 根据规则计算上传码表的词组编码
+function calculateUploadedWordCode(word: string, rule: string): string {
+  if (!uploadedCodeMap.value) return ''
+  
+  const parts = parseWordRule(rule)
+  const wordLen = word.length
+  let code = ''
+  
+  for (const part of parts) {
+    // 计算实际的字索引
+    let actualCharIdx: number
+    if (part.charIndex === -1) {
+      actualCharIdx = wordLen - 1  // 末字
+    } else {
+      actualCharIdx = part.charIndex
+    }
+    
+    // 检查字索引是否有效
+    if (actualCharIdx < 0 || actualCharIdx >= wordLen) continue
+    
+    const char = word[actualCharIdx]
+    const charCode = uploadedCodeMap.value.get(char)
+    
+    if (!charCode) continue
+    
+    // 计算实际的码位索引
+    let actualCodeIdx: number
+    if (part.codeIndex === -1) {
+      actualCodeIdx = charCode.length - 1  // 末码
+    } else {
+      actualCodeIdx = part.codeIndex
+    }
+    
+    // 获取指定码位
+    if (actualCodeIdx >= 0 && actualCodeIdx < charCode.length) {
+      code += charCode[actualCodeIdx]
+    }
+  }
+  
+  return code
+}
+
 // 执行上传码表的测评
 async function runUploadedEvaluation() {
   if (!uploadedCodeMap.value) {
@@ -291,10 +581,47 @@ async function runUploadedEvaluation() {
       return
     }
     
+    // 单字测评
     const result = evaluateScheme(uploadedCodeMap.value, freqMap, selectKeys.value, maxCodeLength.value)
     uploadedResult.value = result
     
-    toast(`测评完成：共 ${freqMap.size} 字`)
+    // 词组测评
+    const wordFreqMap = await loadWordFreq()
+    if (wordFreqMap) {
+      const wordCodeMap = new Map<string, string>()
+      
+      for (const [word, freq] of wordFreqMap) {
+        if (word.length >= 2) {
+          // 根据词长选择规则
+          let rule: string
+          if (word.length === 2) {
+            rule = uploadedWord2Rule.value
+          } else if (word.length === 3) {
+            rule = uploadedWord3Rule.value
+          } else {
+            rule = uploadedWord4Rule.value
+          }
+          
+          const code = calculateUploadedWordCode(word, rule)
+          if (code) {
+            wordCodeMap.set(word, code)
+          }
+        }
+      }
+      
+      const wordResult = evaluateWords(wordCodeMap, wordFreqMap)
+      uploadedWordResult.value = wordResult
+    }
+    
+    // 统计词数
+    let wordCount = 0
+    if (wordFreqMap) {
+      for (const [word] of wordFreqMap) {
+        if (word.length >= 2) wordCount++
+      }
+    }
+    
+    toast(`测评完成：${freqMap.size} 字，${wordCount} 词`)
   } catch (e) {
     console.error('测评失败:', e)
     toast('测评失败: ' + (e as Error).message)
@@ -358,10 +685,23 @@ function getSubtotal(lines: EvaluateLine[]): EvaluateLine {
   return zipLines(lines)
 }
 
+// 获取多字词小计行
+function getWordSubtotal(lines: EvaluateWordLine[]): EvaluateWordLine {
+  return zipWordLines(lines)
+}
+
+// 计算多字词加权比重
+function getWordWeightPercent(line: EvaluateWordLine, column: string): string {
+  const { weight } = getWordColumnValue(line, column)
+  return line.totalFreq > 0 ? fmt(weight / line.totalFreq * 100, 4) : '0.0000'
+}
+
 // 详情弹窗相关
 const showDetailModal = ref(false)
 const detailTitle = ref('')
 const detailItems = ref<EvaluateHanziItem[]>([])
+const detailWordItems = ref<EvaluateWordItem[]>([])
+const isWordDetail = ref(false)
 
 // 列名映射
 const COLUMN_NAMES: Record<string, string> = {
@@ -417,6 +757,64 @@ function handleCellClick(line: EvaluateLine, column: string, rangeLabel: string)
   
   detailTitle.value = `${rangeLabel} - ${COLUMN_NAMES[column] || column}（共 ${items.length} 字）`
   detailItems.value = items
+  isWordDetail.value = false
+  showDetailModal.value = true
+}
+
+// 过滤符合条件的词组
+function filterWordItemsByColumn(line: EvaluateWordLine, column: string): EvaluateWordItem[] {
+  const items: EvaluateWordItem[] = []
+  
+  for (const item of line.items) {
+    let match = false
+    
+    switch (column) {
+      case 'select': match = item.collision > 1 && !item.isLack; break
+      case 'lack': match = item.isLack; break
+      case 'dh': match = item.dh > 0 && !item.isLack && item.overKey === 0; break
+      case 'ms': match = item.ms > 0 && !item.isLack && item.overKey === 0; break
+      case 'ss': match = item.ss > 0 && !item.isLack && item.overKey === 0; break
+      case 'pd': match = item.pd > 0 && !item.isLack && item.overKey === 0; break
+      case 'lfd': match = item.lfd > 0 && !item.isLack && item.overKey === 0; break
+      case 'trible': match = item.trible > 0 && !item.isLack && item.overKey === 0; break
+      case 'overKey': match = item.overKey > 0 && !item.isLack; break
+    }
+    
+    if (match) items.push(item)
+  }
+  
+  return items.sort((a, b) => b.freq - a.freq)
+}
+
+// 词组表格列名映射
+const WORD_COLUMN_NAMES: Record<string, string> = {
+  select: '选重',
+  lack: '缺词标记',
+  dh: '左右互击',
+  ms: '同指大跨',
+  ss: '同指小跨',
+  pd: '小指干扰',
+  lfd: '错手',
+  trible: '三连击',
+  overKey: '超标键位'
+}
+
+// 词组可点击的列
+const WORD_CLICKABLE_COLUMNS = ['select', 'lack', 'dh', 'ms', 'ss', 'pd', 'lfd', 'trible', 'overKey']
+
+// 点击词组单元格查看详情
+function handleWordCellClick(line: EvaluateWordLine, column: string, rangeLabel: string) {
+  if (!WORD_CLICKABLE_COLUMNS.includes(column)) return
+  
+  const { count } = getWordColumnValue(line, column)
+  if (count === 0) return
+  
+  const items = filterWordItemsByColumn(line, column)
+  if (items.length === 0) return
+  
+  detailTitle.value = `${rangeLabel} - ${WORD_COLUMN_NAMES[column] || column}（共 ${items.length} 词）`
+  detailWordItems.value = items
+  isWordDetail.value = true
   showDetailModal.value = true
 }
 
@@ -429,6 +827,7 @@ function closeDetailModal() {
 // 监听配置变化
 watch([rootsVersion, configVersion, charsetVersion], () => {
   evaluationResult.value = null
+  wordEvaluationResult.value = null
 })
 </script>
 
@@ -467,21 +866,32 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
         <button class="btn btn-primary" :disabled="isEvaluating" @click="runEvaluation">
           {{ isEvaluating ? '测评中...' : '开始测评' }}
         </button>
-        <span class="hint">测评当前编码方案的性能指标</span>
+        <span class="hint">测评当前编码方案的单字和词组性能指标</span>
       </div>
 
-      <!-- 测评结果表格 -->
-      <div v-if="evaluationResult" class="result-panel">
-        <div class="table-container">
+      <!-- 测评结果：子标签切换 -->
+      <div v-if="evaluationResult || wordEvaluationResult" class="result-panel">
+        <!-- 子标签 -->
+        <div class="sub-tabs">
+          <button class="sub-tab-btn" :class="{ active: subTab === 'char' }" @click="subTab = 'char'">
+            单字测评
+          </button>
+          <button class="sub-tab-btn" :class="{ active: subTab === 'word' }" @click="subTab = 'word'">
+            词组测评
+          </button>
+        </div>
+
+        <!-- 单字测评表格 -->
+        <div v-if="subTab === 'char' && evaluationResult" class="table-container">
           <table class="eval-table">
             <thead>
               <tr class="scheme-title-row">
                 <th colspan="20" class="scheme-title-cell">
                   <div class="scheme-title-content">
                     <template v-if="editingSchemeName">
-                      <input 
-                        v-model="currentSchemeName" 
-                        class="scheme-name-input" 
+                      <input
+                        v-model="currentSchemeName"
+                        class="scheme-name-input"
                         @blur="finishEditSchemeName('current')"
                         @keyup.enter="finishEditSchemeName('current')"
                         ref="currentNameInput"
@@ -647,9 +1057,107 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
         </div>
 
         <!-- 键位热力图 -->
-        <div class="heatmap-container">
+        <div v-if="subTab === 'char' && evaluationResult" class="heatmap-container">
           <h3 class="section-title">键位热力图（单位：%）</h3>
           <KeyboardHeatmap :usage="evaluationResult.usage" />
+        </div>
+
+        <!-- 词组测评表格 -->
+        <div v-if="subTab === 'word' && wordEvaluationResult" class="table-container">
+          <table class="eval-table word-eval-table">
+            <thead>
+              <tr class="scheme-title-row">
+                <th colspan="12" class="scheme-title-cell">
+                  <div class="scheme-title-content">
+                    <span class="scheme-name-text">{{ currentSchemeName }}</span>
+                    <span class="scheme-subtitle">词组测评数据</span>
+                  </div>
+                </th>
+              </tr>
+              <tr>
+                <th class="sticky-col">统计范围</th>
+                <th class="col-select">选重</th>
+                <th>加权词均当量</th>
+                <th>左右互击</th>
+                <th>同指大跨</th>
+                <th>同指小跨</th>
+                <th>小指干扰</th>
+                <th>错手</th>
+                <th>三连击</th>
+                <th>超标键位</th>
+                <th>缺词标记</th>
+              </tr>
+            </thead>
+            <tbody>
+              <!-- 数据行 -->
+              <template v-for="(line, idx) in wordEvaluationResult.lines" :key="idx">
+                <tr :class="{ 'row-highlight': idx < 3 }">
+                  <td class="sticky-col">{{ line.start + 1 }}~{{ line.end }}</td>
+                  <td class="col-select clickable" @click="handleWordCellClick(line, 'select', `${line.start + 1}~${line.end}`)">{{ getWordColumnValue(line, 'select').count }}</td>
+                  <td>{{ fmt(getWordWeightedEq(line)) }}</td>
+                  <td class="clickable" @click="handleWordCellClick(line, 'dh', `${line.start + 1}~${line.end}`)">{{ getWordColumnValue(line, 'dh').count }}</td>
+                  <td class="clickable" @click="handleWordCellClick(line, 'ms', `${line.start + 1}~${line.end}`)">{{ getWordColumnValue(line, 'ms').count }}</td>
+                  <td class="clickable" @click="handleWordCellClick(line, 'ss', `${line.start + 1}~${line.end}`)">{{ getWordColumnValue(line, 'ss').count }}</td>
+                  <td class="clickable" @click="handleWordCellClick(line, 'pd', `${line.start + 1}~${line.end}`)">{{ getWordColumnValue(line, 'pd').count }}</td>
+                  <td class="clickable" @click="handleWordCellClick(line, 'lfd', `${line.start + 1}~${line.end}`)">{{ getWordColumnValue(line, 'lfd').count }}</td>
+                  <td class="clickable" @click="handleWordCellClick(line, 'trible', `${line.start + 1}~${line.end}`)">{{ getWordColumnValue(line, 'trible').count }}</td>
+                  <td class="clickable" @click="handleWordCellClick(line, 'overKey', `${line.start + 1}~${line.end}`)">{{ getWordColumnValue(line, 'overKey').count }}</td>
+                  <td class="clickable" @click="handleWordCellClick(line, 'lack', `${line.start + 1}~${line.end}`)">{{ getWordColumnValue(line, 'lack').count }}</td>
+                </tr>
+
+                <!-- 小计行（在第3行后） -->
+                <tr v-if="idx === 2" class="row-subtotal">
+                  <td class="sticky-col">小计</td>
+                  <td class="col-select">{{ getWordWeightPercent(getWordSubtotal(wordEvaluationResult.lines.slice(0, 3)), 'select') }}%</td>
+                  <td>{{ fmt(getWordWeightedEq(getWordSubtotal(wordEvaluationResult.lines.slice(0, 3)))) }}</td>
+                  <td>{{ getWordComboWeightPercent(getWordSubtotal(wordEvaluationResult.lines.slice(0, 3)), 'dh') }}%</td>
+                  <td>{{ getWordComboWeightPercent(getWordSubtotal(wordEvaluationResult.lines.slice(0, 3)), 'ms') }}%</td>
+                  <td>{{ getWordComboWeightPercent(getWordSubtotal(wordEvaluationResult.lines.slice(0, 3)), 'ss') }}%</td>
+                  <td>{{ getWordComboWeightPercent(getWordSubtotal(wordEvaluationResult.lines.slice(0, 3)), 'pd') }}%</td>
+                  <td>{{ getWordComboWeightPercent(getWordSubtotal(wordEvaluationResult.lines.slice(0, 3)), 'lfd') }}%</td>
+                  <td>{{ getWordWeightPercent(getWordSubtotal(wordEvaluationResult.lines.slice(0, 3)), 'trible') }}%</td>
+                  <td>-</td>
+                  <td>{{ getWordLackWeightPercent(getWordSubtotal(wordEvaluationResult.lines.slice(0, 3))) }}%</td>
+                </tr>
+              </template>
+
+              <!-- 总计行 -->
+              <tr class="row-total">
+                <td class="sticky-col">总计</td>
+                <td class="col-select clickable" @click="handleWordCellClick(getWordSubtotal(wordEvaluationResult.lines), 'select', '总计')">{{ getWordColumnValue(getWordSubtotal(wordEvaluationResult.lines), 'select').count }}</td>
+                <td>{{ fmt(getWordWeightedEq(getWordSubtotal(wordEvaluationResult.lines))) }}</td>
+                <td class="clickable" @click="handleWordCellClick(getWordSubtotal(wordEvaluationResult.lines), 'dh', '总计')">{{ getWordColumnValue(getWordSubtotal(wordEvaluationResult.lines), 'dh').count }}</td>
+                <td class="clickable" @click="handleWordCellClick(getWordSubtotal(wordEvaluationResult.lines), 'ms', '总计')">{{ getWordColumnValue(getWordSubtotal(wordEvaluationResult.lines), 'ms').count }}</td>
+                <td class="clickable" @click="handleWordCellClick(getWordSubtotal(wordEvaluationResult.lines), 'ss', '总计')">{{ getWordColumnValue(getWordSubtotal(wordEvaluationResult.lines), 'ss').count }}</td>
+                <td class="clickable" @click="handleWordCellClick(getWordSubtotal(wordEvaluationResult.lines), 'pd', '总计')">{{ getWordColumnValue(getWordSubtotal(wordEvaluationResult.lines), 'pd').count }}</td>
+                <td class="clickable" @click="handleWordCellClick(getWordSubtotal(wordEvaluationResult.lines), 'lfd', '总计')">{{ getWordColumnValue(getWordSubtotal(wordEvaluationResult.lines), 'lfd').count }}</td>
+                <td class="clickable" @click="handleWordCellClick(getWordSubtotal(wordEvaluationResult.lines), 'trible', '总计')">{{ getWordColumnValue(getWordSubtotal(wordEvaluationResult.lines), 'trible').count }}</td>
+                <td class="clickable" @click="handleWordCellClick(getWordSubtotal(wordEvaluationResult.lines), 'overKey', '总计')">{{ getWordColumnValue(getWordSubtotal(wordEvaluationResult.lines), 'overKey').count }}</td>
+                <td class="clickable" @click="handleWordCellClick(getWordSubtotal(wordEvaluationResult.lines), 'lack', '总计')">{{ getWordColumnValue(getWordSubtotal(wordEvaluationResult.lines), 'lack').count }}</td>
+              </tr>
+
+              <!-- 总加权比重行 -->
+              <tr class="row-weight">
+                <td class="sticky-col">加权比重</td>
+                <td class="col-select">{{ getWordWeightPercent(getWordSubtotal(wordEvaluationResult.lines), 'select') }}%</td>
+                <td>-</td>
+                <td>{{ getWordComboWeightPercent(getWordSubtotal(wordEvaluationResult.lines), 'dh') }}%</td>
+                <td>{{ getWordComboWeightPercent(getWordSubtotal(wordEvaluationResult.lines), 'ms') }}%</td>
+                <td>{{ getWordComboWeightPercent(getWordSubtotal(wordEvaluationResult.lines), 'ss') }}%</td>
+                <td>{{ getWordComboWeightPercent(getWordSubtotal(wordEvaluationResult.lines), 'pd') }}%</td>
+                <td>{{ getWordComboWeightPercent(getWordSubtotal(wordEvaluationResult.lines), 'lfd') }}%</td>
+                <td>{{ getWordWeightPercent(getWordSubtotal(wordEvaluationResult.lines), 'trible') }}%</td>
+                <td>-</td>
+                <td>{{ getWordLackWeightPercent(getWordSubtotal(wordEvaluationResult.lines)) }}%</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- 词组键位热力图 -->
+        <div v-if="subTab === 'word' && wordEvaluationResult" class="heatmap-container">
+          <h3 class="section-title">键位热力图（单位：%）</h3>
+          <KeyboardHeatmap :usage="wordEvaluationResult.usage" />
         </div>
       </div>
 
@@ -678,6 +1186,29 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
           </div>
         </div>
 
+        <!-- 组词规则配置 -->
+        <div v-if="uploadedCodeMap" class="rule-config">
+          <h4 class="rule-title">组词规则</h4>
+          <p class="rule-hint">格式：大写字母表示字序(A=第1字,B=第2字...Z=末字)，小写字母表示码位(a=第1码,b=第2码...z=末码)</p>
+          <div class="rule-inputs">
+            <div class="rule-item">
+              <label>2字词:</label>
+              <input v-model="uploadedWord2Rule" type="text" class="rule-input" placeholder="AaAbBaBb" />
+              <span class="rule-example">如 AaAbBaBb = 第1字前2码+第2字前2码</span>
+            </div>
+            <div class="rule-item">
+              <label>3字词:</label>
+              <input v-model="uploadedWord3Rule" type="text" class="rule-input" placeholder="AaBaCaCb" />
+              <span class="rule-example">如 AaBaCaCb = 各字第1码+末字第2码</span>
+            </div>
+            <div class="rule-item">
+              <label>4字以上:</label>
+              <input v-model="uploadedWord4Rule" type="text" class="rule-input" placeholder="AaBaCaZa" />
+              <span class="rule-example">如 AaBaCaZa = 前3字第1码+末字第1码</span>
+            </div>
+          </div>
+        </div>
+
         <div class="action-bar">
           <button class="btn btn-primary" :disabled="isEvaluating || !uploadedCodeMap" @click="runUploadedEvaluation">
             {{ isEvaluating ? '测评中...' : '开始测评' }}
@@ -689,8 +1220,18 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
       </div>
 
       <!-- 上传码表测评结果 -->
-      <div v-if="uploadedResult" class="result-panel">
-        <div class="table-container">
+      <div v-if="uploadedResult || uploadedWordResult" class="result-panel">
+        <!-- 子标签 -->
+        <div class="sub-tabs">
+          <button class="sub-tab-btn" :class="{ active: subTab === 'char' }" @click="subTab = 'char'">
+            单字测评
+          </button>
+          <button class="sub-tab-btn" :class="{ active: subTab === 'word' }" @click="subTab = 'word'">
+            词组测评
+          </button>
+        </div>
+        <!-- 单字测评表格 -->
+        <div v-if="subTab === 'char' && uploadedResult" class="table-container">
           <table class="eval-table">
             <thead>
               <tr class="scheme-title-row">
@@ -862,9 +1403,104 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
           </table>
         </div>
 
-        <div class="heatmap-container">
+        <!-- 单字键位热力图 -->
+        <div v-if="subTab === 'char' && uploadedResult" class="heatmap-container">
           <h3 class="section-title">键位使用分布（单位：%）</h3>
           <KeyboardHeatmap :usage="uploadedResult.usage" />
+        </div>
+
+        <!-- 词组测评表格 -->
+        <div v-if="subTab === 'word' && uploadedWordResult" class="table-container">
+          <table class="eval-table word-eval-table">
+            <thead>
+              <tr class="scheme-title-row">
+                <th colspan="12" class="scheme-title-cell">
+                  <div class="scheme-title-content">
+                    <span class="scheme-name-text">{{ uploadedSchemeName }}</span>
+                    <span class="scheme-subtitle">词组测评数据</span>
+                  </div>
+                </th>
+              </tr>
+              <tr>
+                <th class="sticky-col">统计范围</th>
+                <th class="col-select">选重</th>
+                <th>加权词均当量</th>
+                <th>左右互击</th>
+                <th>同指大跨</th>
+                <th>同指小跨</th>
+                <th>小指干扰</th>
+                <th>错手</th>
+                <th>三连击</th>
+                <th>超标键位</th>
+                <th>缺词标记</th>
+              </tr>
+            </thead>
+            <tbody>
+              <template v-for="(line, idx) in uploadedWordResult.lines" :key="idx">
+                <tr :class="{ 'row-highlight': idx < 3 }">
+                  <td class="sticky-col">{{ line.start + 1 }}~{{ line.end }}</td>
+                  <td class="col-select clickable" @click="handleWordCellClick(line, 'select', `${line.start + 1}~${line.end}`)">{{ getWordColumnValue(line, 'select').count }}</td>
+                  <td>{{ fmt(getWordWeightedEq(line)) }}</td>
+                  <td class="clickable" @click="handleWordCellClick(line, 'dh', `${line.start + 1}~${line.end}`)">{{ getWordColumnValue(line, 'dh').count }}</td>
+                  <td class="clickable" @click="handleWordCellClick(line, 'ms', `${line.start + 1}~${line.end}`)">{{ getWordColumnValue(line, 'ms').count }}</td>
+                  <td class="clickable" @click="handleWordCellClick(line, 'ss', `${line.start + 1}~${line.end}`)">{{ getWordColumnValue(line, 'ss').count }}</td>
+                  <td class="clickable" @click="handleWordCellClick(line, 'pd', `${line.start + 1}~${line.end}`)">{{ getWordColumnValue(line, 'pd').count }}</td>
+                  <td class="clickable" @click="handleWordCellClick(line, 'lfd', `${line.start + 1}~${line.end}`)">{{ getWordColumnValue(line, 'lfd').count }}</td>
+                  <td class="clickable" @click="handleWordCellClick(line, 'trible', `${line.start + 1}~${line.end}`)">{{ getWordColumnValue(line, 'trible').count }}</td>
+                  <td class="clickable" @click="handleWordCellClick(line, 'overKey', `${line.start + 1}~${line.end}`)">{{ getWordColumnValue(line, 'overKey').count }}</td>
+                  <td class="clickable" @click="handleWordCellClick(line, 'lack', `${line.start + 1}~${line.end}`)">{{ getWordColumnValue(line, 'lack').count }}</td>
+                </tr>
+
+                <tr v-if="idx === 2" class="row-subtotal">
+                  <td class="sticky-col">小计</td>
+                  <td class="col-select">{{ getWordWeightPercent(getWordSubtotal(uploadedWordResult.lines.slice(0, 3)), 'select') }}%</td>
+                  <td>{{ fmt(getWordWeightedEq(getWordSubtotal(uploadedWordResult.lines.slice(0, 3)))) }}</td>
+                  <td>{{ getWordComboWeightPercent(getWordSubtotal(uploadedWordResult.lines.slice(0, 3)), 'dh') }}%</td>
+                  <td>{{ getWordComboWeightPercent(getWordSubtotal(uploadedWordResult.lines.slice(0, 3)), 'ms') }}%</td>
+                  <td>{{ getWordComboWeightPercent(getWordSubtotal(uploadedWordResult.lines.slice(0, 3)), 'ss') }}%</td>
+                  <td>{{ getWordComboWeightPercent(getWordSubtotal(uploadedWordResult.lines.slice(0, 3)), 'pd') }}%</td>
+                  <td>{{ getWordComboWeightPercent(getWordSubtotal(uploadedWordResult.lines.slice(0, 3)), 'lfd') }}%</td>
+                  <td>{{ getWordWeightPercent(getWordSubtotal(uploadedWordResult.lines.slice(0, 3)), 'trible') }}%</td>
+                  <td>-</td>
+                  <td>{{ getWordLackWeightPercent(getWordSubtotal(uploadedWordResult.lines.slice(0, 3))) }}%</td>
+                </tr>
+              </template>
+
+              <tr class="row-total">
+                <td class="sticky-col">总计</td>
+                <td class="col-select clickable" @click="handleWordCellClick(getWordSubtotal(uploadedWordResult.lines), 'select', '总计')">{{ getWordColumnValue(getWordSubtotal(uploadedWordResult.lines), 'select').count }}</td>
+                <td>{{ fmt(getWordWeightedEq(getWordSubtotal(uploadedWordResult.lines))) }}</td>
+                <td class="clickable" @click="handleWordCellClick(getWordSubtotal(uploadedWordResult.lines), 'dh', '总计')">{{ getWordColumnValue(getWordSubtotal(uploadedWordResult.lines), 'dh').count }}</td>
+                <td class="clickable" @click="handleWordCellClick(getWordSubtotal(uploadedWordResult.lines), 'ms', '总计')">{{ getWordColumnValue(getWordSubtotal(uploadedWordResult.lines), 'ms').count }}</td>
+                <td class="clickable" @click="handleWordCellClick(getWordSubtotal(uploadedWordResult.lines), 'ss', '总计')">{{ getWordColumnValue(getWordSubtotal(uploadedWordResult.lines), 'ss').count }}</td>
+                <td class="clickable" @click="handleWordCellClick(getWordSubtotal(uploadedWordResult.lines), 'pd', '总计')">{{ getWordColumnValue(getWordSubtotal(uploadedWordResult.lines), 'pd').count }}</td>
+                <td class="clickable" @click="handleWordCellClick(getWordSubtotal(uploadedWordResult.lines), 'lfd', '总计')">{{ getWordColumnValue(getWordSubtotal(uploadedWordResult.lines), 'lfd').count }}</td>
+                <td class="clickable" @click="handleWordCellClick(getWordSubtotal(uploadedWordResult.lines), 'trible', '总计')">{{ getWordColumnValue(getWordSubtotal(uploadedWordResult.lines), 'trible').count }}</td>
+                <td class="clickable" @click="handleWordCellClick(getWordSubtotal(uploadedWordResult.lines), 'overKey', '总计')">{{ getWordColumnValue(getWordSubtotal(uploadedWordResult.lines), 'overKey').count }}</td>
+                <td class="clickable" @click="handleWordCellClick(getWordSubtotal(uploadedWordResult.lines), 'lack', '总计')">{{ getWordColumnValue(getWordSubtotal(uploadedWordResult.lines), 'lack').count }}</td>
+              </tr>
+
+              <tr class="row-weight">
+                <td class="sticky-col">加权比重</td>
+                <td class="col-select">{{ getWordWeightPercent(getWordSubtotal(uploadedWordResult.lines), 'select') }}%</td>
+                <td>-</td>
+                <td>{{ getWordComboWeightPercent(getWordSubtotal(uploadedWordResult.lines), 'dh') }}%</td>
+                <td>{{ getWordComboWeightPercent(getWordSubtotal(uploadedWordResult.lines), 'ms') }}%</td>
+                <td>{{ getWordComboWeightPercent(getWordSubtotal(uploadedWordResult.lines), 'ss') }}%</td>
+                <td>{{ getWordComboWeightPercent(getWordSubtotal(uploadedWordResult.lines), 'pd') }}%</td>
+                <td>{{ getWordComboWeightPercent(getWordSubtotal(uploadedWordResult.lines), 'lfd') }}%</td>
+                <td>{{ getWordWeightPercent(getWordSubtotal(uploadedWordResult.lines), 'trible') }}%</td>
+                <td>-</td>
+                <td>{{ getWordLackWeightPercent(getWordSubtotal(uploadedWordResult.lines)) }}%</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- 词组键位热力图 -->
+        <div v-if="subTab === 'word' && uploadedWordResult" class="heatmap-container">
+          <h3 class="section-title">键位热力图（单位：%）</h3>
+          <KeyboardHeatmap :usage="uploadedWordResult.usage" />
         </div>
       </div>
     </div>
@@ -877,7 +1513,8 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
           <button class="modal-close" @click="closeDetailModal">&times;</button>
         </div>
         <div class="modal-body">
-          <table class="detail-table">
+          <!-- 单字详情表格 -->
+          <table v-if="!isWordDetail" class="detail-table">
             <thead>
               <tr>
                 <th>序号</th>
@@ -894,6 +1531,27 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                 <td class="char-col">{{ item.char }}</td>
                 <td class="code-col">{{ item.code || '-' }}</td>
                 <td>{{ item.selectKey || '-' }}</td>
+                <td>{{ item.collision > 1 ? item.collision : '-' }}</td>
+                <td>{{ item.freq }}</td>
+              </tr>
+            </tbody>
+          </table>
+          <!-- 词组详情表格 -->
+          <table v-else class="detail-table">
+            <thead>
+              <tr>
+                <th>序号</th>
+                <th>词组</th>
+                <th>编码</th>
+                <th>重码位</th>
+                <th>词频</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="(item, idx) in detailWordItems" :key="item.word" :class="{ 'is-lack': item.isLack }">
+                <td>{{ idx + 1 }}</td>
+                <td class="char-col">{{ item.word }}</td>
+                <td class="code-col">{{ item.code || '-' }}</td>
                 <td>{{ item.collision > 1 ? item.collision : '-' }}</td>
                 <td>{{ item.freq }}</td>
               </tr>
@@ -1007,8 +1665,38 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
   box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4);
 }
 
-.tab-content {
-  /* 内容跟随页面滚动 */
+/* 子标签 */
+.sub-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  background: var(--bg3);
+  border-radius: 10px;
+  margin-bottom: 16px;
+  width: fit-content;
+}
+
+.sub-tab-btn {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text2);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.sub-tab-btn:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+}
+
+.sub-tab-btn.active {
+  background: var(--primary);
+  color: white;
+  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.3);
 }
 
 /* 操作栏 */
@@ -1277,6 +1965,76 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
 .upload-hint {
   font-size: 12px;
   color: var(--text3);
+}
+
+/* 组词规则配置 */
+.rule-config {
+  padding: 16px 20px;
+  background: var(--bg2);
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.rule-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  margin: 0 0 8px 0;
+}
+
+.rule-hint {
+  font-size: 12px;
+  color: var(--text3);
+  margin: 0 0 16px 0;
+  line-height: 1.5;
+}
+
+.rule-inputs {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.rule-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.rule-item label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text2);
+  min-width: 70px;
+}
+
+.rule-input {
+  flex: 0 0 140px;
+  padding: 8px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 13px;
+  font-family: 'SF Mono', 'JetBrains Mono', 'Consolas', monospace;
+  transition: all 0.2s ease;
+}
+
+.rule-input:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
+}
+
+.rule-input::placeholder {
+  color: var(--text3);
+}
+
+.rule-example {
+  font-size: 12px;
+  color: var(--text3);
+  font-style: italic;
 }
 
 /* 空状态 */

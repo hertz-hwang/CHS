@@ -4,7 +4,8 @@ import {
   UserConfig, parseConfig, exportConfig, saveConfigToStorage, loadConfigFromStorage,
   ConfigScheme, ConfigSchemeWithData, listSchemes, loadScheme, saveScheme, deleteScheme, 
   renameScheme, createScheme, importSchemeFromToml, exportSchemeToToml, duplicateScheme,
-  getCurrentSchemeId, setCurrentSchemeId, initExampleSchemes, loadExampleScheme
+  getCurrentSchemeId, setCurrentSchemeId, initExampleSchemes, loadExampleScheme,
+  createDefaultConfig
 } from '@/engine/config'
 import { loadRoots2PuaMap, bracedRootToPua, convertBracedRootsToPua, isBracedRoot, needsPuaFont, getPuaFontName } from '@/utils/pua'
 
@@ -375,16 +376,10 @@ function saveCurrentToScheme(id: string): boolean {
 // 创建新方案
 function createNewScheme(name: string, author: string, description: string = ''): ConfigScheme {
   const scheme = createScheme(name, author, description)
-  const config = getConfig()
-  
-  // 使用当前配置作为新方案的配置
-  config.meta = {
-    version: '1.0',
-    name,
-    author,
-    created: scheme.created,
-    description,
-  }
+  // 创建空配置，不使用当前配置
+  const config = createDefaultConfig(name, author)
+  config.meta.description = description
+  config.meta.created = scheme.created
   
   saveScheme(scheme, config)
   schemesVersion.value++
