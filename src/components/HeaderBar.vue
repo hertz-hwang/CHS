@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue'
-import { useEngine, CHARSET_OPTIONS, CharsetOption } from "../composables/useEngine"
+import { useEngine, CHARSET_OPTIONS, FREQ_SOURCE_OPTIONS, CharsetOption, FreqSourceOption } from "../composables/useEngine"
 import { useTheme } from "../composables/useTheme"
 import { exportConfig, parseConfig, saveConfigToStorage, createDefaultConfig } from "../engine/config"
 import Icon from './Icon.vue'
 import ConfigManager from './ConfigManager.vue'
 
-const { engine, refreshStats, toast, stats, configVersion, getConfig, applyConfig, currentCharsetId, setCharset, getCurrentCharsetName, initSchemes, getCurrentScheme } = useEngine()
+const { engine, refreshStats, toast, stats, configVersion, getConfig, applyConfig, currentCharsetId, setCharset, getCurrentCharsetName, initSchemes, getCurrentScheme, currentFreqSourceId, setFreqSource, getCurrentFreqSourceName } = useEngine()
 const { theme, toggleTheme, isDark } = useTheme()
 
 const fileInput = ref<HTMLInputElement>()
@@ -136,6 +136,16 @@ function onCharsetChange(event: Event) {
     toast(`已切换到字集: ${option?.name || charsetId}`)
   }
 }
+
+// 字词频数据源切换事件处理
+async function onFreqSourceChange(event: Event) {
+  const target = event.target as HTMLSelectElement
+  const freqSourceId = target.value
+  const option = FREQ_SOURCE_OPTIONS.find(o => o.id === freqSourceId)
+  if (await setFreqSource(freqSourceId)) {
+    toast(`已切换到字频数据: ${option?.name || freqSourceId}`)
+  }
+}
 </script>
 
 <template>
@@ -260,6 +270,21 @@ function onCharsetChange(event: Event) {
           title="选择字集"
         >
           <option v-for="option in CHARSET_OPTIONS" :key="option.id" :value="option.id">
+            {{ option.name }}
+          </option>
+        </select>
+      </div>
+      
+      <!-- 字词频数据源选择器 -->
+      <div class="stat-item freq-item">
+        <span class="stat-label">字频</span>
+        <select 
+          class="stat-value freq-select" 
+          :value="currentFreqSourceId" 
+          @change="onFreqSourceChange($event)"
+          title="选择字频数据源"
+        >
+          <option v-for="option in FREQ_SOURCE_OPTIONS" :key="option.id" :value="option.id">
             {{ option.name }}
           </option>
         </select>
@@ -609,6 +634,41 @@ h1 {
 
 @media (max-width: 900px) {
   .charset-item {
+    display: none;
+  }
+}
+
+/* 字词频数据源选择器样式 */
+.freq-item {
+  margin-left: 4px;
+}
+
+.freq-select {
+  padding: 2px 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--success);
+  background: rgba(0, 180, 42, 0.15);
+  border: 1px solid var(--success);
+  border-radius: 4px;
+  cursor: pointer;
+  outline: none;
+  transition: all 0.2s ease;
+  min-width: 50px;
+  text-align: center;
+}
+
+.freq-select:hover {
+  background: var(--success);
+  color: white;
+}
+
+.freq-select:focus {
+  box-shadow: 0 0 0 2px rgba(0, 180, 42, 0.2);
+}
+
+@media (max-width: 900px) {
+  .freq-item {
     display: none;
   }
 }

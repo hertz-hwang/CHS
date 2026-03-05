@@ -219,6 +219,66 @@ export class CharsHijack {
     return n
   }
 
+  // 仅加载拼音数据（从字典文件）
+  loadPinyin(text: string): number {
+    let n = 0
+    for (const raw of text.split('\n')) {
+      const line = raw.trim()
+      if (!line || line.startsWith('#')) continue
+      const cols = line.split('\t')
+      if (cols.length >= 2 && [...cols[0]].length === 1) {
+        const ch = cols[0]
+        const py = cols[1]
+        const fq = cols.length >= 3 ? (parseInt(cols[2]) || 0) : 0
+        
+        // 收集所有拼音信息（避免重复）
+        if (!this.pinyinList.has(ch)) {
+          this.pinyinList.set(ch, [])
+        }
+        const list = this.pinyinList.get(ch)!
+        // 检查是否已存在相同的拼音
+        if (!list.some(p => p.py === py)) {
+          list.push({ py, freq: fq })
+          n++
+        }
+      }
+    }
+    
+    // 对每个字的拼音按词频降序排列，并设置最高频拼音到 pinyin（兼容）
+    for (const [ch, list] of this.pinyinList) {
+      list.sort((a, b) => b.freq - a.freq)
+      if (list.length > 0) {
+        this.pinyin.set(ch, list[0].py)
+      }
+    }
+    
+    return n
+  }
+
+  // 仅加载字词频数据（科测格式：字/词\t频率）
+  loadFreq(text: string): number {
+    let n = 0
+    for (const raw of text.split('\n')) {
+      const line = raw.trim()
+      if (!line || line.startsWith('#')) continue
+      const cols = line.split('\t')
+      if (cols.length >= 2) {
+        const ch = cols[0]
+        const fq = parseInt(cols[1]) || 0
+        if (fq > 0) {
+          this.freq.set(ch, fq)
+          n++
+        }
+      }
+    }
+    return n
+  }
+
+  // 清除字词频数据
+  clearFreq(): void {
+    this.freq.clear()
+  }
+
   loadCharset(name: string, text: string): number {
     const charSet = new Set<string>()
     for (const raw of text.split('\n')) {

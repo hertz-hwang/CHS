@@ -23,10 +23,28 @@ export const CHARSET_OPTIONS: CharsetOption[] = [
   { id: 'all', name: '全部', file: '/data/all.txt' },
 ]
 
+// 字词频数据源选项定义
+export interface FreqSourceOption {
+  id: string        // 数据源ID
+  name: string      // 显示名称
+  file: string      // 文件路径
+}
+
+export const FREQ_SOURCE_OPTIONS: FreqSourceOption[] = [
+  { id: 'kc6000', name: '科测', file: '/data/kc6000.txt' },
+  { id: 'dictionary', name: '自带', file: '/data/dictionary.txt' },
+]
+
 const engine = new CharsHijack()
 
 // 当前选中的字集ID（默认值 'all'）
 const currentCharsetId = ref<string>('all')
+
+// 当前字词频数据源ID（默认值 'kc6000'，即科测数据）
+const currentFreqSourceId = ref<string>('kc6000')
+
+// 字词频版本号，用于触发相关更新
+const freqVersion = ref(0)
 
 // 在模块初始化时立即加载保存的配置
 const savedConfig = loadConfigFromStorage()
@@ -137,9 +155,19 @@ async function loadDefaultData(): Promise<{ loaded: string[]; failed: string[] }
   const stroke = await fetchText('/data/stroke.txt')
   if (stroke) { engine.loadStrokes(stroke); loaded.push('笔画') }
 
-  // 加载字典数据
+  // 加载拼音数据（始终从 dictionary.txt 加载）
   const dict = await fetchText('/data/dictionary.txt')
-  if (dict) { engine.loadDict(dict); loaded.push('字典') }
+  if (dict) { engine.loadPinyin(dict); loaded.push('拼音') }
+
+  // 加载默认字词频数据（科测数据）
+  const defaultFreqSource = FREQ_SOURCE_OPTIONS.find(o => o.id === currentFreqSourceId.value)
+  if (defaultFreqSource) {
+    const freqText = await fetchText(defaultFreqSource.file)
+    if (freqText) {
+      engine.loadFreq(freqText)
+      loaded.push(`${defaultFreqSource.name}字频`)
+    }
+  }
 
   // 加载所有字集文件
   for (const option of CHARSET_OPTIONS) {
@@ -187,6 +215,32 @@ function getCurrentCharsetName(): string {
 function getCurrentCharset(): string[] {
   charsetVersion.value // 依赖触发
   return engine.getCharset(currentCharsetId.value)
+}
+
+// 切换字词频数据源
+async function setFreqSource(freqSourceId: string): Promise<boolean> {
+  const option = FREQ_SOURCE_OPTIONS.find(o => o.id === freqSourceId)
+  if (!option) return false
+  
+  // 清除现有字词频数据
+  engine.clearFreq()
+  
+  // 加载新的字词频数据
+  const text = await fetchText(option.file)
+  if (!text) return false
+  
+  engine.loadFreq(text)
+  currentFreqSourceId.value = freqSourceId
+  freqVersion.value++
+  refreshStats()
+  
+  return true
+}
+
+// 获取当前字词频数据源名称
+function getCurrentFreqSourceName(): string {
+  const option = FREQ_SOURCE_OPTIONS.find(o => o.id === currentFreqSourceId.value)
+  return option?.name || '科测'
 }
 
 // ============ 配置管理方法 ============
@@ -491,6 +545,11 @@ export function useEngine() {
     setCharset,
     getCurrentCharsetName,
     getCurrentCharset,
+    // 字词频数据源管理
+    currentFreqSourceId: readonly(currentFreqSourceId),
+    freqVersion,
+    setFreqSource,
+    getCurrentFreqSourceName,
     // PUA 字根转换
     bracedRootToPua,
     convertBracedRootsToPua,
