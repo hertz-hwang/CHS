@@ -44,9 +44,8 @@ export async function loadEquivalenceData(): Promise<void> {
     }
     
     eqDataLoaded = true
-    console.log(`已加载当量数据：${Object.keys(EQ_DATA).length} 条`)
   } catch (e) {
-    console.error('加载当量数据失败:', e)
+    // 加载失败时使用默认值
   }
 }
 
@@ -244,8 +243,12 @@ export interface EvaluateHanziItem {
   selectKey: string  // 选重键
   brief2: boolean    // 理论二简
   
+  // 出简重和全码重
+  simpleCollision: number  // 出简重（最短编码的重码情况）
+  fullCollision: number    // 全码重（最长编码的重码情况）
+  
   // 加权值
-  cl: number         // 加权键长 = 键长 * 字频
+  cl: number         // 加权键长
   ziEq: number       // 加权字均当量
   keyEq: number      // 加权键均当量
   
@@ -277,9 +280,10 @@ export interface EvaluationResult {
 
 /**
  * 解析码表文件（支持 TXT 和 YAML 格式）
+ * 返回每个字的所有编码（用于计算出简重和全码重）
  */
-export function parseCodeTable(content: string, filename?: string): Map<string, string> {
-  const codeMap = new Map<string, string>()
+export function parseCodeTable(content: string, filename?: string): Map<string, string[]> {
+  const codeMap = new Map<string, string[]>()
   
   const isYaml = filename?.endsWith('.yaml') || filename?.endsWith('.yml') || 
                  content.includes('---')
@@ -293,7 +297,7 @@ export function parseCodeTable(content: string, filename?: string): Map<string, 
   return codeMap
 }
 
-function parseTxtCodeTable(content: string, codeMap: Map<string, string>): void {
+function parseTxtCodeTable(content: string, codeMap: Map<string, string[]>): void {
   const lines = content.split('\n')
   
   for (const line of lines) {
@@ -305,16 +309,19 @@ function parseTxtCodeTable(content: string, codeMap: Map<string, string>): void 
       const char = parts[0]
       const code = parts[1].toLowerCase()
       if (char.length === 1) {
-        const existing = codeMap.get(char)
-        if (!existing || code.length < existing.length) {
-          codeMap.set(char, code)
+        if (!codeMap.has(char)) {
+          codeMap.set(char, [])
+        }
+        const codes = codeMap.get(char)!
+        if (!codes.includes(code)) {
+          codes.push(code)
         }
       }
     }
   }
 }
 
-function parseYamlCodeTable(content: string, codeMap: Map<string, string>): void {
+function parseYamlCodeTable(content: string, codeMap: Map<string, string[]>): void {
   const lines = content.split('\n')
   let passedHeader = false
   
@@ -334,9 +341,12 @@ function parseYamlCodeTable(content: string, codeMap: Map<string, string>): void
         const char = parts[0]
         const code = parts[1].toLowerCase()
         if (char.length === 1) {
-          const existing = codeMap.get(char)
-          if (!existing || code.length < existing.length) {
-            codeMap.set(char, code)
+          if (!codeMap.has(char)) {
+            codeMap.set(char, [])
+          }
+          const codes = codeMap.get(char)!
+          if (!codes.includes(code)) {
+            codes.push(code)
           }
         }
       }
@@ -350,14 +360,14 @@ function parseYamlCodeTable(content: string, codeMap: Map<string, string>): void
 
 /**
  * 测评编码方案
- * @param codeMap 编码映射
+ * @param codeMap 编码映射（支持 Map<string, string> 和 Map<string, string[]>）
  * @param freqMap 字频映射
  * @param selectKeys 选重键
  * @param maxCodeLength 最大码长
  * @param missingSet 缺字集合（可选，用于标记缺字）
  */
 export function evaluateScheme(
-  codeMap: Map<string, string>,
+  codeMap: Map<string, string> | Map<string, string[]>,
   freqMap: Map<string, number>,
   selectKeys: string = ";'456789",
   maxCodeLength: number = 4,
@@ -368,7 +378,7 @@ export function evaluateScheme(
     .filter(([char]) => char.length === 1)
     .sort((a, b) => b[1] - a[1])
   
-  // 5个分区
+  // 5 个分区
   const sections = [
     [0, 300],
     [300, 500],
@@ -377,14 +387,20 @@ export function evaluateScheme(
     [3000, 6000],
   ]
   
-  // 编码冲突计数器
-  const codeCollision = new Map<string, number>()
+  // 编码冲突计数器（全码重 - 基于最长编码）
+  const fullCodeCollision = new Map<string, number>()
+  // 出简重冲突计数器（基于最短编码）
+  const simpleCodeCollision = new Map<string, number>()
   
   // 理论二简集合
   const brief2Set = new Set<string>()
   
   const lines: EvaluateLine[] = []
   const totalUsage: Record<string, number> = {}
+  
+  // 是否为数组类型的 codeMap
+  const isArrayCodeMap = codeMap instanceof Map && 
+    codeMap.size > 0 && Array.isArray(codeMap.values().next().value)
   
   for (const [start, end] of sections) {
     const line: EvaluateLine = {
@@ -402,19 +418,27 @@ export function evaluateScheme(
       // 检查是否在缺字集合中（由调用方提供）
       const isMissing = missingSet?.has(char) ?? false
       
-      // 检查码表中是否存在该字
-      const code = codeMap.get(char)
+      // 获取该字的所有编码
+      let codes: string[] | undefined
+      if (isArrayCodeMap) {
+        codes = (codeMap as Map<string, string[]>).get(char)
+      } else {
+        const code = (codeMap as Map<string, string>).get(char)
+        if (code) codes = [code]
+      }
       
       // 缺字判断：优先使用 missingSet，其次检查 codeMap
-      if (isMissing || !code) {
+      if (isMissing || !codes || codes.length === 0) {
         line.items.push({
           char,
           freq,
-          code: code || '',
+          code: '',
           codeLen: 0,
           collision: 0,
           selectKey: '',
           brief2: false,
+          simpleCollision: 0,
+          fullCollision: 0,
           cl: 0,
           ziEq: 0,
           keyEq: 0,
@@ -430,15 +454,33 @@ export function evaluateScheme(
         continue
       }
       
+      // 找到最短编码和最长编码
+      let shortestCode = codes[0]
+      let longestCode = codes[0]
+      for (const code of codes) {
+        if (code.length < shortestCode.length) shortestCode = code
+        if (code.length > longestCode.length) longestCode = code
+      }
+      
+      // 使用最短编码作为主要编码
+      const code = shortestCode
       const codeLen = code.length
-      const collision = (codeCollision.get(code) || 0) + 1
-      codeCollision.set(code, collision)
+      
+      // 计算出简重：基于最短编码的重码情况
+      const simpleCollisionKey = shortestCode
+      const simpleCollision = (simpleCodeCollision.get(simpleCollisionKey) || 0) + 1
+      simpleCodeCollision.set(simpleCollisionKey, simpleCollision)
+      
+      // 计算全码重：基于最长编码的重码情况
+      const fullCollisionKey = longestCode
+      const fullCollision = (fullCodeCollision.get(fullCollisionKey) || 0) + 1
+      fullCodeCollision.set(fullCollisionKey, fullCollision)
       
       // 计算选重键
       let selectKey = ''
-      if (collision > 1) {
-        // 有重码，使用配置的选重键（从第2选项开始）
-        const selectIdx = Math.min(collision - 2, selectKeys.length - 1)
+      if (simpleCollision > 1) {
+        // 有重码，使用配置的选重键（从第 2 选项开始）
+        const selectIdx = Math.min(simpleCollision - 2, selectKeys.length - 1)
         selectKey = selectKeys[selectIdx]
       } else if (codeLen < maxCodeLength) {
         // 码长不足，使用空格确认首选项
@@ -477,9 +519,11 @@ export function evaluateScheme(
         freq,
         code,
         codeLen,
-        collision,
+        collision: simpleCollision,  // collision 使用出简重
         selectKey,
         brief2,
+        simpleCollision,
+        fullCollision,
         cl: keysLen * freq,
         ziEq: 0,
         keyEq: 0,
@@ -501,7 +545,7 @@ export function evaluateScheme(
       
       // 计算当量
       if (keysLen < 2) {
-        item.ziEq = freq  // 1码字当量为1
+        item.ziEq = freq  // 1 码字当量为 1
         item.keyEq = freq
       } else {
         let eq = 0
@@ -601,7 +645,13 @@ export function getColumnValue(
         if (item.codeLen >= 5) { count++; weight += item.freq }
         break
       case 'select':
-        if (item.collision > 1) { count++; weight += item.freq }
+      case 'simpleCollision':
+        // 出简重：最短编码重码数 > 1
+        if (item.simpleCollision > 1) { count++; weight += item.freq }
+        break
+      case 'fullCollision':
+        // 全码重：最长编码重码数 > 1
+        if (item.fullCollision > 1) { count++; weight += item.freq }
         break
       case 'brief2':
         if (item.brief2) { count++; weight += item.freq }
