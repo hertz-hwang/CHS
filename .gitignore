@@ -1,6 +1,9 @@
 /node_modules
 /setup.sh
 /package-lock.json
+/bun.lock
+/chars-hijack*
 /dist
+/release
 /tmp
-.DS_Store
+**/.DS_Store
