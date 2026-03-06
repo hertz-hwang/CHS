@@ -51,7 +51,10 @@ export async function loadEquivalenceData(): Promise<void> {
 
 // 计算两键组合的当量
 function getComboEquivalence(key1: string, key2: string): number {
-  const combo = key1.toLowerCase() + key2.toLowerCase()
+  // 将空格转换为 _（数据文件中用 _ 表示空格）
+  const k1 = key1 === ' ' ? '_' : key1.toLowerCase()
+  const k2 = key2 === ' ' ? '_' : key2.toLowerCase()
+  const combo = k1 + k2
   return EQ_DATA[combo] ?? DEFAULT_EQ
 }
 
@@ -251,6 +254,8 @@ export interface EvaluateHanziItem {
   cl: number         // 加权键长
   ziEq: number       // 加权字均当量
   keyEq: number      // 加权键均当量
+  ziEqCombo: number  // 字当量（键值对当量值之和）
+  keyEqCombo: number // 键当量（键均当量，字当量/键值对数量）
   
   // 手感指标（次数）
   dh: number         // 左右互击
@@ -442,6 +447,8 @@ export function evaluateScheme(
           cl: 0,
           ziEq: 0,
           keyEq: 0,
+          ziEqCombo: 0,
+          keyEqCombo: 0,
           dh: 0,
           ms: 0,
           ss: 0,
@@ -527,6 +534,8 @@ export function evaluateScheme(
         cl: keysLen * freq,
         ziEq: 0,
         keyEq: 0,
+        ziEqCombo: 0,
+        keyEqCombo: 0,
         dh: 0,
         ms: 0,
         ss: 0,
@@ -545,8 +554,11 @@ export function evaluateScheme(
       
       // 计算当量
       if (keysLen < 2) {
-        item.ziEq = freq  // 1 码字当量为 1
-        item.keyEq = freq
+        // 1 码字：只有一个键，无法形成键值对，当量为 0
+        item.ziEq = 0
+        item.keyEq = 0
+        item.ziEqCombo = 0
+        item.keyEqCombo = 0
       } else {
         let eq = 0
         for (let j = 1; j < fullCode.length; j++) {
@@ -554,6 +566,8 @@ export function evaluateScheme(
         }
         item.ziEq = eq * freq
         item.keyEq = (eq / (keysLen - 1)) * freq
+        item.ziEqCombo = eq  // 字当量为键值对当量值之和
+        item.keyEqCombo = eq / (keysLen - 1)  // 键当量 = 字当量 / 键值对数量
       }
       
       // 计算手感指标（使用完整的编码，包括选重键）

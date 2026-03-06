@@ -1544,6 +1544,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                 <th>选重</th>
                 <th>重码位</th>
                 <th>字当量</th>
+                <th>键当量</th>
                 <th>字频</th>
               </tr>
             </thead>
@@ -1554,7 +1555,8 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                 <td class="code-col">{{ item.code || '-' }}</td>
                 <td>{{ item.selectKey || '-' }}</td>
                 <td>{{ item.collision > 1 ? item.collision : '-' }}</td>
-                <td>{{ item.isLack || item.overKey > 0 ? '-' : fmt(item.ziEq / item.freq) }}</td>
+                <td>{{ item.isLack || item.overKey > 0 ? '-' : fmt(item.ziEqCombo) }}</td>
+                <td>{{ item.isLack || item.overKey > 0 ? '-' : fmt(item.keyEqCombo) }}</td>
                 <td>{{ item.freq }}</td>
               </tr>
             </tbody>
