@@ -98,7 +98,8 @@ async function loadDefaultFreq() {
   if (defaultFreqMap.value) return defaultFreqMap.value
   
   try {
-    const res = await fetch('/data/kc6000.txt')
+    const base = import.meta.env.BASE_URL
+    const res = await fetch(`${base}data/kc6000.txt`)
     if (!res.ok) throw new Error('加载字频数据失败')
     
     const text = await res.text()
@@ -428,7 +429,8 @@ async function loadWordFreq(): Promise<Map<string, number> | null> {
   if (defaultWordFreqMap.value) return defaultWordFreqMap.value
 
   try {
-    const res = await fetch('/data/kc6000.txt')
+    const base = import.meta.env.BASE_URL
+    const res = await fetch(`${base}data/kc6000.txt`)
     if (!res.ok) throw new Error('加载词频数据失败')
 
     const text = await res.text()

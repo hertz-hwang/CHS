@@ -16,12 +16,14 @@ export interface CharsetOption {
   file: string      // 文件路径
 }
 
+const BASE = import.meta.env.BASE_URL
+
 export const CHARSET_OPTIONS: CharsetOption[] = [
-  { id: 'gb2312', name: 'GB2312', file: '/data/gb2312.txt' },
-  { id: 'kc6000', name: '科测6000', file: '/data/kc6000.txt' },
-  { id: 'tg8105', name: '通规8105', file: '/data/tg8105.txt' },
-  { id: 'cjk', name: '基本区', file: '/data/cjk.txt' },
-  { id: 'all', name: '全部', file: '/data/all.txt' },
+  { id: 'gb2312', name: 'GB2312', file: `${BASE}data/gb2312.txt` },
+  { id: 'kc6000', name: '科测6000', file: `${BASE}data/kc6000.txt` },
+  { id: 'tg8105', name: '通规8105', file: `${BASE}data/tg8105.txt` },
+  { id: 'cjk', name: '基本区', file: `${BASE}data/cjk.txt` },
+  { id: 'all', name: '全部', file: `${BASE}data/all.txt` },
 ]
 
 // 字词频数据源选项定义
@@ -32,8 +34,8 @@ export interface FreqSourceOption {
 }
 
 export const FREQ_SOURCE_OPTIONS: FreqSourceOption[] = [
-  { id: 'kc6000', name: '科测', file: '/data/kc6000.txt' },
-  { id: 'dictionary', name: '自带', file: '/data/dictionary.txt' },
+  { id: 'kc6000', name: '科测', file: `${BASE}data/kc6000.txt` },
+  { id: 'dictionary', name: '自带', file: `${BASE}data/dictionary.txt` },
 ]
 
 const engine = new CharsHijack()
@@ -144,20 +146,20 @@ async function loadDefaultData(): Promise<{ loaded: string[]; failed: string[] }
   const failed: string[] = []
 
   // 加载 IDS 数据
-  const ids = await fetchText('/data/sky_ids.txt')
+  const ids = await fetchText(`${BASE}data/sky_ids.txt`)
   if (ids) { engine.loadSkyIDS(ids); loaded.push('IDS') }
   else failed.push('IDS')
 
   // 加载自定义 IDS
-  const custom = await fetchText('/data/custom_ids.txt')
+  const custom = await fetchText(`${BASE}data/custom_ids.txt`)
   if (custom) { engine.loadCustomIDS(custom); loaded.push('自定义IDS') }
 
   // 加载笔画数据
-  const stroke = await fetchText('/data/stroke.txt')
+  const stroke = await fetchText(`${BASE}data/stroke.txt`)
   if (stroke) { engine.loadStrokes(stroke); loaded.push('笔画') }
 
   // 加载拼音数据（始终从 dictionary.txt 加载）
-  const dict = await fetchText('/data/dictionary.txt')
+  const dict = await fetchText(`${BASE}data/dictionary.txt`)
   if (dict) { engine.loadPinyin(dict); loaded.push('拼音') }
 
   // 加载默认字词频数据（科测数据）

@@ -15,7 +15,8 @@ async function loadPuaFont(): Promise<boolean> {
   if (puaFontLoaded) return true
   
   try {
-    const font = new FontFace('CHS-PUA', 'url(/data/CHS_PUA-Regular.woff2)')
+    const base = import.meta.env.BASE_URL
+    const font = new FontFace('CHS-PUA', `url(${base}data/CHS_PUA-Regular.woff2)`)
     await font.load()
     document.fonts.add(font)
     puaFontLoaded = true

@@ -1,11 +1,5 @@
 /* PUA 专用字体 - 用于显示花括号原子字根 */
-@font-face {
-  font-family: 'CHS-PUA';
-  src: url('/data/CHS_PUA-Regular.woff2') format('woff2');
-  font-weight: normal;
-  font-style: normal;
-  font-display: swap;
-}
+/* 字体通过 JavaScript 动态加载（见 main.ts）*/
 
 /* PUA 字体样式类 - 全局可用 */
 .pua-font {

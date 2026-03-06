@@ -15,7 +15,8 @@ export async function loadRoots2PuaMap(): Promise<void> {
   if (isLoaded) return
   
   try {
-    const response = await fetch('/data/roots2pua.txt')
+    const base = import.meta.env.BASE_URL
+    const response = await fetch(`${base}data/roots2pua.txt`)
     if (!response.ok) {
       console.warn('Failed to load roots2pua.txt:', response.status)
       return

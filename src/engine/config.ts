@@ -519,8 +519,9 @@ export function duplicateScheme(id: string, newName?: string): ConfigSchemeWithD
 // ============ 官方示例配置 ============
 
 // 示例配置文件定义（只定义文件路径，元信息从文件读取）
+const BASE = import.meta.env.BASE_URL
 const EXAMPLE_FILES: { id: string; file: string }[] = [
-  { id: 'example_hakimi', file: '/data/examples/哈基米_字劫.toml' },
+  { id: 'example_hakimi', file: `${BASE}data/examples/哈基米_字劫.toml` },
 ]
 
 // 示例配置缓存

@@ -22,7 +22,8 @@ export async function loadEquivalenceData(): Promise<void> {
   if (eqDataLoaded) return
   
   try {
-    const res = await fetch('/data/pair_equivalence.txt')
+    const base = import.meta.env.BASE_URL
+    const res = await fetch(`${base}data/pair_equivalence.txt`)
     if (!res.ok) throw new Error('加载当量数据失败')
     
     const text = await res.text()
