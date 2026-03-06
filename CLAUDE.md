@@ -17,9 +17,9 @@
 ## 开发命令
 
 ```bash
-npm run dev      # 启动开发服务器 (Vite)
-npm run build    # 类型检查 (vue-tsc) 并构建生产版本
-npm run preview  # 本地预览生产构建
+bun run dev      # 启动开发服务器 (Vite)
+bun run build    # 类型检查 (vue-tsc) 并构建生产版本
+bun run preview  # 本地预览生产构建
 ```
 
 ## 架构说明
