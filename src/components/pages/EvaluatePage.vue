@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, watch, computed, shallowRef } from 'vue'
 import { useEngine } from '../../composables/useEngine'
 import KeyboardHeatmap from '../shared/KeyboardHeatmap.vue'
 import Icon from '../Icon.vue'
@@ -35,17 +35,17 @@ const activeTab = ref<'single' | 'upload'>('single')
 // 子标签页（用于切换单字/词组测评结果）
 const subTab = ref<'char' | 'word'>('char')
 
-// 测评结果
-const evaluationResult = ref<EvaluationResult | null>(null)
-const wordEvaluationResult = ref<EvaluationWordResult | null>(null)
+// 测评结果 - 使用 shallowRef 避免深层响应式带来的性能开销
+const evaluationResult = shallowRef<EvaluationResult | null>(null)
+const wordEvaluationResult = shallowRef<EvaluationWordResult | null>(null)
 const isEvaluating = ref(false)
 
 // 上传码表相关
 // 注意：parseCodeTable 返回 Map<string, string[]>，每个字可能有多个编码
 const uploadedCodeMap = ref<Map<string, string[]> | null>(null)
 const uploadedFileName = ref('')
-const uploadedResult = ref<EvaluationResult | null>(null)
-const uploadedWordResult = ref<EvaluationWordResult | null>(null)
+const uploadedResult = shallowRef<EvaluationResult | null>(null)
+const uploadedWordResult = shallowRef<EvaluationWordResult | null>(null)
 
 // 上传码表组词规则
 // 规则格式：大写字母表示字序(A=第1字,B=第2字...Z=末字)，小写字母表示码位(a=第1码,b=第2码...)
@@ -650,6 +650,38 @@ function fmt(n: number, decimals: number = 2): string {
   return n.toFixed(decimals)
 }
 
+// 计算缓存 - 用于缓存小计行和加权比重的计算结果
+const subtotalCache = new Map<string, EvaluateLine>()
+const wordSubtotalCache = new Map<string, EvaluateWordLine>()
+
+// 获取小计行（带缓存）
+function getSubtotal(lines: EvaluateLine[]): EvaluateLine {
+  const cacheKey = lines.map(l => `${l.start}-${l.end}`).join(',')
+  if (subtotalCache.has(cacheKey)) {
+    return subtotalCache.get(cacheKey)!
+  }
+  const result = zipLines(lines)
+  subtotalCache.set(cacheKey, result)
+  return result
+}
+
+// 获取多字词小计行（带缓存）
+function getWordSubtotal(lines: EvaluateWordLine[]): EvaluateWordLine {
+  const cacheKey = lines.map(l => `${l.start}-${l.end}`).join(',')
+  if (wordSubtotalCache.has(cacheKey)) {
+    return wordSubtotalCache.get(cacheKey)!
+  }
+  const result = zipWordLines(lines)
+  wordSubtotalCache.set(cacheKey, result)
+  return result
+}
+
+// 清除计算缓存
+function clearCalculationCache() {
+  subtotalCache.clear()
+  wordSubtotalCache.clear()
+}
+
 // 计算加权比重
 function getWeightPercent(line: EvaluateLine, column: string): string {
   const { weight } = getColumnValue(line, column)
@@ -688,16 +720,6 @@ function getLackWeightPercent(line: EvaluateLine): string {
   return line.totalFreq > 0 ? fmt(lackWeight / line.totalFreq * 100, 4) : '0.0000'
 }
 
-// 获取小计行
-function getSubtotal(lines: EvaluateLine[]): EvaluateLine {
-  return zipLines(lines)
-}
-
-// 获取多字词小计行
-function getWordSubtotal(lines: EvaluateWordLine[]): EvaluateWordLine {
-  return zipWordLines(lines)
-}
-
 // 计算多字词加权比重
 function getWordWeightPercent(line: EvaluateWordLine, column: string): string {
   const { weight } = getWordColumnValue(line, column)
@@ -710,6 +732,133 @@ const detailTitle = ref('')
 const detailItems = ref<EvaluateHanziItem[]>([])
 const detailWordItems = ref<EvaluateWordItem[]>([])
 const isWordDetail = ref(false)
+
+// 弹窗分页相关
+const detailPageSize = 10  // 每页显示数量
+const detailCurrentPage = ref(1)
+const detailWordCurrentPage = ref(1)
+
+// 总页数（单字）
+const detailTotalPages = computed(() => {
+  return Math.ceil(detailItems.value.length / detailPageSize)
+})
+
+// 总页数（词组）
+const detailWordTotalPages = computed(() => {
+  return Math.ceil(detailWordItems.value.length / detailPageSize)
+})
+
+// 获取当前页显示的详情数据（单字）
+const paginatedDetailItems = computed(() => {
+  const start = (detailCurrentPage.value - 1) * detailPageSize
+  const end = start + detailPageSize
+  return detailItems.value.slice(start, end)
+})
+
+// 获取当前页显示的详情数据（词组）
+const paginatedDetailWordItems = computed(() => {
+  const start = (detailWordCurrentPage.value - 1) * detailPageSize
+  const end = start + detailPageSize
+  return detailWordItems.value.slice(start, end)
+})
+
+// 分页控制函数（单字）
+function goToDetailFirstPage() {
+  detailCurrentPage.value = 1
+}
+
+function goToDetailPrevPage() {
+  if (detailCurrentPage.value > 1) {
+    detailCurrentPage.value--
+  }
+}
+
+function goToDetailNextPage() {
+  if (detailCurrentPage.value < detailTotalPages.value) {
+    detailCurrentPage.value++
+  }
+}
+
+function goToDetailLastPage() {
+  detailCurrentPage.value = detailTotalPages.value
+}
+
+function goToDetailPage(page: number) {
+  if (page >= 1 && page <= detailTotalPages.value) {
+    detailCurrentPage.value = page
+  }
+}
+
+// 分页控制函数（词组）
+function goToDetailWordFirstPage() {
+  detailWordCurrentPage.value = 1
+}
+
+function goToDetailWordPrevPage() {
+  if (detailWordCurrentPage.value > 1) {
+    detailWordCurrentPage.value--
+  }
+}
+
+function goToDetailWordNextPage() {
+  if (detailWordCurrentPage.value < detailWordTotalPages.value) {
+    detailWordCurrentPage.value++
+  }
+}
+
+function goToDetailWordLastPage() {
+  detailWordCurrentPage.value = detailWordTotalPages.value
+}
+
+function goToDetailWordPage(page: number) {
+  if (page >= 1 && page <= detailWordTotalPages.value) {
+    detailWordCurrentPage.value = page
+  }
+}
+
+// 重置分页
+function resetDetailPagination() {
+  detailCurrentPage.value = 1
+  detailWordCurrentPage.value = 1
+}
+
+// 跳转页码输入
+const detailJumpPage = ref('')
+const detailWordJumpPage = ref('')
+
+function handleDetailJump() {
+  const page = parseInt(detailJumpPage.value)
+  if (!isNaN(page)) {
+    goToDetailPage(page)
+    detailJumpPage.value = ''
+  }
+}
+
+function handleDetailWordJump() {
+  const page = parseInt(detailWordJumpPage.value)
+  if (!isNaN(page)) {
+    goToDetailWordPage(page)
+    detailWordJumpPage.value = ''
+  }
+}
+
+// 滚动到表格顶部
+function scrollModalBodyToTop() {
+  const modalBody = document.querySelector('.modal-body')
+  if (modalBody) {
+    modalBody.scrollTop = 0
+  }
+}
+
+// 处理弹窗滚动事件
+function handleModalScroll(event: Event) {
+  // 用于可能的滚动相关逻辑
+}
+
+// 分页时滚动到顶部
+watch([detailCurrentPage, detailWordCurrentPage], () => {
+  scrollModalBodyToTop()
+})
 
 // 列名映射
 const COLUMN_NAMES: Record<string, string> = {
@@ -831,6 +980,8 @@ function handleWordCellClick(line: EvaluateWordLine, column: string, rangeLabel:
 function closeDetailModal() {
   showDetailModal.value = false
   detailItems.value = []
+  detailWordItems.value = []
+  resetDetailPagination()
 }
 
 // 监听配置变化
@@ -1533,55 +1684,83 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
           <h3>{{ detailTitle }}</h3>
           <button class="modal-close" @click="closeDetailModal">&times;</button>
         </div>
-        <div class="modal-body">
+        <div class="modal-body" @scroll="handleModalScroll">
           <!-- 单字详情表格 -->
-          <table v-if="!isWordDetail" class="detail-table">
-            <thead>
-              <tr>
-                <th>序号</th>
-                <th>汉字</th>
-                <th>编码</th>
-                <th>选重</th>
-                <th>重码位</th>
-                <th>字当量</th>
-                <th>键当量</th>
-                <th>字频</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="(item, idx) in detailItems" :key="item.char" :class="{ 'is-lack': item.isLack }">
-                <td>{{ idx + 1 }}</td>
-                <td class="char-col">{{ item.char }}</td>
-                <td class="code-col">{{ item.code || '-' }}</td>
-                <td>{{ item.selectKey || '-' }}</td>
-                <td>{{ item.collision > 1 ? item.collision : '-' }}</td>
-                <td>{{ item.isLack || item.overKey > 0 ? '-' : fmt(item.ziEqCombo) }}</td>
-                <td>{{ item.isLack || item.overKey > 0 ? '-' : fmt(item.keyEqCombo) }}</td>
-                <td>{{ item.freq }}</td>
-              </tr>
-            </tbody>
-          </table>
+          <template v-if="!isWordDetail">
+            <table class="detail-table">
+              <thead>
+                <tr>
+                  <th>序号</th>
+                  <th>汉字</th>
+                  <th>编码</th>
+                  <th>选重</th>
+                  <th>重码位</th>
+                  <th>字当量</th>
+                  <th>键当量</th>
+                  <th>字频</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="(item, idx) in paginatedDetailItems" :key="item.char" :class="{ 'is-lack': item.isLack }">
+                  <td>{{ (detailCurrentPage - 1) * detailPageSize + idx + 1 }}</td>
+                  <td class="char-col">{{ item.char }}</td>
+                  <td class="code-col">{{ item.code || '-' }}</td>
+                  <td>{{ item.selectKey || '-' }}</td>
+                  <td>{{ item.collision > 1 ? item.collision : '-' }}</td>
+                  <td>{{ item.isLack || item.overKey > 0 ? '-' : fmt(item.ziEqCombo) }}</td>
+                  <td>{{ item.isLack || item.overKey > 0 ? '-' : fmt(item.keyEqCombo) }}</td>
+                  <td>{{ item.freq }}</td>
+                </tr>
+              </tbody>
+            </table>
+            <!-- 单字分页控制 -->
+            <div class="pagination" v-if="detailTotalPages > 1">
+              <button class="page-btn" :disabled="detailCurrentPage === 1" @click="goToDetailFirstPage">首页</button>
+              <button class="page-btn" :disabled="detailCurrentPage === 1" @click="goToDetailPrevPage">上一页</button>
+              <span class="page-info">第 {{ detailCurrentPage }} / {{ detailTotalPages }} 页</span>
+              <button class="page-btn" :disabled="detailCurrentPage === detailTotalPages" @click="goToDetailNextPage">下一页</button>
+              <button class="page-btn" :disabled="detailCurrentPage === detailTotalPages" @click="goToDetailLastPage">尾页</button>
+              <div class="page-jump">
+                <input v-model="detailJumpPage" type="number" min="1" :max="detailTotalPages" class="page-input" placeholder="页码" @keyup.enter="handleDetailJump" />
+                <button class="page-btn" @click="handleDetailJump">跳转</button>
+              </div>
+            </div>
+          </template>
           <!-- 词组详情表格 -->
-          <table v-else class="detail-table">
-            <thead>
-              <tr>
-                <th>序号</th>
-                <th>词组</th>
-                <th>编码</th>
-                <th>重码位</th>
-                <th>词频</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="(item, idx) in detailWordItems" :key="item.word" :class="{ 'is-lack': item.isLack }">
-                <td>{{ idx + 1 }}</td>
-                <td class="char-col">{{ item.word }}</td>
-                <td class="code-col">{{ item.code || '-' }}</td>
-                <td>{{ item.collision > 1 ? item.collision : '-' }}</td>
-                <td>{{ item.freq }}</td>
-              </tr>
-            </tbody>
-          </table>
+          <template v-else>
+            <table class="detail-table">
+              <thead>
+                <tr>
+                  <th>序号</th>
+                  <th>词组</th>
+                  <th>编码</th>
+                  <th>重码位</th>
+                  <th>词频</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="(item, idx) in paginatedDetailWordItems" :key="item.word" :class="{ 'is-lack': item.isLack }">
+                  <td>{{ (detailWordCurrentPage - 1) * detailPageSize + idx + 1 }}</td>
+                  <td class="char-col">{{ item.word }}</td>
+                  <td class="code-col">{{ item.code || '-' }}</td>
+                  <td>{{ item.collision > 1 ? item.collision : '-' }}</td>
+                  <td>{{ item.freq }}</td>
+                </tr>
+              </tbody>
+            </table>
+            <!-- 词组分页控制 -->
+            <div class="pagination" v-if="detailWordTotalPages > 1">
+              <button class="page-btn" :disabled="detailWordCurrentPage === 1" @click="goToDetailWordFirstPage">首页</button>
+              <button class="page-btn" :disabled="detailWordCurrentPage === 1" @click="goToDetailWordPrevPage">上一页</button>
+              <span class="page-info">第 {{ detailWordCurrentPage }} / {{ detailWordTotalPages }} 页</span>
+              <button class="page-btn" :disabled="detailWordCurrentPage === detailWordTotalPages" @click="goToDetailWordNextPage">下一页</button>
+              <button class="page-btn" :disabled="detailWordCurrentPage === detailWordTotalPages" @click="goToDetailWordLastPage">尾页</button>
+              <div class="page-jump">
+                <input v-model="detailWordJumpPage" type="number" min="1" :max="detailWordTotalPages" class="page-input" placeholder="页码" @keyup.enter="handleDetailWordJump" />
+                <button class="page-btn" @click="handleDetailWordJump">跳转</button>
+              </div>
+            </div>
+          </template>
         </div>
       </div>
     </div>
@@ -2232,5 +2411,80 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
   font-family: 'SF Mono', 'JetBrains Mono', 'Consolas', monospace;
   color: var(--primary);
   font-weight: 500;
+}
+
+/* 分页控制 */
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 20px 0;
+  margin-top: 16px;
+  border-top: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+
+.page-btn {
+  padding: 6px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: var(--bg3);
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.page-btn:hover:not(:disabled) {
+  background: var(--primary);
+  color: white;
+  border-color: var(--primary);
+}
+
+.page-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.page-info {
+  font-size: 13px;
+  color: var(--text2);
+  font-weight: 500;
+  margin: 0 8px;
+}
+
+.page-jump {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 16px;
+}
+
+.page-input {
+  width: 60px;
+  padding: 6px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 13px;
+  text-align: center;
+}
+
+.page-input:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
+}
+
+/* 隐藏数字输入框的上下箭头 */
+.page-input::-webkit-outer-spin-button,
+.page-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.page-input[type=number] {
+  -moz-appearance: textfield;
 }
 </style>
