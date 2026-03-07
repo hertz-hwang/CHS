@@ -1,10 +1,15 @@
 <script setup lang="ts">
-import { computed, watch, onMounted, onUnmounted, shallowRef } from 'vue'
+import { computed, watch, onMounted, onUnmounted, shallowRef, ref } from 'vue'
 import { useEngine } from '../../composables/useEngine'
 import Icon from '../Icon.vue'
 
-const { engine, rootsVersion, bracedRootToPua, isBracedRoot } = useEngine()
+const { engine, rootsVersion, configVersion, charsetVersion, getCurrentCharset, bracedRootToPua, isBracedRoot } = useEngine()
 
+// ==================== 标签页状态 ====================
+type TabType = 'root' | 'char'
+const activeTab = shallowRef<TabType>('root')
+
+// ==================== 字根练习部分 ====================
 // 练习卡片类型
 interface PracticeCard {
   root: string       // 字根
@@ -16,7 +21,7 @@ interface PracticeCard {
 // 练习记录类型 [练习次数, 原始索引]
 type Record = [count: number, index: number]
 
-const LS_KEY = 'chars_hijack_practice_records'
+const LS_KEY_ROOT = 'chars_hijack_practice_records'
 
 // 计算字根的字频加权分数（取相关汉字字频之和的对数）
 function calcFreqScore(chars: string[]): number {
@@ -85,7 +90,7 @@ function initRecords() {
   // 从 localStorage 加载记录
   let savedRecords: Record[] | null = null
   try {
-    const saved = localStorage.getItem(LS_KEY)
+    const saved = localStorage.getItem(LS_KEY_ROOT)
     if (saved) {
       savedRecords = JSON.parse(saved)
     }
@@ -136,7 +141,7 @@ function updateCurrentCard() {
 // 保存记录
 function saveRecords() {
   try {
-    localStorage.setItem(LS_KEY, JSON.stringify(records.value))
+    localStorage.setItem(LS_KEY_ROOT, JSON.stringify(records.value))
   } catch {}
 }
 
@@ -208,8 +213,8 @@ function answer(correct: boolean) {
   }
 }
 
-// 处理键盘事件
-function handleKeydown(e: KeyboardEvent) {
+// 处理键盘事件（字根练习）
+function handleRootKeydown(e: KeyboardEvent) {
   if (e.key === ' ' && spaceForHint.value) {
     // 空格键提示编码模式：表示用户忘记编码，显示提示
     e.preventDefault()
@@ -241,7 +246,7 @@ function handleKeydown(e: KeyboardEvent) {
   // 如果未勾选空格提示，空格键作为编码输入，显示为 "_"
 }
 
-// 监听用户输入
+// 监听用户输入（字根练习）
 watch(userKeys, (newKeys) => {
   if (!currentCard.value) return
 
@@ -263,8 +268,8 @@ watch(userKeys, (newKeys) => {
   userKeys.value = ''
 })
 
-// 重新开始
-function restart() {
+// 重新开始（字根练习）
+function restartRoot() {
   if (!confirm('重置进度需要清空数据，无法撤回，您确定继续吗？')) return
 
   const cards = allCards.value
@@ -274,11 +279,11 @@ function restart() {
   showComplete.value = false
   saveRecords()
   updateCurrentCard()
-  focusInput()
+  focusRootInput()
 }
 
-// 聚焦输入框
-function focusInput() {
+// 聚焦输入框（字根练习）
+function focusRootInput() {
   const el = document.getElementById('practice-input')
   el?.focus()
 }
@@ -293,18 +298,376 @@ function getRootFontClass(root: string): string {
   return isBracedRoot(root) ? 'pua-font' : ''
 }
 
+// ==================== 单字练习部分 ====================
+// 词条类型
+interface PhraseItem {
+  text: string           // 文本内容
+  code: string           // 编码（用于提示）
+  freq: number           // 字频
+}
+
+// 统计数据
+interface Stats {
+  totalChars: number     // 总字数
+  typedChars: number     // 已打字数
+  totalKeys: number      // 总击键数
+  correctKeys: number    // 正确击键数
+  startTime: number      // 开始时间
+  lastKeyTime: number    // 上次按键时间
+}
+
+const LS_KEY_CHAR = 'chars_hijack_type_settings'
+
+// 设置选项
+interface TypeSettings {
+  randomOrder: boolean            // 乱序
+}
+
+// 默认设置
+const defaultSettings: TypeSettings = {
+  randomOrder: false
+}
+
+// 状态
+const settings = ref<TypeSettings>({ ...defaultSettings })
+const showSettings = ref(false)
+const phrases = shallowRef<PhraseItem[]>([])
+const currentIndex = ref(0)
+const userInput = ref('')
+const charStats = ref<Stats>({
+  totalChars: 0,
+  typedChars: 0,
+  totalKeys: 0,
+  correctKeys: 0,
+  startTime: 0,
+  lastKeyTime: 0
+})
+const isRunning = ref(false)
+const isFinished = ref(false)
+const isError = ref(false)
+const charShowHint = ref(false)
+const lastPhraseStats = ref({ speed: 0, hitRate: 0 })
+const lastPhraseKeys = ref(0)
+const lastPhraseTime = ref(0)
+
+// 计算属性：当前词条
+const currentPhrase = computed(() => {
+  if (phrases.value.length === 0 || currentIndex.value >= phrases.value.length) {
+    return null
+  }
+  return phrases.value[currentIndex.value]
+})
+
+// 计算属性：当前字的拆分（字根数组）
+const currentSplit = computed(() => {
+  if (!currentPhrase.value) return []
+  const decomp = engine.decompose(currentPhrase.value.text)
+  return decomp.leaves || []
+})
+
+// 计算属性：已打过的词条（显示前面2个，渐变消失）
+const prevPhrases = computed(() => {
+  const result: PhraseItem[] = []
+  for (let i = 2; i >= 1; i--) {
+    const idx = currentIndex.value - i
+    if (idx >= 0) {
+      result.push(phrases.value[idx])
+    }
+  }
+  return result
+})
+
+// 计算属性：下一个词条预览（显示后面2个，渐变）
+const nextPhrases = computed(() => {
+  const result: PhraseItem[] = []
+  for (let i = 1; i <= 2; i++) {
+    const idx = currentIndex.value + i
+    if (idx < phrases.value.length) {
+      result.push(phrases.value[idx])
+    }
+  }
+  return result
+})
+
+// 计算属性：进度百分比
+const progressPercent = computed(() => {
+  if (phrases.value.length === 0) return 0
+  return Math.round((currentIndex.value / phrases.value.length) * 100)
+})
+
+// 计算属性：总速度（字/分钟）
+const totalSpeed = computed(() => {
+  if (charStats.value.typedChars === 0 || charStats.value.startTime === 0) return '0.00'
+  const elapsed = (Date.now() - charStats.value.startTime) / 1000 / 60 // 分钟
+  return (charStats.value.typedChars / elapsed).toFixed(2)
+})
+
+// 计算属性：总击键速度（键/秒）
+const totalHitRate = computed(() => {
+  if (charStats.value.totalKeys === 0 || charStats.value.startTime === 0) return '0.00'
+  const elapsed = (Date.now() - charStats.value.startTime) / 1000 // 秒
+  return (charStats.value.totalKeys / elapsed).toFixed(2)
+})
+
+// 计算属性：键准率
+const accuracy = computed(() => {
+  if (charStats.value.totalKeys === 0) return '100.00'
+  return ((charStats.value.correctKeys / charStats.value.totalKeys) * 100).toFixed(2)
+})
+
+// 从当前字集获取所有有编码的词条
+function buildPhrases(): PhraseItem[] {
+  configVersion.value
+  rootsVersion.value
+  charsetVersion.value
+  
+  const result: PhraseItem[] = []
+  const seen = new Set<string>()
+  
+  // 直接从当前字集获取汉字
+  const chars = getCurrentCharset()
+  
+  for (const char of chars) {
+    if (seen.has(char)) continue
+    
+    // 计算编码（直接使用 engine 的公共方法）
+    const code = engine.calculateCharCode(char)
+    if (!code) continue
+    
+    seen.add(char)
+    const freq = engine.freq.get(char) || 0
+    result.push({ text: char, code, freq })
+  }
+  
+  // 按字频排序
+  result.sort((a, b) => b.freq - a.freq)
+  
+  return result
+}
+
+// 初始化练习（单字练习）
+function initCharPractice() {
+  const allPhrases = buildPhrases()
+  
+  if (allPhrases.length === 0) {
+    phrases.value = []
+    return
+  }
+  
+  if (settings.value.randomOrder) {
+    shuffleArray(allPhrases)
+  }
+  
+  phrases.value = allPhrases
+  resetCharStats()
+}
+
+// 洗牌算法
+function shuffleArray<T>(array: T[]): void {
+  for (let i = array.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[array[i], array[j]] = [array[j], array[i]]
+  }
+}
+
+// 重置统计（单字练习）
+function resetCharStats() {
+  currentIndex.value = 0
+  userInput.value = ''
+  charStats.value = {
+    totalChars: phrases.value.reduce((sum, p) => sum + p.text.length, 0),
+    typedChars: 0,
+    totalKeys: 0,
+    correctKeys: 0,
+    startTime: 0,
+    lastKeyTime: 0
+  }
+  isRunning.value = false
+  isFinished.value = false
+  isError.value = false
+  charShowHint.value = false
+  lastPhraseStats.value = { speed: 0, hitRate: 0 }
+  lastPhraseKeys.value = 0
+  lastPhraseTime.value = 0
+}
+
+// 开始计时（单字练习）
+function startTimer() {
+  if (!isRunning.value) {
+    isRunning.value = true
+    charStats.value.startTime = Date.now()
+    charStats.value.lastKeyTime = charStats.value.startTime
+    lastPhraseTime.value = charStats.value.startTime
+    lastPhraseKeys.value = 0
+  }
+}
+
+// 处理输入（单字练习）
+function handleCharInput() {
+  if (!currentPhrase.value) return
+  
+  startTimer()
+  
+  const input = userInput.value.toLowerCase()
+  const targetCode = currentPhrase.value.code.toLowerCase()
+  
+  if (targetCode.startsWith(input)) {
+    isError.value = false
+    
+    if (input === targetCode) {
+      const now = Date.now()
+      const phraseTime = (now - lastPhraseTime.value) / 1000
+      const phraseChars = 1  // 每个词条算1个字
+      const phraseKeys = charStats.value.totalKeys - lastPhraseKeys.value
+      
+      if (phraseTime > 0) {
+        lastPhraseStats.value = {
+          speed: (phraseChars / phraseTime) * 60,
+          hitRate: phraseKeys / phraseTime
+        }
+      }
+      
+      charStats.value.typedChars += phraseChars
+      charStats.value.lastKeyTime = now
+      lastPhraseTime.value = now
+      lastPhraseKeys.value = charStats.value.totalKeys
+      
+      currentIndex.value++
+      userInput.value = ''
+      charShowHint.value = false  // 切换到下一个字时重置编码提示状态
+      
+      if (currentIndex.value >= phrases.value.length) {
+        isFinished.value = true
+        isRunning.value = false
+      }
+    }
+  } else {
+    isError.value = true
+  }
+}
+
+// 处理键盘事件（单字练习）
+function handleCharKeydown(e: KeyboardEvent) {
+  if (!currentPhrase.value || isFinished.value) return
+  
+  if (e.ctrlKey || e.altKey || e.metaKey) return
+  
+  if (e.key === 'Tab') {
+    e.preventDefault()
+    charShowHint.value = !charShowHint.value
+    return
+  }
+  
+  startTimer()
+  
+  if (e.key.length === 1) {
+    charStats.value.totalKeys++
+    
+    const targetCode = currentPhrase.value.code.toLowerCase()
+    const currentPos = userInput.value.length
+    if (currentPos < targetCode.length && e.key.toLowerCase() === targetCode[currentPos]) {
+      charStats.value.correctKeys++
+    }
+  }
+}
+
+// 重新开始（单字练习）- 恢复有序并重置进度
+function restartChar() {
+  const allPhrases = buildPhrases()
+  phrases.value = allPhrases  // 重新获取有序列表
+  resetCharStats()
+  focusCharInput()
+}
+
+// 重新乱序（单字练习）
+function reshuffle() {
+  const shuffled = [...phrases.value]  // 创建新数组
+  shuffleArray(shuffled)
+  phrases.value = shuffled  // 赋值新数组触发响应式更新
+  resetCharStats()
+  focusCharInput()
+}
+
+// 聚焦输入框（单字练习）
+function focusCharInput() {
+  const el = document.getElementById('type-input')
+  el?.focus()
+}
+
+// 加载设置（单字练习）
+function loadCharSettings() {
+  try {
+    const saved = localStorage.getItem(LS_KEY_CHAR)
+    if (saved) {
+      Object.assign(settings.value, JSON.parse(saved))
+    }
+  } catch {}
+}
+
+// 保存设置（单字练习）
+function saveCharSettings() {
+  try {
+    localStorage.setItem(LS_KEY_CHAR, JSON.stringify(settings.value))
+  } catch {}
+}
+
+// 应用设置（单字练习）
+function applySettings() {
+  saveCharSettings()
+  initCharPractice()
+  showSettings.value = false
+  focusCharInput()
+}
+
+// 显示文本（花括号字根转为 PUA 字符）
+function displayText(text: string): string {
+  return bracedRootToPua(text)
+}
+
+// ==================== 全局事件处理 ====================
+// 全局键盘事件处理（根据当前标签分发）
+function handleGlobalKeydown(e: KeyboardEvent) {
+  if (activeTab.value === 'root') {
+    handleRootKeydown(e)
+  }
+}
+
+// 切换标签时聚焦对应的输入框
+watch(activeTab, (newTab) => {
+  if (newTab === 'root') {
+    setTimeout(focusRootInput, 0)
+  } else {
+    setTimeout(focusCharInput, 0)
+  }
+})
+
+// 监听输入（单字练习）
+watch(userInput, handleCharInput)
+
 // 初始化
 onMounted(() => {
+  // 字根练习初始化
   initRecords()
   progress.value = scanProgress()
-  focusInput()
+  
+  // 单字练习初始化
+  loadCharSettings()
+  initCharPractice()
+  
+  // 聚焦当前标签的输入框
+  if (activeTab.value === 'root') {
+    focusRootInput()
+  } else {
+    focusCharInput()
+  }
+  
   // 添加全局键盘事件监听
-  document.addEventListener('keydown', handleKeydown)
+  document.addEventListener('keydown', handleGlobalKeydown)
 })
 
 // 清理
 onUnmounted(() => {
-  document.removeEventListener('keydown', handleKeydown)
+  document.removeEventListener('keydown', handleGlobalKeydown)
 })
 
 // 监听字根变化
@@ -312,79 +675,270 @@ watch(allCards, () => {
   initRecords()
   progress.value = scanProgress()
 }, { deep: true })
+
+// 监听字根变化（单字练习）
+watch(rootsVersion, () => {
+  initCharPractice()
+})
+
+// 监听配置变化（单字练习）
+watch(configVersion, () => {
+  initCharPractice()
+})
 </script>
 
 <template>
   <div class="practice-page">
-    <!-- 进度条 -->
-    <div class="progress-header">
-      <div class="progress-info">
-        <span class="progress-text">{{ progress }} / {{ allCards.length }}</span>
-      </div>
-      <div class="header-actions">
-        <label class="hint-toggle">
-          <input type="checkbox" v-model="spaceForHint" />
-          <span>空格提示</span>
-        </label>
-        <button class="reset-btn" @click="restart" title="重置进度">
-          <Icon name="refresh" :size="14" />
-        </button>
-      </div>
-    </div>
-    <div class="progress-bar">
-      <div class="progress-fill" :style="{ width: `${(progress / allCards.length) * 100}%` }"></div>
+    <!-- 标签切换 -->
+    <div class="tabs-header">
+      <button 
+        class="tab-btn" 
+        :class="{ 'active': activeTab === 'root' }"
+        @click="activeTab = 'root'"
+      >
+        字根练习
+      </button>
+      <button 
+        class="tab-btn" 
+        :class="{ 'active': activeTab === 'char' }"
+        @click="activeTab = 'char'"
+      >
+        单字练习
+      </button>
     </div>
 
-    <!-- 主练习区域 -->
-    <div v-if="currentCard && !showComplete" class="practice-area" :class="{ 'wrong': !isCorrect, 'hint-mode': isHintRequested }">
-      <!-- 字根展示 -->
-      <div class="card-display">
-        <div
-          class="root-char"
-          :class="[getRootFontClass(currentCard.root), { 'shake': !isCorrect }]"
-        >
-          {{ displayRoot(currentCard.root) }}
+    <!-- ==================== 字根练习 ==================== -->
+    <template v-if="activeTab === 'root'">
+      <!-- 进度条 -->
+      <div class="progress-header">
+        <div class="progress-info">
+          <span class="progress-text">{{ progress }} / {{ allCards.length }}</span>
+        </div>
+        <div class="header-actions">
+          <label class="hint-toggle">
+            <input type="checkbox" v-model="spaceForHint" />
+            <span>空格提示</span>
+          </label>
+          <button class="reset-btn" @click="restartRoot" title="重置进度">
+            <Icon name="refresh" :size="14" />
+          </button>
+        </div>
+      </div>
+      <div class="progress-bar">
+        <div class="progress-fill" :style="{ width: `${(progress / allCards.length) * 100}%` }"></div>
+      </div>
+
+      <!-- 主练习区域 -->
+      <div v-if="currentCard && !showComplete" class="practice-area" :class="{ 'wrong': !isCorrect, 'hint-mode': isHintRequested }">
+        <!-- 字根展示 -->
+        <div class="card-display">
+          <div
+            class="root-char"
+            :class="[getRootFontClass(currentCard.root), { 'shake': !isCorrect }]"
+          >
+            {{ displayRoot(currentCard.root) }}
+          </div>
+
+          <!-- 相关汉字 -->
+          <div v-if="currentCard.relatedChars.length > 0" class="related-chars">
+            {{ currentCard.relatedChars.join(' ') }}
+          </div>
         </div>
 
-        <!-- 相关汉字 -->
-        <div v-if="currentCard.relatedChars.length > 0" class="related-chars">
-          {{ currentCard.relatedChars.join(' ') }}
+        <!-- 输入区域 -->
+        <div class="input-area">
+          <input
+            id="practice-input"
+            v-model="userKeys"
+            type="text"
+            class="code-input"
+            :class="{ 'error': !isCorrect }"
+            placeholder="输入编码"
+            autocomplete="off"
+            autofocus
+          />
+        </div>
+
+        <!-- 提示区域 -->
+        <div class="hint-area" :class="{ 'visible': showHint }">
+          <span class="hint-label">提示</span>
+          <span class="hint-code">{{ currentCard.code }}</span>
         </div>
       </div>
 
-      <!-- 输入区域 -->
-      <div class="input-area">
-        <input
-          id="practice-input"
-          v-model="userKeys"
-          type="text"
-          class="code-input"
-          :class="{ 'error': !isCorrect }"
-          placeholder="输入编码"
-          autocomplete="off"
-          autofocus
-        />
+      <!-- 完成提示 -->
+      <div v-else-if="showComplete" class="complete-area">
+        <div class="complete-icon">✓</div>
+        <div class="complete-text">练习完成</div>
+        <button class="continue-btn" @click="showComplete = false; focusRootInput()">继续</button>
       </div>
 
-      <!-- 提示区域 -->
-      <div class="hint-area" :class="{ 'visible': showHint }">
-        <span class="hint-label">提示</span>
-        <span class="hint-code">{{ currentCard.code }}</span>
+      <!-- 空状态 -->
+      <div v-else class="empty-state">
+        <div class="empty-icon">-</div>
+        <p>暂无可练习的字根</p>
       </div>
-    </div>
+    </template>
 
-    <!-- 完成提示 -->
-    <div v-else-if="showComplete" class="complete-area">
-      <div class="complete-icon">✓</div>
-      <div class="complete-text">练习完成</div>
-      <button class="continue-btn" @click="showComplete = false; focusInput()">继续</button>
-    </div>
+    <!-- ==================== 单字练习 ==================== -->
+    <template v-else-if="activeTab === 'char'">
+      <!-- 顶部统计栏 -->
+      <div class="stats-bar">
+        <div class="stat-item">
+          <span class="stat-value">{{ progressPercent }}%</span>
+          <span class="stat-label">进度</span>
+        </div>
+        <div class="stat-item">
+          <span class="stat-value">{{ totalSpeed }}</span>
+          <span class="stat-label">速度</span>
+        </div>
+        <div class="stat-item">
+          <span class="stat-value">{{ totalHitRate }}</span>
+          <span class="stat-label">击键</span>
+        </div>
+        <div class="stat-item">
+          <span class="stat-value">{{ accuracy }}%</span>
+          <span class="stat-label">键准</span>
+        </div>
+        <div class="stat-item instant">
+          <span class="stat-value">{{ lastPhraseStats.speed.toFixed(1) }}</span>
+          <span class="stat-label">瞬速</span>
+        </div>
+        <div class="stat-item instant">
+          <span class="stat-value">{{ lastPhraseStats.hitRate.toFixed(1) }}</span>
+          <span class="stat-label">瞬击</span>
+        </div>
+        <div class="toolbar">
+          <button class="tool-btn" @click="restartChar" title="重置">
+            <Icon name="refresh" :size="16" />
+          </button>
+          <button class="tool-btn" @click="reshuffle" title="乱序">
+            <Icon name="shuffle" :size="16" />
+          </button>
+        </div>
+      </div>
 
-    <!-- 空状态 -->
-    <div v-else class="empty-state">
-      <div class="empty-icon">-</div>
-      <p>暂无可练习的字根</p>
-    </div>
+      <!-- 进度条 -->
+      <div class="progress-bar">
+        <div class="progress-fill" :style="{ width: `${progressPercent}%` }"></div>
+      </div>
+
+      <!-- 主练习区域 -->
+      <div v-if="currentPhrase && !isFinished" class="practice-area char-practice">
+        <!-- 词条展示 -->
+        <div class="phrases-display">
+          <!-- 已打字2（最左） -->
+          <div class="phrase prev-2">
+            <span v-if="currentIndex >= 2" class="phrase-text">{{ displayText(phrases[currentIndex - 2].text) }}</span>
+          </div>
+          <!-- 已打字1 -->
+          <div class="phrase prev-1">
+            <span v-if="currentIndex >= 1" class="phrase-text">{{ displayText(phrases[currentIndex - 1].text) }}</span>
+          </div>
+          <!-- 当前字（居中） -->
+          <div class="phrase current">
+            <span class="phrase-text">{{ displayText(currentPhrase.text) }}</span>
+          </div>
+          <!-- 预打字1 -->
+          <div class="phrase next-1">
+            <span v-if="currentIndex + 1 < phrases.length" class="phrase-text">{{ displayText(phrases[currentIndex + 1].text) }}</span>
+          </div>
+          <!-- 预打字2（最右） -->
+          <div class="phrase next-2">
+            <span v-if="currentIndex + 2 < phrases.length" class="phrase-text">{{ displayText(phrases[currentIndex + 2].text) }}</span>
+          </div>
+        </div>
+
+        <!-- 提示区域（按 Tab 显示，始终占据空间） -->
+        <div class="char-hint-area" :class="{ 'visible': charShowHint }">
+          <div class="hint-split">
+            <span 
+              v-for="(root, idx) in currentSplit" 
+              :key="idx"
+              class="split-root"
+              :class="getRootFontClass(root)"
+            >{{ displayRoot(root) }}</span>
+          </div>
+          <div class="hint-code-row">
+            <span class="hint-code">{{ currentPhrase.code }}</span>
+          </div>
+        </div>
+
+        <!-- 输入区域 -->
+        <div class="input-area char-input-area">
+          <input
+            id="type-input"
+            v-model="userInput"
+            type="text"
+            class="type-input"
+            :class="{ 'error': isError }"
+            placeholder="开始输入..."
+            autocomplete="off"
+            autofocus
+            @keydown="handleCharKeydown"
+          />
+          <div class="input-hint">按 Tab 显示当前字编码</div>
+        </div>
+
+        <!-- 进度信息 -->
+        <div class="progress-info">
+          <span>{{ currentIndex + 1 }} / {{ phrases.length }}</span>
+        </div>
+      </div>
+
+      <!-- 完成提示 -->
+      <div v-else-if="isFinished" class="finish-area">
+        <div class="finish-icon">✓</div>
+        <div class="finish-title">练习完成</div>
+        <div class="finish-stats">
+          <div class="finish-stat">
+            <span class="finish-stat-value">{{ charStats.typedChars }}</span>
+            <span class="finish-stat-label">总字数</span>
+          </div>
+          <div class="finish-stat">
+            <span class="finish-stat-value">{{ totalSpeed }}</span>
+            <span class="finish-stat-label">平均速度</span>
+          </div>
+          <div class="finish-stat">
+            <span class="finish-stat-value">{{ totalHitRate }}</span>
+            <span class="finish-stat-label">平均击键</span>
+          </div>
+          <div class="finish-stat">
+            <span class="finish-stat-value">{{ accuracy }}%</span>
+            <span class="finish-stat-label">键准率</span>
+          </div>
+        </div>
+        <button class="restart-btn" @click="restartChar">再来一轮</button>
+      </div>
+
+      <!-- 空状态 -->
+      <div v-else class="empty-area">
+        <div class="empty-icon">!</div>
+        <p>暂无可练习的词条</p>
+        <p class="empty-hint">请确保已加载字根编码数据</p>
+      </div>
+
+      <!-- 设置面板 -->
+      <div v-if="showSettings" class="settings-overlay" @click.self="showSettings = false">
+        <div class="settings-panel">
+          <div class="settings-header">
+            <h3>跟打设置</h3>
+            <button class="close-btn" @click="showSettings = false">×</button>
+          </div>
+          <div class="settings-body">
+            <div class="setting-item">
+              <label class="checkbox-label">
+                <input type="checkbox" v-model="settings.randomOrder" />
+                <span>随机顺序</span>
+              </label>
+            </div>
+          </div>
+          <div class="settings-footer">
+            <button class="apply-btn" @click="applySettings">应用</button>
+          </div>
+        </div>
+      </div>
+    </template>
   </div>
 </template>
 
@@ -395,6 +949,43 @@ watch(allCards, () => {
   height: 100%;
   gap: 12px;
   padding: 16px;
+}
+
+/* 标签切换 */
+.tabs-header {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  background: var(--bg2);
+  border-radius: 10px;
+  border: 1px solid var(--border);
+}
+
+.tab-btn {
+  flex: 1;
+  padding: 10px 16px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text2);
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.tab-btn:hover {
+  color: var(--text);
+  background: var(--bg3);
+}
+
+.tab-btn.active {
+  color: white;
+  background: var(--primary);
+}
+
+.tab-btn.active:hover {
+  background: var(--primary-light);
 }
 
 /* 进度区域 */
@@ -543,6 +1134,9 @@ watch(allCards, () => {
 .input-area {
   width: 100%;
   max-width: 240px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
 }
 
 .code-input {
@@ -695,5 +1289,461 @@ watch(allCards, () => {
 .empty-state p {
   margin: 0;
   font-size: 14px;
+}
+
+/* ==================== 单字练习样式 ==================== */
+.stats-bar {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 12px 16px;
+  background: var(--bg2);
+  border-radius: 10px;
+  border: 1px solid var(--border);
+}
+
+.stat-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.stat-value {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.stat-label {
+  font-size: 12px;
+  color: var(--text3);
+}
+
+.stat-item.instant .stat-value {
+  color: var(--primary);
+  font-size: 16px;
+}
+
+.toolbar {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+}
+
+.tool-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: var(--bg3);
+  color: var(--text2);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.tool-btn:hover {
+  background: var(--primary-bg);
+  color: var(--primary);
+}
+
+.char-practice {
+  gap: 40px;
+}
+
+.phrases-display {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  align-items: center;
+  justify-items: center;
+  gap: 16px;
+  width: 100%;
+  max-width: 700px;
+}
+
+/* 确保每个格子都有固定尺寸 */
+.phrase {
+  min-width: 80px;
+  min-height: 80px;
+}
+
+.phrase {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.phrase.current .phrase-text {
+  font-size: 64px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+/* 已打过的字（左侧，渐变消失） */
+.phrase.prev-1 { opacity: 0.4; }
+.phrase.prev-1 .phrase-text { font-size: 42px; color: var(--text3); }
+
+.phrase.prev-2 { opacity: 0.25; }
+.phrase.prev-2 .phrase-text { font-size: 36px; color: var(--text3); }
+
+/* 预打的字（右侧，渐变） */
+.phrase.next-1 { opacity: 0.6; }
+.phrase.next-1 .phrase-text { font-size: 48px; color: var(--text2); }
+
+.phrase.next-2 { opacity: 0.4; }
+.phrase.next-2 .phrase-text { font-size: 42px; color: var(--text3); }
+
+.phrase-code {
+  font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+  font-size: 18px;
+  color: var(--primary);
+  background: var(--primary-bg);
+  padding: 4px 12px;
+  border-radius: 6px;
+  letter-spacing: 2px;
+}
+
+/* 单字练习提示区域 - 始终占据固定空间 */
+.char-hint-area {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 24px;
+  min-height: 80px;
+  background: var(--bg);
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.2s ease, visibility 0.2s ease;
+}
+
+.char-hint-area.visible {
+  opacity: 1;
+  visibility: visible;
+}
+
+.hint-split {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.split-root {
+  font-size: 24px;
+  color: var(--text);
+  padding: 2px 6px;
+  background: var(--bg3);
+  border-radius: 4px;
+}
+
+.hint-code-row {
+  display: flex;
+  align-items: center;
+}
+
+.hint-code-row .hint-code {
+  font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--primary);
+  background: var(--primary-bg);
+  padding: 6px 16px;
+  border-radius: 6px;
+  letter-spacing: 3px;
+}
+
+.char-input-area {
+  max-width: none;
+}
+
+.type-input {
+  width: 400px;
+  padding: 16px 24px;
+  font-size: 32px;
+  text-align: center;
+  font-family: inherit;
+  letter-spacing: 4px;
+  font-weight: 500;
+  background: var(--bg);
+  border: 2px solid var(--border);
+  border-radius: 12px;
+  color: var(--text);
+  outline: none;
+  transition: all 0.2s ease;
+}
+
+.type-input::placeholder {
+  color: var(--text3);
+  font-weight: 400;
+  letter-spacing: 1px;
+}
+
+.type-input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary) 12%, transparent);
+}
+
+.type-input.error {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--danger) 12%, transparent);
+}
+
+.input-hint {
+  font-size: 12px;
+  color: var(--text3);
+}
+
+.progress-info {
+  font-size: 14px;
+  color: var(--text3);
+}
+
+.finish-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+  padding: 48px 24px;
+  background: var(--bg2);
+  border-radius: 12px;
+  border: 1px solid var(--border);
+}
+
+.finish-icon {
+  width: 72px;
+  height: 72px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 32px;
+  font-weight: 600;
+  color: white;
+  background: linear-gradient(135deg, #10b981, #059669);
+  border-radius: 50%;
+  box-shadow: 0 4px 16px rgba(16, 185, 129, 0.3);
+}
+
+.finish-title {
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.finish-stats {
+  display: flex;
+  gap: 32px;
+}
+
+.finish-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.finish-stat-value {
+  font-size: 28px;
+  font-weight: 600;
+  color: var(--primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.finish-stat-label {
+  font-size: 13px;
+  color: var(--text3);
+}
+
+.restart-btn {
+  margin-top: 16px;
+  padding: 12px 32px;
+  font-size: 15px;
+  font-weight: 500;
+  color: white;
+  background: var(--primary);
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.restart-btn:hover {
+  background: color-mix(in srgb, var(--primary) 85%, black);
+  transform: translateY(-1px);
+}
+
+.empty-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 48px 24px;
+  background: var(--bg2);
+  border-radius: 12px;
+  border: 1px solid var(--border);
+}
+
+.empty-area .empty-icon {
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--text3);
+  background: var(--bg3);
+  border-radius: 50%;
+}
+
+.empty-area p {
+  margin: 0;
+  font-size: 14px;
+  color: var(--text2);
+}
+
+.empty-hint {
+  font-size: 12px !important;
+  color: var(--text3) !important;
+}
+
+.settings-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.settings-panel {
+  width: 400px;
+  background: var(--bg);
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+}
+
+.settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.settings-header h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.close-btn {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  color: var(--text3);
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.close-btn:hover {
+  background: var(--bg3);
+  color: var(--text);
+}
+
+.settings-body {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.setting-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.setting-item label {
+  font-size: 14px;
+  color: var(--text2);
+}
+
+.range-input {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.range-input input {
+  width: 60px;
+  padding: 6px 10px;
+  font-size: 14px;
+  text-align: center;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+}
+
+.range-input span {
+  color: var(--text3);
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.checkbox-label input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--primary);
+}
+
+.settings-footer {
+  padding: 16px 20px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  justify-content: flex-end;
+}
+
+.apply-btn {
+  padding: 8px 20px;
+  font-size: 14px;
+  font-weight: 500;
+  color: white;
+  background: var(--primary);
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.apply-btn:hover {
+  background: color-mix(in srgb, var(--primary) 85%, black);
 }
 </style>
