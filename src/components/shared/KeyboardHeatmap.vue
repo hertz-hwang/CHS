@@ -181,6 +181,26 @@ function formatPercent(key: string): string {
   justify-content: center;
 }
 
+/* 模拟真实键盘的行偏移 - 使用 transform 在居中基础上偏移 */
+.keyboard-row:nth-child(1) {
+  /* 数字行 - 无偏移 */
+}
+
+.keyboard-row:nth-child(2) {
+  /* QWERTY 行 - 向右偏移约 0.25 个键宽 */
+  transform: translateX(calc(1.6 * (52px + 6px)));
+}
+
+.keyboard-row:nth-child(3) {
+  /* ASDF 行 - 向右偏移约 0.5 个键宽 */
+  transform: translateX(calc(0.85 * (52px + 6px)));
+}
+
+.keyboard-row:nth-child(4) {
+  /* ZXCV 行 - 向右偏移约 0.75 个键宽 */
+  transform: translateX(calc(0.9 * (52px + 6px)));
+}
+
 .key {
   flex: 1;
   max-width: 52px;
@@ -199,6 +219,7 @@ function formatPercent(key: string): string {
 .key:hover {
   transform: scale(1.1);
   z-index: 1;
+  position: relative;
 }
 
 .key-label {
