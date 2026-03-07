@@ -1746,7 +1746,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
               <thead>
                 <tr>
                   <th>序号</th>
-                  <th>汉字</th>
+                  <th>汉字 (括号内首选)</th>
                   <th>编码</th>
                   <th>选重</th>
                   <th>重码位</th>
@@ -1790,7 +1790,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
               <thead>
                 <tr>
                   <th>序号</th>
-                  <th>词组</th>
+                  <th>词组 (括号内首选)</th>
                   <th>编码</th>
                   <th>重码位</th>
                   <th>词频</th>
