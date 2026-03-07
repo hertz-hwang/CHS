@@ -646,7 +646,7 @@ function clearUploaded() {
 }
 
 // 格式化数字
-function fmt(n: number, decimals: number = 2): string {
+function fmt(n: number, decimals: number = 3): string {
   return n.toFixed(decimals)
 }
 

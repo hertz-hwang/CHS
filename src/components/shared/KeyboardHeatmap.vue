@@ -14,6 +14,9 @@ const KEYBOARD_ROWS = [
   ['z', 'x', 'c', 'v', 'b', 'n', 'm', ',', '.', '/'],
 ]
 
+// 左手键集合（用于计算左右手占比）
+const LEFT_HAND_KEYS = new Set([...`12345qwertasdfgzxcvb`])
+
 // 计算相对使用率（百分比）
 const relativeUsage = computed(() => {
   const total = Object.values(props.usage).reduce((a, b) => a + b, 0)
@@ -37,6 +40,32 @@ const maxUsage = computed(() => {
 // 获取空格键使用率
 const spaceUsage = computed(() => {
   return relativeUsage.value[' '] || 0
+})
+
+// 计算左手使用率（左手键 + 空格键使用率的一半）
+const leftHandUsage = computed(() => {
+  let total = 0
+  const spaceUsage = relativeUsage.value[' '] || 0
+  for (const [key, value] of Object.entries(relativeUsage.value)) {
+    if (LEFT_HAND_KEYS.has(key)) {
+      total += value
+    }
+  }
+  // 空格键使用率对半均分给左右手
+  return total + spaceUsage / 2
+})
+
+// 计算右手使用率（右手键 + 空格键使用率的一半）
+const rightHandUsage = computed(() => {
+  let total = 0
+  const spaceUsage = relativeUsage.value[' '] || 0
+  for (const [key, value] of Object.entries(relativeUsage.value)) {
+    if (!LEFT_HAND_KEYS.has(key) && key !== ' ') {
+      total += value
+    }
+  }
+  // 空格键使用率对半均分给左右手
+  return total + spaceUsage / 2
 })
 
 // 获取键的颜色
@@ -114,7 +143,7 @@ function formatPercent(key: string): string {
           <span class="key-usage">{{ formatPercent(key) }}</span>
         </div>
       </div>
-      <!-- 空格键单独一行 -->
+      <!-- 空格键行：在空格键内部左侧显示左手占比，右侧显示右手占比 -->
       <div class="keyboard-row space-row">
         <div
           class="key key-space"
@@ -124,8 +153,20 @@ function formatPercent(key: string): string {
           }"
           title="空格"
         >
-          <span class="key-label">空格</span>
-          <span class="key-usage">{{ formatPercent(' ') }}</span>
+          <div class="space-content">
+            <div class="hand-stats left-stats">
+              <span class="hand-label">左手</span>
+              <span class="hand-percent">{{ leftHandUsage.toFixed(2) }}%</span>
+            </div>
+            <div class="space-center">
+              <span class="key-label">空格</span>
+              <span class="key-usage">{{ formatPercent(' ') }}</span>
+            </div>
+            <div class="hand-stats right-stats">
+              <span class="hand-label">右手</span>
+              <span class="hand-percent">{{ rightHandUsage.toFixed(2) }}%</span>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -236,14 +277,97 @@ function formatPercent(key: string): string {
   flex: 0 0 auto;
   width: 50%;
   max-width: 400px;
-  min-width: 160px;
+  min-width: 200px;
   aspect-ratio: auto;
   height: 44px;
+  padding: 0 16px;
+}
+
+.space-content {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  height: 100%;
+}
+
+.hand-stats {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 50px;
+}
+
+.hand-stats .hand-label {
+  font-size: 9px;
+  opacity: 0.8;
+  color: inherit;
+}
+
+.hand-stats .hand-percent {
+  font-size: 10px;
+  opacity: 0.8;
+  font-weight: 600;
+  color: inherit;
+}
+
+.space-center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+}
+
+.space-center .key-label {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.space-center .key-usage {
+  font-size: 10px;
+  opacity: 0.8;
 }
 
 .space-row {
+  display: flex;
+  align-items: center;
   justify-content: center;
+  gap: 16px;
   margin-top: 4px;
+}
+
+.hand-usage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 12px;
+  background: var(--bg3);
+  border-radius: 6px;
+  min-width: 60px;
+}
+
+.hand-label {
+  font-size: 11px;
+  color: var(--text2);
+  font-weight: 500;
+}
+
+.hand-percent {
+  font-size: 13px;
+  color: var(--text);
+  font-weight: 600;
+  font-family: 'SF Mono', 'Consolas', monospace;
+}
+
+.left-hand {
+  border-left: 3px solid hsl(200, 70%, 55%);
+}
+
+.right-hand {
+  border-right: 3px solid hsl(200, 70%, 55%);
 }
 
 .legend-container {

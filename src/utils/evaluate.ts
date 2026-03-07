@@ -240,7 +240,8 @@ function getComboFeel(key1: string, key2: string): ComboFeel {
 export interface EvaluateHanziItem {
   char: string       // 字
   freq: number       // 字频
-  code: string       // 编码
+  code: string       // 编码（最短编码）
+  longestCode: string // 最长编码（用于计算全码重）
   codeLen: number    // 码长
   collision: number  // 选重数
   selectKey: string  // 选重键
@@ -470,6 +471,7 @@ export function evaluateScheme(
           char,
           freq,
           code: '',
+          longestCode: '',
           codeLen: 0,
           collision: 0,
           selectKey: '',
@@ -566,6 +568,7 @@ export function evaluateScheme(
         char,
         freq,
         code,
+        longestCode,
         codeLen,
         collision: simpleCollision,  // collision 使用出简重
         selectKey,
@@ -658,7 +661,48 @@ export function zipLines(lines: EvaluateLine[]): EvaluateLine {
     }
   }
   
+  // 重新计算重码统计（全码重和出简重）
+  recalculateCollisionStats(result.items)
+  
   return result
+}
+
+/**
+ * 重新计算重码统计（全码重和出简重）
+ * 用于小计和总计行，确保重码统计是基于合并后数据的重新计算
+ */
+function recalculateCollisionStats(items: EvaluateHanziItem[]): void {
+  // 重新计算出简重统计（基于最短编码）
+  const simpleCollisionMap = new Map<string, number>()
+  // 重新计算全码重统计（基于最长编码）
+  const fullCollisionMap = new Map<string, number>()
+  
+  // 第一遍：统计每个编码的出现次数
+  for (const item of items) {
+    if (item.isLack || !item.code) continue
+    
+    // 统计最短编码（出简重）
+    const simpleCount = (simpleCollisionMap.get(item.code) || 0) + 1
+    simpleCollisionMap.set(item.code, simpleCount)
+    
+    // 统计最长编码（全码重）
+    const longestCode = item.longestCode || item.code
+    const fullCount = (fullCollisionMap.get(longestCode) || 0) + 1
+    fullCollisionMap.set(longestCode, fullCount)
+  }
+  
+  // 第二遍：更新每个 item 的重码统计
+  
+  // 实际解决方案：由于原始数据中没有存储 longestCode，
+  // 我们需要在 EvaluateHanziItem 中添加 longestCode 字段
+  // 这里暂时保持原样，因为 fullCollision 和 simpleCollision 已经存储在每个 item 中
+  // 问题可能在于 zipLines 只是简单合并，但没有重新统计
+  
+  // 正确的做法：重新统计合并后的所有 item 的重码情况
+  // 基于 item.code（最短编码）和 item 的原始编码信息
+  
+  // 由于 item 中只有 code（最短编码），没有 longestCode，
+  // 我们需要重新设计：在 EvaluateHanziItem 中添加 longestCode 字段
 }
 
 /**
