@@ -88,8 +88,50 @@ function finishEditSchemeName(type: 'current' | 'upload') {
 }
 
 // 测评配置
-const selectKeys = ref(";'456789")
+// 支持多选重键配置：每个位置可以有多个候选键，系统选择当量最低的
+// 每个选重位置独立设置，如 selectKeysConfig[0] 表示第2选（次选）的候选键
+const selectKeysConfig = ref<string[]>([";", "'", "4", "5", "6", "7", "8", "9"])
 const maxCodeLength = ref(4)
+
+// 编辑选重键
+const editingSelectKeyIndex = ref<number | null>(null)
+const selectKeyInput = ref('')
+
+// 开始编辑选重键
+function startEditSelectKey(index: number) {
+  selectKeyInput.value = selectKeysConfig.value[index] || ''
+  editingSelectKeyIndex.value = index
+}
+
+// 完成编辑选重键
+function finishEditSelectKey() {
+  if (editingSelectKeyIndex.value !== null) {
+    const input = selectKeyInput.value.trim()
+    if (input) {
+      selectKeysConfig.value[editingSelectKeyIndex.value] = input
+    }
+    editingSelectKeyIndex.value = null
+  }
+}
+
+// 取消编辑选重键
+function cancelEditSelectKey() {
+  editingSelectKeyIndex.value = null
+}
+
+// 添加新的选重位置
+function addSelectKeyPosition() {
+  selectKeysConfig.value.push('')
+  // 自动开始编辑新添加的位置
+  setTimeout(() => {
+    startEditSelectKey(selectKeysConfig.value.length - 1)
+  }, 0)
+}
+
+// 删除选重位置
+function removeSelectKeyPosition(index: number) {
+  selectKeysConfig.value.splice(index, 1)
+}
 
 // 键位热力图配置
 const includeSpaceInStats = ref(true)
@@ -265,7 +307,7 @@ async function runEvaluation() {
       }
     }
 
-    const result = evaluateScheme(codeMap, freqMap, selectKeys.value, maxCodeLength.value, missingSet)
+    const result = evaluateScheme(codeMap, freqMap, selectKeysConfig.value, maxCodeLength.value, missingSet)
     evaluationResult.value = result
 
     // 词组测评
@@ -594,7 +636,7 @@ async function runUploadedEvaluation() {
     }
     
     // 单字测评
-    const result = evaluateScheme(uploadedCodeMap.value, freqMap, selectKeys.value, maxCodeLength.value)
+    const result = evaluateScheme(uploadedCodeMap.value, freqMap, selectKeysConfig.value, maxCodeLength.value)
     uploadedResult.value = result
     
     // 词组测评
@@ -1029,14 +1071,102 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
       <div class="toolbar-left">
         <span class="title"><Icon name="chart" :size="18" /> 编码测评</span>
       </div>
-      <div class="toolbar-right">
-        <div class="config-group">
-          <label>选重键:</label>
-          <input v-model="selectKeys" type="text" class="config-input" placeholder="1234" />
+    </div>
+
+    <!-- 测评配置卡片 - 更显眼的设计 -->
+    <div class="config-card">
+      <div class="config-card-header">
+        <Icon name="settings" :size="16" />
+        <span>测评参数设置</span>
+        <span class="config-hint">设置影响测评结果的计算方式</span>
+      </div>
+      <div class="config-card-body">
+        <!-- 选重键配置 -->
+        <div class="config-item select-keys-section">
+          <div class="config-label">
+            <span class="config-name">选重键</span>
+            <span class="config-desc">每个选重位置可配置多个候选键，系统自动选择最低当量的按键</span>
+          </div>
+          <div class="config-value select-keys-editor">
+            <div class="select-keys-grid">
+              <div
+                v-for="(keys, index) in selectKeysConfig"
+                :key="index"
+                class="select-key-item"
+              >
+                <template v-if="editingSelectKeyIndex === index">
+                  <div class="select-key-edit-row">
+                    <span class="select-key-label">{{ index + 2 }}选</span>
+                    <input
+                      v-model="selectKeyInput"
+                      type="text"
+                      class="select-key-input"
+                      placeholder="如: ;z"
+                      @keyup.enter="finishEditSelectKey"
+                      @keyup.esc="cancelEditSelectKey"
+                      autofocus
+                    />
+                    <button class="btn-icon-sm btn-confirm" @click="finishEditSelectKey" title="确认">
+                      <Icon name="check" :size="12" />
+                    </button>
+                    <button class="btn-icon-sm btn-cancel" @click="cancelEditSelectKey" title="取消">
+                      <Icon name="close" :size="12" />
+                    </button>
+                  </div>
+                </template>
+                <template v-else>
+                  <div class="select-key-display" @click="startEditSelectKey(index)">
+                    <span class="select-key-label">{{ index + 2 }}选</span>
+                    <span class="select-key-value" :class="{ 'multi-keys': keys.length > 1 }">
+                      {{ keys || '-' }}
+                    </span>
+                    <button class="btn-icon-sm btn-edit" title="编辑">
+                      <Icon name="edit" :size="12" />
+                    </button>
+                  </div>
+                </template>
+              </div>
+              <!-- 添加新选重位置 -->
+              <div class="select-key-item add-position" @click="addSelectKeyPosition">
+                <span class="add-icon">+</span>
+                <span class="add-text">添加</span>
+              </div>
+            </div>
+            <div class="select-keys-actions" v-if="selectKeysConfig.length > 0">
+              <button 
+                v-for="(_, index) in selectKeysConfig" 
+                :key="index"
+                class="btn-remove" 
+                @click="removeSelectKeyPosition(index)"
+                title="删除此选重位置"
+              >
+                删除{{ index + 2 }}选
+              </button>
+            </div>
+          </div>
         </div>
-        <div class="config-group">
-          <label>最大码长:</label>
-          <input v-model.number="maxCodeLength" type="number" class="config-input" min="1" max="6" />
+
+        <!-- 最大码长配置 -->
+        <div class="config-item">
+          <div class="config-label">
+            <span class="config-name">最大码长</span>
+            <span class="config-desc">达到此码长后自动上屏，无需空格确认。设为 -1 表示所有码长都需要空格确认</span>
+          </div>
+          <div class="config-value">
+            <div class="max-code-control">
+              <button 
+                class="btn-step" 
+                :disabled="maxCodeLength <= -1"
+                @click="maxCodeLength--"
+              >-</button>
+              <span class="max-code-value">{{ maxCodeLength === -1 ? '无' : maxCodeLength + ' 码' }}</span>
+              <button 
+                class="btn-step" 
+                :disabled="maxCodeLength >= 6"
+                @click="maxCodeLength++"
+              >+</button>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -2061,6 +2191,22 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
   color: white !important;
 }
 
+/* 出简重列使用红色字色 */
+.eval-table th:nth-child(7),
+.eval-table td:nth-child(7) {
+  color: #f43f5e !important;
+  font-weight: 700;
+}
+
+.eval-table td:nth-child(7).clickable {
+  color: #f43f5e !important;
+}
+
+.eval-table td:nth-child(7).clickable:hover {
+  background: linear-gradient(135deg, #f43f5e 0%, #ec4899 100%);
+  color: white !important;
+}
+
 .eval-table .row-highlight {
   background: rgba(99, 102, 241, 0.03);
 }
@@ -2585,5 +2731,406 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
 .page-input[type=number] {
   -moz-appearance: textfield;
   appearance: textfield;
+}
+
+/* 配置卡片 - 显眼的测评参数设置 */
+.config-card {
+  background: linear-gradient(135deg, var(--bg2) 0%, var(--bg1) 100%);
+  border-radius: 16px;
+  border: 2px solid rgba(99, 102, 241, 0.3);
+  box-shadow: 0 4px 20px rgba(99, 102, 241, 0.1);
+  overflow: hidden;
+  transition: all 0.3s ease;
+}
+
+.config-card:hover {
+  border-color: rgba(99, 102, 241, 0.5);
+  box-shadow: 0 6px 24px rgba(99, 102, 241, 0.15);
+}
+
+.config-card-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 20px;
+  background: linear-gradient(90deg, rgba(99, 102, 241, 0.15) 0%, rgba(139, 92, 246, 0.08) 100%);
+  border-bottom: 1px solid rgba(99, 102, 241, 0.2);
+  color: var(--text);
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.config-card-header :deep(svg) {
+  color: var(--primary);
+}
+
+.config-hint {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--text3);
+  font-weight: 400;
+}
+
+.config-card-body {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.config-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+
+.config-label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  min-width: 200px;
+}
+
+.config-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.config-desc {
+  font-size: 12px;
+  color: var(--text3);
+  line-height: 1.5;
+}
+
+.config-value {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-end;
+}
+
+/* 选重键显示 */
+.select-keys-display {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  background: var(--bg);
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.select-keys-display:hover {
+  border-color: var(--primary);
+  background: rgba(99, 102, 241, 0.05);
+}
+
+.select-keys-list {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.select-key-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  background: var(--bg2);
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text2);
+  font-family: 'SF Mono', 'JetBrains Mono', 'Consolas', monospace;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.select-key-badge.key-primary {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.2) 0%, rgba(139, 92, 246, 0.2) 100%);
+  color: var(--primary);
+  border-color: rgba(99, 102, 241, 0.3);
+}
+
+.select-key-badge.key-secondary {
+  background: linear-gradient(135deg, rgba(244, 63, 94, 0.15) 0%, rgba(236, 72, 153, 0.15) 100%);
+  color: #f43f5e;
+  border-color: rgba(244, 63, 94, 0.3);
+}
+
+/* 选重键编辑 */
+.select-keys-edit {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.select-keys-input {
+  width: 220px;
+  padding: 8px 12px;
+  background: var(--bg);
+  border: 2px solid var(--primary);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 14px;
+  font-family: 'SF Mono', 'JetBrains Mono', 'Consolas', monospace;
+  outline: none;
+  transition: all 0.2s ease;
+}
+
+.select-keys-input:focus {
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
+}
+
+.edit-hint {
+  font-size: 11px;
+  color: var(--text3);
+  font-style: italic;
+}
+
+/* 图标按钮 */
+.btn-icon {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  background: transparent;
+}
+
+.btn-icon:hover {
+  transform: scale(1.05);
+}
+
+.btn-edit {
+  color: var(--text3);
+}
+
+.btn-edit:hover {
+  background: rgba(99, 102, 241, 0.1);
+  color: var(--primary);
+}
+
+.btn-confirm {
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  color: white;
+}
+
+.btn-confirm:hover {
+  box-shadow: 0 2px 8px rgba(16, 185, 129, 0.4);
+}
+
+.btn-cancel {
+  background: linear-gradient(135deg, #f43f5e 0%, #e11d48 100%);
+  color: white;
+}
+
+.btn-cancel:hover {
+  box-shadow: 0 2px 8px rgba(244, 63, 94, 0.4);
+}
+
+/* 最大码长控制 */
+.max-code-control {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px;
+  background: var(--bg);
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.btn-step {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 8px;
+  background: var(--bg2);
+  color: var(--text);
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-step:hover:not(:disabled) {
+  background: var(--primary);
+  color: white;
+}
+
+.btn-step:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.max-code-value {
+  min-width: 60px;
+  text-align: center;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+  font-family: 'SF Mono', 'JetBrains Mono', 'Consolas', monospace;
+}
+
+/* 选重键网格布局 */
+.select-keys-section {
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.select-keys-editor {
+  width: 100%;
+  align-items: flex-start;
+}
+
+.select-keys-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 12px;
+  width: 100%;
+}
+
+.select-key-item {
+  background: var(--bg);
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  overflow: hidden;
+  transition: all 0.2s ease;
+}
+
+.select-key-item:hover {
+  border-color: rgba(99, 102, 241, 0.3);
+}
+
+.select-key-display {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.select-key-display:hover {
+  background: rgba(99, 102, 241, 0.05);
+}
+
+.select-key-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text3);
+  min-width: 32px;
+}
+
+.select-key-value {
+  flex: 1;
+  font-family: 'SF Mono', 'JetBrains Mono', 'Consolas', monospace;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  text-align: center;
+}
+
+.select-key-value.multi-keys {
+  color: var(--primary);
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.1) 0%, rgba(139, 92, 246, 0.1) 100%);
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.select-key-edit-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+}
+
+.select-key-input {
+  flex: 1;
+  width: 60px;
+  padding: 6px 8px;
+  background: var(--bg2);
+  border: 2px solid var(--primary);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 13px;
+  font-family: 'SF Mono', 'JetBrains Mono', 'Consolas', monospace;
+  outline: none;
+}
+
+.btn-icon-sm {
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.add-position {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 12px;
+  cursor: pointer;
+  background: rgba(99, 102, 241, 0.05);
+  border: 2px dashed rgba(99, 102, 241, 0.3);
+  min-height: 60px;
+}
+
+.add-position:hover {
+  background: rgba(99, 102, 241, 0.1);
+  border-color: rgba(99, 102, 241, 0.5);
+}
+
+.add-icon {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--primary);
+}
+
+.add-text {
+  font-size: 12px;
+  color: var(--text3);
+}
+
+.select-keys-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.btn-remove {
+  padding: 4px 10px;
+  font-size: 11px;
+  color: var(--text3);
+  background: var(--bg);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-remove:hover {
+  color: #f43f5e;
+  border-color: rgba(244, 63, 94, 0.3);
+  background: rgba(244, 63, 94, 0.05);
 }
 </style>

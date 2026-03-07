@@ -368,20 +368,61 @@ function parseYamlCodeTable(content: string, codeMap: Map<string, string[]>): vo
 }
 
 /**
+ * 计算选重键的当量（用于智能选择最低当量选重键）
+ * @param prevKey 前一个键
+ * @param selectKey 选重键
+ */
+function getSelectKeyEquivalence(prevKey: string, selectKey: string): number {
+  // 空格没有当量成本（大拇指单独按键）
+  if (selectKey === ' ') return 0
+  // 使用当量数据计算
+  return getComboEquivalence(prevKey, selectKey)
+}
+
+/**
+ * 从多个候选选重键中选择当量最低的
+ * @param prevKey 前一个键
+ * @param candidateKeys 候选选重键数组
+ */
+function selectBestKey(prevKey: string, candidateKeys: string[]): string {
+  if (candidateKeys.length === 0) return ' '
+  if (candidateKeys.length === 1) return candidateKeys[0]
+  
+  // 选择当量最低的键
+  let bestKey = candidateKeys[0]
+  let minEq = getSelectKeyEquivalence(prevKey, bestKey)
+  
+  for (let i = 1; i < candidateKeys.length; i++) {
+    const key = candidateKeys[i]
+    const eq = getSelectKeyEquivalence(prevKey, key)
+    if (eq < minEq) {
+      minEq = eq
+      bestKey = key
+    }
+  }
+  
+  return bestKey
+}
+
+/**
  * 测评编码方案
  * @param codeMap 编码映射（支持 Map<string, string> 和 Map<string, string[]>）
  * @param freqMap 字频映射
- * @param selectKeys 选重键
+ * @param selectKeys 选重键（字符串或字符串数组）
  * @param maxCodeLength 最大码长
  * @param missingSet 缺字集合（可选，用于标记缺字）
  */
 export function evaluateScheme(
   codeMap: Map<string, string> | Map<string, string[]>,
   freqMap: Map<string, number>,
-  selectKeys: string = ";'456789",
+  selectKeys: string | string[] = ";'456789",
   maxCodeLength: number = 4,
   missingSet?: Set<string>
 ): EvaluationResult {
+  // 统一处理为数组
+  const selectKeyArray: string[] = Array.isArray(selectKeys) 
+    ? selectKeys 
+    : selectKeys.split('')
   // 按字频排序
   const sortedChars = [...freqMap.entries()]
     .filter(([char]) => char.length === 1)
@@ -530,8 +571,14 @@ export function evaluateScheme(
       let selectKey = ''
       if (simpleCollision > 1) {
         // 有重码，使用配置的选重键（从第 2 选项开始）
-        const selectIdx = Math.min(simpleCollision - 2, selectKeys.length - 1)
-        selectKey = selectKeys[selectIdx]
+        const selectIdx = Math.min(simpleCollision - 2, selectKeyArray.length - 1)
+        // 如果该位置配置了多个候选键，智能选择当量最低的
+        const candidateKeys = selectKeyArray[selectIdx] || ' '
+        // 支持多选重键配置：每个位置可以是单个键或多个候选键
+        const keys = candidateKeys.length > 1 ? candidateKeys.split('') : [candidateKeys]
+        // 选择当量最低的键
+        const lastCodeKey = code[code.length - 1] || ' '
+        selectKey = selectBestKey(lastCodeKey, keys)
       } else if (codeLen < maxCodeLength) {
         // 码长不足，使用空格确认首选项
         selectKey = ' '
