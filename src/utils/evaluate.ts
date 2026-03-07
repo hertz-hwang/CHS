@@ -266,6 +266,9 @@ export interface EvaluateHanziItem {
   trible: number     // 三连击
   overKey: number    // 超标键位
   isLack: boolean    // 是否缺字
+  
+  // 首选字（同编码下的首位候选字）
+  primaryChar?: string
 }
 
 // 每一行的测评结果
@@ -407,6 +410,35 @@ export function evaluateScheme(
   const isArrayCodeMap = codeMap instanceof Map && 
     codeMap.size > 0 && Array.isArray(codeMap.values().next().value)
   
+  // 构建编码到字的映射（用于找出首选字）
+  const codeToChars = new Map<string, string[]>()
+  for (let i = 0; i < sortedChars.length; i++) {
+    const [char, freq] = sortedChars[i]
+    const isMissing = missingSet?.has(char) ?? false
+    if (isMissing) continue
+    
+    let codes: string[] | undefined
+    if (isArrayCodeMap) {
+      codes = (codeMap as Map<string, string[]>).get(char)
+    } else {
+      const code = (codeMap as Map<string, string>).get(char)
+      if (code) codes = [code]
+    }
+    
+    if (!codes || codes.length === 0) continue
+    
+    // 找到最短编码
+    let shortestCode = codes[0]
+    for (const code of codes) {
+      if (code.length < shortestCode.length) shortestCode = code
+    }
+    
+    if (!codeToChars.has(shortestCode)) {
+      codeToChars.set(shortestCode, [])
+    }
+    codeToChars.get(shortestCode)!.push(char)
+  }
+  
   for (const [start, end] of sections) {
     const line: EvaluateLine = {
       items: [],
@@ -483,6 +515,15 @@ export function evaluateScheme(
       const fullCollision = (fullCodeCollision.get(fullCollisionKey) || 0) + 1
       fullCodeCollision.set(fullCollisionKey, fullCollision)
       
+      // 获取首选字（同编码下的首位候选字）
+      let primaryChar: string | undefined
+      if (simpleCollision > 1) {
+        const charsWithSameCode = codeToChars.get(shortestCode)
+        if (charsWithSameCode && charsWithSameCode.length > 0) {
+          primaryChar = charsWithSameCode[0]
+        }
+      }
+      
       // 计算选重键
       let selectKey = ''
       if (simpleCollision > 1) {
@@ -544,6 +585,7 @@ export function evaluateScheme(
         trible: 0,
         overKey,
         isLack: false,
+        primaryChar,
       }
       
       // 超标键位，跳过手感计算
@@ -791,6 +833,9 @@ export interface EvaluateWordItem {
   trible: number     // 三连击
   overKey: number    // 超标键位
   isLack: boolean    // 是否缺字
+  
+  // 首选词（同编码下的首位候选词）
+  primaryWord?: string
 }
 
 // 多字词每一行的测评结果
@@ -849,6 +894,19 @@ export function evaluateWords(
 
   const lines: EvaluateWordLine[] = []
   const totalUsage: Record<string, number> = {}
+  
+  // 构建编码到词的映射（用于找出首选词）
+  const codeToWords = new Map<string, string[]>()
+  for (let i = 0; i < sortedWords.length; i++) {
+    const [word, freq] = sortedWords[i]
+    const code = wordCodeMap.get(word)
+    if (!code) continue
+    
+    if (!codeToWords.has(code)) {
+      codeToWords.set(code, [])
+    }
+    codeToWords.get(code)!.push(word)
+  }
 
   for (const [start, end] of sections) {
     const line: EvaluateWordLine = {
@@ -890,6 +948,15 @@ export function evaluateWords(
       const codeLen = code.length
       const collision = (codeCollision.get(code) || 0) + 1
       codeCollision.set(code, collision)
+      
+      // 获取首选词（同编码下的首位候选词）
+      let primaryWord: string | undefined
+      if (collision > 1) {
+        const wordsWithSameCode = codeToWords.get(code)
+        if (wordsWithSameCode && wordsWithSameCode.length > 0) {
+          primaryWord = wordsWithSameCode[0]
+        }
+      }
 
       // 统计按键使用
       for (const k of code) {
@@ -921,6 +988,7 @@ export function evaluateWords(
         trible: 0,
         overKey,
         isLack: false,
+        primaryWord,
       }
 
       // 超标键位，跳过手感计算

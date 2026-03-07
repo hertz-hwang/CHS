@@ -1703,7 +1703,10 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
               <tbody>
                 <tr v-for="(item, idx) in paginatedDetailItems" :key="item.char" :class="{ 'is-lack': item.isLack }">
                   <td>{{ (detailCurrentPage - 1) * detailPageSize + idx + 1 }}</td>
-                  <td class="char-col">{{ item.char }}</td>
+                  <td class="char-col">
+                    {{ item.char }}
+                    <span v-if="item.primaryChar && item.primaryChar !== item.char" class="primary-char">({{ item.primaryChar }})</span>
+                  </td>
                   <td class="code-col">{{ item.code || '-' }}</td>
                   <td>{{ item.selectKey || '-' }}</td>
                   <td>{{ item.collision > 1 ? item.collision : '-' }}</td>
@@ -1741,7 +1744,10 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
               <tbody>
                 <tr v-for="(item, idx) in paginatedDetailWordItems" :key="item.word" :class="{ 'is-lack': item.isLack }">
                   <td>{{ (detailWordCurrentPage - 1) * detailPageSize + idx + 1 }}</td>
-                  <td class="char-col">{{ item.word }}</td>
+                  <td class="char-col">
+                    {{ item.word }}
+                    <span v-if="item.primaryWord && item.primaryWord !== item.word" class="primary-char">({{ item.primaryWord }})</span>
+                  </td>
                   <td class="code-col">{{ item.code || '-' }}</td>
                   <td>{{ item.collision > 1 ? item.collision : '-' }}</td>
                   <td>{{ item.freq }}</td>
@@ -2405,6 +2411,12 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
   font-size: 18px;
   text-align: center;
   font-weight: 500;
+}
+
+.detail-table .primary-char {
+  font-size: 14px;
+  color: var(--text3);
+  margin-left: 4px;
 }
 
 .detail-table .code-col {
