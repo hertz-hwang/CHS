@@ -4,7 +4,11 @@ import { computed } from 'vue'
 const props = defineProps<{
   usage: Record<string, number>
   title?: string
+  includeSpace?: boolean
 }>()
+
+// 默认包含空格
+const includeSpace = computed(() => props.includeSpace ?? true)
 
 // 键盘布局定义
 const KEYBOARD_ROWS = [
@@ -19,11 +23,30 @@ const LEFT_HAND_KEYS = new Set([...`12345qwertasdfgzxcvb`])
 
 // 计算相对使用率（百分比）
 const relativeUsage = computed(() => {
-  const total = Object.values(props.usage).reduce((a, b) => a + b, 0)
+  let total = 0
+  
+  if (includeSpace.value) {
+    // 包含空格：使用所有键的总量
+    total = Object.values(props.usage).reduce((a, b) => a + b, 0)
+  } else {
+    // 不包含空格：只计算非空格键的总量
+    for (const [key, value] of Object.entries(props.usage)) {
+      if (key !== ' ') {
+        total += value
+      }
+    }
+  }
+  
   const result: Record<string, number> = {}
   
   for (const [key, value] of Object.entries(props.usage)) {
-    result[key.toLowerCase()] = total > 0 ? (value / total) * 100 : 0
+    const normalizedKey = key.toLowerCase()
+    // 不统计空格时，空格键的使用率设为 0
+    if (normalizedKey === ' ' && !includeSpace.value) {
+      result[normalizedKey] = 0
+    } else {
+      result[normalizedKey] = total > 0 ? (value / total) * 100 : 0
+    }
   }
   
   return result
@@ -42,30 +65,36 @@ const spaceUsage = computed(() => {
   return relativeUsage.value[' '] || 0
 })
 
-// 计算左手使用率（左手键 + 空格键使用率的一半）
+// 计算左手使用率
 const leftHandUsage = computed(() => {
   let total = 0
-  const spaceUsage = relativeUsage.value[' '] || 0
   for (const [key, value] of Object.entries(relativeUsage.value)) {
     if (LEFT_HAND_KEYS.has(key)) {
       total += value
     }
   }
-  // 空格键使用率对半均分给左右手
-  return total + spaceUsage / 2
+  // 只有勾选"统计空格"时，才将空格键使用率对半均分给左右手
+  if (includeSpace.value) {
+    const spaceUsage = relativeUsage.value[' '] || 0
+    return total + spaceUsage / 2
+  }
+  return total
 })
 
-// 计算右手使用率（右手键 + 空格键使用率的一半）
+// 计算右手使用率
 const rightHandUsage = computed(() => {
   let total = 0
-  const spaceUsage = relativeUsage.value[' '] || 0
   for (const [key, value] of Object.entries(relativeUsage.value)) {
     if (!LEFT_HAND_KEYS.has(key) && key !== ' ') {
       total += value
     }
   }
-  // 空格键使用率对半均分给左右手
-  return total + spaceUsage / 2
+  // 只有勾选"统计空格"时，才将空格键使用率对半均分给左右手
+  if (includeSpace.value) {
+    const spaceUsage = relativeUsage.value[' '] || 0
+    return total + spaceUsage / 2
+  }
+  return total
 })
 
 // 获取键的颜色

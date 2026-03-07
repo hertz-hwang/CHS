@@ -91,6 +91,9 @@ function finishEditSchemeName(type: 'current' | 'upload') {
 const selectKeys = ref(";'456789")
 const maxCodeLength = ref(4)
 
+// 键位热力图配置
+const includeSpaceInStats = ref(true)
+
 // 默认字频数据（kc6000.txt）
 const defaultFreqMap = ref<Map<string, number> | null>(null)
 
@@ -1252,8 +1255,14 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
 
         <!-- 键位热力图 -->
         <div v-if="subTab === 'char' && evaluationResult" class="heatmap-container">
-          <h3 class="section-title">键位热力图（单位：%）</h3>
-          <KeyboardHeatmap :usage="evaluationResult.usage" />
+          <div class="heatmap-header">
+            <h3 class="section-title">键位热力图（单位：%）</h3>
+            <label class="checkbox-label">
+              <input v-model="includeSpaceInStats" type="checkbox" />
+              <span>统计空格</span>
+            </label>
+          </div>
+          <KeyboardHeatmap :usage="evaluationResult.usage" :include-space="includeSpaceInStats" />
         </div>
 
         <!-- 词组测评表格 -->
@@ -1350,8 +1359,14 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
 
         <!-- 词组键位热力图 -->
         <div v-if="subTab === 'word' && wordEvaluationResult" class="heatmap-container">
-          <h3 class="section-title">键位热力图（单位：%）</h3>
-          <KeyboardHeatmap :usage="wordEvaluationResult.usage" />
+          <div class="heatmap-header">
+            <h3 class="section-title">键位热力图（单位：%）</h3>
+            <label class="checkbox-label">
+              <input v-model="includeSpaceInStats" type="checkbox" />
+              <span>统计空格</span>
+            </label>
+          </div>
+          <KeyboardHeatmap :usage="wordEvaluationResult.usage" :include-space="includeSpaceInStats" />
         </div>
       </div>
 
@@ -1605,8 +1620,14 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
 
         <!-- 单字键位热力图 -->
         <div v-if="subTab === 'char' && uploadedResult" class="heatmap-container">
-          <h3 class="section-title">键位使用分布（单位：%）</h3>
-          <KeyboardHeatmap :usage="uploadedResult.usage" />
+          <div class="heatmap-header">
+            <h3 class="section-title">键位使用分布（单位：%）</h3>
+            <label class="checkbox-label">
+              <input v-model="includeSpaceInStats" type="checkbox" />
+              <span>统计空格</span>
+            </label>
+          </div>
+          <KeyboardHeatmap :usage="uploadedResult.usage" :include-space="includeSpaceInStats" />
         </div>
 
         <!-- 词组测评表格 -->
@@ -1699,8 +1720,14 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
 
         <!-- 词组键位热力图 -->
         <div v-if="subTab === 'word' && uploadedWordResult" class="heatmap-container">
-          <h3 class="section-title">键位热力图（单位：%）</h3>
-          <KeyboardHeatmap :usage="uploadedWordResult.usage" />
+          <div class="heatmap-header">
+            <h3 class="section-title">键位热力图（单位：%）</h3>
+            <label class="checkbox-label">
+              <input v-model="includeSpaceInStats" type="checkbox" />
+              <span>统计空格</span>
+            </label>
+          </div>
+          <KeyboardHeatmap :usage="uploadedWordResult.usage" :include-space="includeSpaceInStats" />
         </div>
       </div>
     </div>
@@ -2090,6 +2117,36 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
   border: 1px solid rgba(255, 255, 255, 0.05);
   padding: 20px;
   box-shadow: 0 4px 24px rgba(0, 0, 0, 0.06);
+}
+
+/* 热力图头部 */
+.heatmap-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.heatmap-header .section-title {
+  margin-bottom: 0;
+}
+
+/* 勾选框样式 */
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text2);
+  cursor: pointer;
+  user-select: none;
+}
+
+.checkbox-label input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--primary);
+  cursor: pointer;
 }
 
 /* 方案名称表头 - 表格内部标题行 */
