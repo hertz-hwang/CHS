@@ -9,6 +9,33 @@ import {
 } from '@/engine/config'
 import { loadRoots2PuaMap, bracedRootToPua, convertBracedRootsToPua, isBracedRoot, needsPuaFont, getPuaFontName } from '@/utils/pua'
 
+// 缓存版本号 - 更新此版本号会强制重新加载数据
+const CACHE_VERSION = '0.1.9'
+const CACHE_KEY_PREFIX = 'chars_hijack_cache_'
+const CACHE_VERSION_KEY = `${CACHE_KEY_PREFIX}version`
+
+// 缓存的数据项定义
+interface CachedData {
+  ids: string | null          // IDS 数据
+  customIds: string | null    // 自定义 IDS
+  stroke: string | null       // 笔画数据
+  pinyin: string | null       // 拼音数据
+  freq: string | null         // 字词频数据
+  charsets: Record<string, string>  // 字集数据
+}
+
+// 加载进度回调类型
+export interface LoadingProgress {
+  progress: number
+  currentItem: string
+  loaded: string[]
+  failed: string[]
+  items: Array<{ id: string; name: string; status: 'pending' | 'loading' | 'done' | 'error' }>
+}
+
+// 加载状态变化回调
+type ProgressCallback = (progress: LoadingProgress) => void
+
 // 字集选项定义
 export interface CharsetOption {
   id: string        // 文件名（不含扩展名）
@@ -188,6 +215,304 @@ async function loadDefaultData(): Promise<{ loaded: string[]; failed: string[] }
 
   refreshStats()
   return { loaded, failed }
+}
+
+// ============ 数据缓存管理 ============
+
+// 检查缓存是否有效
+function isCacheValid(): boolean {
+  const version = localStorage.getItem(CACHE_VERSION_KEY)
+  return version === CACHE_VERSION
+}
+
+// 保存数据到缓存
+function saveDataToCache(data: CachedData): void {
+  try {
+    localStorage.setItem(`${CACHE_KEY_PREFIX}ids`, data.ids || '')
+    localStorage.setItem(`${CACHE_KEY_PREFIX}customIds`, data.customIds || '')
+    localStorage.setItem(`${CACHE_KEY_PREFIX}stroke`, data.stroke || '')
+    localStorage.setItem(`${CACHE_KEY_PREFIX}pinyin`, data.pinyin || '')
+    localStorage.setItem(`${CACHE_KEY_PREFIX}freq`, data.freq || '')
+    localStorage.setItem(`${CACHE_KEY_PREFIX}charsets`, JSON.stringify(data.charsets))
+    localStorage.setItem(CACHE_VERSION_KEY, CACHE_VERSION)
+  } catch (e) {
+    console.warn('保存缓存失败:', e)
+  }
+}
+
+// 从缓存加载数据
+function loadDataFromCache(): CachedData | null {
+  try {
+    if (!isCacheValid()) return null
+    
+    const charsetsStr = localStorage.getItem(`${CACHE_KEY_PREFIX}charsets`)
+    const charsets = charsetsStr ? JSON.parse(charsetsStr) : {}
+    
+    return {
+      ids: localStorage.getItem(`${CACHE_KEY_PREFIX}ids`) || null,
+      customIds: localStorage.getItem(`${CACHE_KEY_PREFIX}customIds`) || null,
+      stroke: localStorage.getItem(`${CACHE_KEY_PREFIX}stroke`) || null,
+      pinyin: localStorage.getItem(`${CACHE_KEY_PREFIX}pinyin`) || null,
+      freq: localStorage.getItem(`${CACHE_KEY_PREFIX}freq`) || null,
+      charsets,
+    }
+  } catch (e) {
+    console.warn('读取缓存失败:', e)
+    return null
+  }
+}
+
+// 清除缓存
+function clearCache(): void {
+  const keys = ['ids', 'customIds', 'stroke', 'pinyin', 'freq', 'charsets']
+  keys.forEach(key => localStorage.removeItem(`${CACHE_KEY_PREFIX}${key}`))
+  localStorage.removeItem(CACHE_VERSION_KEY)
+}
+
+// 带进度回调的数据加载函数
+async function loadDefaultDataWithProgress(
+  onProgress?: ProgressCallback
+): Promise<{ loaded: string[]; failed: string[]; fromCache: boolean }> {
+  
+  // 定义所有加载项
+  const loadingItems: Array<{ id: string; name: string; status: 'pending' | 'loading' | 'done' | 'error' }> = [
+    { id: 'ids', name: 'IDS 拆分数据', status: 'pending' },
+    { id: 'customIds', name: '自定义 IDS', status: 'pending' },
+    { id: 'stroke', name: '笔画数据', status: 'pending' },
+    { id: 'pinyin', name: '拼音数据', status: 'pending' },
+    { id: 'freq', name: '字词频数据', status: 'pending' },
+    { id: 'gb2312', name: 'GB2312 字集', status: 'pending' },
+    { id: 'kc6000', name: '科测6000 字集', status: 'pending' },
+    { id: 'tg8105', name: '通规8105 字集', status: 'pending' },
+    { id: 'cjk', name: '基本区 字集', status: 'pending' },
+    { id: 'all', name: '全部 字集', status: 'pending' },
+    { id: 'pua', name: 'PUA 字根映射', status: 'pending' },
+  ]
+  
+  const loaded: string[] = []
+  const failed: string[] = []
+  const totalItems = loadingItems.length
+  
+  // 更新进度的辅助函数
+  const updateProgress = (currentItem: string) => {
+    const doneCount = loadingItems.filter(i => i.status === 'done').length
+    const errorCount = loadingItems.filter(i => i.status === 'error').length
+    const progress = Math.round(((doneCount + errorCount) / totalItems) * 100)
+    onProgress?.({
+      progress,
+      currentItem,
+      loaded: [...loaded],
+      failed: [...failed],
+      items: [...loadingItems]
+    })
+  }
+  
+  // 设置加载项状态
+  const setItemStatus = (id: string, status: 'loading' | 'done' | 'error') => {
+    const item = loadingItems.find(i => i.id === id)
+    if (item) item.status = status
+  }
+
+  // 先尝试从缓存加载
+  const cachedData = loadDataFromCache()
+  if (cachedData) {
+    // 从缓存加载
+    updateProgress('正在从缓存加载...')
+    
+    // IDS 数据
+    setItemStatus('ids', 'loading')
+    updateProgress('IDS 拆分数据')
+    if (cachedData.ids) {
+      engine.loadSkyIDS(cachedData.ids)
+      loaded.push('IDS')
+      setItemStatus('ids', 'done')
+    } else {
+      failed.push('IDS')
+      setItemStatus('ids', 'error')
+    }
+    
+    // 自定义 IDS
+    setItemStatus('customIds', 'loading')
+    updateProgress('自定义 IDS')
+    if (cachedData.customIds) {
+      engine.loadCustomIDS(cachedData.customIds)
+      loaded.push('自定义IDS')
+    }
+    setItemStatus('customIds', 'done')
+    
+    // 笔画数据
+    setItemStatus('stroke', 'loading')
+    updateProgress('笔画数据')
+    if (cachedData.stroke) {
+      engine.loadStrokes(cachedData.stroke)
+      loaded.push('笔画')
+      setItemStatus('stroke', 'done')
+    } else {
+      failed.push('笔画')
+      setItemStatus('stroke', 'error')
+    }
+    
+    // 拼音数据
+    setItemStatus('pinyin', 'loading')
+    updateProgress('拼音数据')
+    if (cachedData.pinyin) {
+      engine.loadPinyin(cachedData.pinyin)
+      loaded.push('拼音')
+      setItemStatus('pinyin', 'done')
+    } else {
+      failed.push('拼音')
+      setItemStatus('pinyin', 'error')
+    }
+    
+    // 字词频数据
+    setItemStatus('freq', 'loading')
+    updateProgress('字词频数据')
+    if (cachedData.freq) {
+      engine.loadFreq(cachedData.freq)
+      loaded.push('字频')
+      setItemStatus('freq', 'done')
+    } else {
+      failed.push('字频')
+      setItemStatus('freq', 'error')
+    }
+    
+    // 字集数据
+    for (const [id, content] of Object.entries(cachedData.charsets)) {
+      setItemStatus(id, 'loading')
+      updateProgress(`${id} 字集`)
+      if (content) {
+        engine.loadCharset(id, content)
+        loaded.push(`${id}字集`)
+        setItemStatus(id, 'done')
+      } else {
+        failed.push(`${id}字集`)
+        setItemStatus(id, 'error')
+      }
+    }
+    
+    // PUA 映射
+    setItemStatus('pua', 'loading')
+    updateProgress('PUA 字根映射')
+    await loadRoots2PuaMap()
+    loaded.push('PUA映射')
+    setItemStatus('pua', 'done')
+    
+    refreshStats()
+    updateProgress('加载完成')
+    
+    return { loaded, failed, fromCache: true }
+  }
+  
+  // 缓存无效，从网络加载
+  const cacheData: CachedData = {
+    ids: null,
+    customIds: null,
+    stroke: null,
+    pinyin: null,
+    freq: null,
+    charsets: {}
+  }
+  
+  // 加载 IDS 数据
+  setItemStatus('ids', 'loading')
+  updateProgress('IDS 拆分数据')
+  const ids = await fetchText(`${BASE}data/sky_ids.txt`)
+  if (ids) {
+    engine.loadSkyIDS(ids)
+    cacheData.ids = ids
+    loaded.push('IDS')
+    setItemStatus('ids', 'done')
+  } else {
+    failed.push('IDS')
+    setItemStatus('ids', 'error')
+  }
+  
+  // 加载自定义 IDS
+  setItemStatus('customIds', 'loading')
+  updateProgress('自定义 IDS')
+  const custom = await fetchText(`${BASE}data/custom_ids.txt`)
+  if (custom) {
+    engine.loadCustomIDS(custom)
+    cacheData.customIds = custom
+    loaded.push('自定义IDS')
+  }
+  setItemStatus('customIds', 'done')
+  
+  // 加载笔画数据
+  setItemStatus('stroke', 'loading')
+  updateProgress('笔画数据')
+  const stroke = await fetchText(`${BASE}data/stroke.txt`)
+  if (stroke) {
+    engine.loadStrokes(stroke)
+    cacheData.stroke = stroke
+    loaded.push('笔画')
+    setItemStatus('stroke', 'done')
+  } else {
+    failed.push('笔画')
+    setItemStatus('stroke', 'error')
+  }
+  
+  // 加载拼音数据
+  setItemStatus('pinyin', 'loading')
+  updateProgress('拼音数据')
+  const dict = await fetchText(`${BASE}data/dictionary.txt`)
+  if (dict) {
+    engine.loadPinyin(dict)
+    cacheData.pinyin = dict
+    loaded.push('拼音')
+    setItemStatus('pinyin', 'done')
+  } else {
+    failed.push('拼音')
+    setItemStatus('pinyin', 'error')
+  }
+  
+  // 加载字词频数据
+  setItemStatus('freq', 'loading')
+  updateProgress('字词频数据')
+  const defaultFreqSource = FREQ_SOURCE_OPTIONS.find(o => o.id === currentFreqSourceId.value)
+  if (defaultFreqSource) {
+    const freqText = await fetchText(defaultFreqSource.file)
+    if (freqText) {
+      engine.loadFreq(freqText)
+      cacheData.freq = freqText
+      loaded.push('字频')
+      setItemStatus('freq', 'done')
+    } else {
+      failed.push('字频')
+      setItemStatus('freq', 'error')
+    }
+  }
+  
+  // 加载所有字集文件
+  for (const option of CHARSET_OPTIONS) {
+    setItemStatus(option.id, 'loading')
+    updateProgress(`${option.name} 字集`)
+    const content = await fetchText(option.file)
+    if (content) {
+      engine.loadCharset(option.id, content)
+      cacheData.charsets[option.id] = content
+      loaded.push(`${option.name}字集`)
+      setItemStatus(option.id, 'done')
+    } else {
+      failed.push(`${option.name}字集`)
+      setItemStatus(option.id, 'error')
+    }
+  }
+  
+  // 加载 PUA 字根映射
+  setItemStatus('pua', 'loading')
+  updateProgress('PUA 字根映射')
+  await loadRoots2PuaMap()
+  loaded.push('PUA映射')
+  setItemStatus('pua', 'done')
+  
+  // 保存到缓存
+  saveDataToCache(cacheData)
+  
+  refreshStats()
+  updateProgress('加载完成')
+  
+  return { loaded, failed, fromCache: false }
 }
 
 // 切换字集
@@ -534,6 +859,11 @@ export function useEngine() {
     searchChar: readonly(searchChar), setSearchChar, clearSearchChar,
     toastMsg: readonly(toastMsg), toastVisible: readonly(toastVisible), toast,
     loadDefaultData,
+    // 带进度的数据加载
+    loadDefaultDataWithProgress,
+    // 缓存管理
+    clearCache,
+    isCacheValid,
     // 配置管理
     applyConfig, getConfig, importConfigFromToml, exportConfigToToml, saveCurrentConfig, loadSavedConfig,
     // 字集管理

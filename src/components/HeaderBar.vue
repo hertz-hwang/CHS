@@ -222,7 +222,7 @@ async function onFreqSourceChange(event: Event) {
   <header class="header">
     <div class="header-left">
       <div class="title">
-        <h1>字劫 <span class="title-suffix">CHS</span><span class="ver">v0.1.8</span></h1>
+        <h1>字劫 <span class="title-suffix">CHS</span><span class="ver">v0.1.9</span></h1>
       </div>
       
       <!-- 配置操作 -->

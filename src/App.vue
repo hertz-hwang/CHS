@@ -4,6 +4,7 @@ import HeaderBar from './components/HeaderBar.vue'
 import SideNav from './components/SideNav.vue'
 import DetailPanel from './components/DetailPanel.vue'
 import ToastNotify from './components/ToastNotify.vue'
+import LoadingPage from './components/LoadingPage.vue'
 
 // 新页面
 import DataPage from './components/pages/DataPage.vue'
@@ -18,27 +19,38 @@ import PracticePage from './components/pages/PracticePage.vue'
 import CoveragePage from './components/pages/CoveragePage.vue'
 import SuggestPage from './components/pages/SuggestPage.vue'
 
-import { useEngine } from './composables/useEngine'
+import { useEngine, type LoadingProgress } from './composables/useEngine'
 
-const { engine, currentPage, navCollapsed, refreshStats, toast, loadDefaultData } = useEngine()
+const { engine, currentPage, navCollapsed, refreshStats, toast, loadDefaultDataWithProgress } = useEngine()
 
 const isLoading = ref(true)
+const loadingProgress = ref<LoadingProgress>({
+  progress: 0,
+  currentItem: '',
+  loaded: [],
+  failed: [],
+  items: []
+})
 
 // 显示右侧详情栏的页面（保留旧页面的兼容）
 const showDetailPages = ['data', 'split', 'code', 'coverage', 'suggest']
 const showDetailPanel = computed(() => showDetailPages.includes(currentPage.value))
 
 onMounted(async () => {
-  // 自动加载默认数据，加载成功不提示
-  const { loaded, failed } = await loadDefaultData()
-  //if (loaded.length > 0) {
-  //  toast(`已加载: ${loaded.join(', ')}`)
-  //}
+  // 使用带进度回调的加载函数
+  const { loaded, failed, fromCache } = await loadDefaultDataWithProgress((progress) => {
+    loadingProgress.value = progress
+  })
+  
   if (failed.length > 0) {
     toast(`加载失败: ${failed.join(', ')}`, 4000)
   }
+  
+  // 如果是从网络加载的，提示用户数据已缓存
+  if (!fromCache && loaded.length > 0) {
+    toast('数据已缓存，下次加载将更快', 3000)
+  }
 
-  // 字根已在 useEngine 初始化时通过 applyConfig 加载，无需再次加载
   refreshStats()
   isLoading.value = false
 })
@@ -46,19 +58,22 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div>
+  <!-- 加载页面 -->
+  <LoadingPage 
+    v-if="isLoading" 
+    :progress="loadingProgress.progress"
+    :items="loadingProgress.items"
+    :message="loadingProgress.currentItem"
+  />
+  
+  <!-- 主应用 -->
+  <div v-else>
     <HeaderBar />
     <div class="main-layout" :class="{ 'no-detail': !showDetailPanel, 'nav-collapsed': navCollapsed }">
       <SideNav />
       <main class="center">
-        <!-- 加载中状态 -->
-        <div v-if="isLoading" class="loading-page">
-          <div class="loading-spinner"></div>
-          <p>正在加载数据...</p>
-        </div>
-        
         <!-- 新页面 -->
-        <DataPage v-else-if="currentPage === 'data'" />
+        <DataPage v-if="currentPage === 'data'" />
         <ElementPage v-else-if="currentPage === 'element'" />
         <SplitPage v-else-if="currentPage === 'split'" />
         <RulePage v-else-if="currentPage === 'rule'" />
@@ -112,34 +127,6 @@ onMounted(async () => {
   height: 100%;
   color: var(--text2);
   font-size: 16px;
-}
-
-.loading-page {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  height: 100%;
-  color: var(--text2);
-  gap: 16px;
-}
-
-.loading-spinner {
-  width: 40px;
-  height: 40px;
-  border: 3px solid var(--border);
-  border-top-color: var(--primary);
-  border-radius: 50%;
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
-
-.loading-page p {
-  font-size: 14px;
-  color: var(--text3);
 }
 
 @media (max-width: 900px) {
