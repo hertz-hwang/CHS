@@ -1152,7 +1152,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
         <div class="config-item">
           <div class="config-label">
             <span class="config-name">最大码长</span>
-            <span class="config-desc">达到此码长后自动上屏，无需空格确认。设为 -1 表示所有码长都需要空格确认</span>
+            <span class="config-desc">达到此码长后自动上屏，无需空格确认。设为 无 表示所有码长都不需要空格确认</span>
           </div>
           <div class="config-value">
             <div class="max-code-control">
