@@ -4,6 +4,7 @@ import { useEngine } from '../../composables/useEngine'
 import { codeToString } from '../../engine/config'
 import ElementPicker from '../element/ElementPicker.vue'
 import ExportRootsImage from '../element/ExportRootsImage.vue'
+import EquivalentRootsModal from '../element/EquivalentRootsModal.vue'
 
 const {
   engine, toast, refreshStats, rootsVersion, saveCurrentConfig,
@@ -430,22 +431,8 @@ function openEquivModal() {
       </div>
     </div>
 
-    <!-- 等效字根设置弹窗（简化版，后续可扩展） -->
-    <div v-if="showEquivModal" class="modal-overlay" @click="showEquivModal = false">
-      <div class="modal-content" @click.stop>
-        <div class="modal-header">
-          <h3>等效字根设置</h3>
-          <button class="btn-close" @click="showEquivModal = false">×</button>
-        </div>
-        <div class="modal-body">
-          <p class="modal-desc">等效字根设置功能可在「字根管理」页面中使用。</p>
-          <p class="modal-desc">此处暂未实现完整功能，请使用原页面的等效字根设置。</p>
-        </div>
-        <div class="modal-footer">
-          <button class="btn btn-primary" @click="showEquivModal = false">关闭</button>
-        </div>
-      </div>
-    </div>
+    <!-- 等效字根设置弹窗 -->
+    <EquivalentRootsModal :visible="showEquivModal" @close="showEquivModal = false" />
   </div>
 </template>
 

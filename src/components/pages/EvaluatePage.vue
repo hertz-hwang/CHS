@@ -2482,9 +2482,11 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
 .page-input::-webkit-outer-spin-button,
 .page-input::-webkit-inner-spin-button {
   -webkit-appearance: none;
+  appearance: none;
   margin: 0;
 }
 .page-input[type=number] {
   -moz-appearance: textfield;
+  appearance: textfield;
 }
 </style>
