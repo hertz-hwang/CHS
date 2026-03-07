@@ -929,16 +929,18 @@ function getMaxCodeLength(result: EvaluationResult | null): number {
 
 // 判断是否显示4码列（最大码长 >= 4）
 const showCd4 = computed(() => {
-  const currentMax = getMaxCodeLength(evaluationResult.value)
-  const uploadedMax = getMaxCodeLength(uploadedResult.value)
-  return currentMax >= 4 || uploadedMax >= 4
+  // 根据当前活动标签页决定使用哪个结果
+  const result = activeTab.value === 'single' ? evaluationResult.value : uploadedResult.value
+  const maxLen = getMaxCodeLength(result)
+  return maxLen >= 4
 })
 
 // 判断是否显示5码列（最大码长 >= 5）
 const showCd5 = computed(() => {
-  const currentMax = getMaxCodeLength(evaluationResult.value)
-  const uploadedMax = getMaxCodeLength(uploadedResult.value)
-  return currentMax >= 5 || uploadedMax >= 5
+  // 根据当前活动标签页决定使用哪个结果
+  const result = activeTab.value === 'single' ? evaluationResult.value : uploadedResult.value
+  const maxLen = getMaxCodeLength(result)
+  return maxLen >= 5
 })
 
 // 可点击的列
@@ -2191,18 +2193,18 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
   color: white !important;
 }
 
-/* 出简重列使用红色字色 */
-.eval-table th:nth-child(7),
-.eval-table td:nth-child(7) {
+/* 出简重列使用红色字色（仅单字测评表格） */
+.eval-table:not(.word-eval-table) th:nth-child(7),
+.eval-table:not(.word-eval-table) td:nth-child(7) {
   color: #f43f5e !important;
   font-weight: 700;
 }
 
-.eval-table td:nth-child(7).clickable {
+.eval-table:not(.word-eval-table) td:nth-child(7).clickable {
   color: #f43f5e !important;
 }
 
-.eval-table td:nth-child(7).clickable:hover {
+.eval-table:not(.word-eval-table) td:nth-child(7).clickable:hover {
   background: linear-gradient(135deg, #f43f5e 0%, #ec4899 100%);
   color: white !important;
 }
@@ -2802,7 +2804,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
 
 .config-desc {
   font-size: 12px;
-  color: var(--text3);
+  color: var(--text);
   line-height: 1.5;
 }
 
@@ -3029,7 +3031,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
 .select-key-label {
   font-size: 12px;
   font-weight: 600;
-  color: var(--text3);
+  color: var(--text);
   min-width: 32px;
 }
 
@@ -3107,7 +3109,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
 
 .add-text {
   font-size: 12px;
-  color: var(--text3);
+  color: var(--text);
 }
 
 .select-keys-actions {
@@ -3120,7 +3122,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
 .btn-remove {
   padding: 4px 10px;
   font-size: 11px;
-  color: var(--text3);
+  color: var(--text);
   background: var(--bg);
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 6px;
