@@ -21,6 +21,43 @@ const KEYBOARD_ROWS = [
 // 左手键集合（用于计算左右手占比）
 const LEFT_HAND_KEYS = new Set([...`12345qwertasdfgzxcvb`])
 
+// 手指键位分配（标准指法）
+// 左小指(L5): ` 1 Q A Z
+// 左无名指(L4): 2 W S X
+// 左中指(L3): 3 E D C
+// 左食指(L2): 4 5 R T F G V B
+// 右食指(R2): 6 7 Y U H J N M
+// 右中指(R3): 8 I K ,
+// 右无名指(R4): 9 O L .
+// 右小指(R5): 0 - = P [ ] \ ; '
+const FINGER_KEYS: Record<string, string[]> = {
+  'L5': ['`', '1', 'q', 'a', 'z'],           // 左小指
+  'L4': ['2', 'w', 's', 'x'],                // 左无名指
+  'L3': ['3', 'e', 'd', 'c'],                // 左中指
+  'L2': ['4', '5', 'r', 't', 'f', 'g', 'v', 'b'], // 左食指
+  'T': [],                                    // 拇指（空格键）
+  'R2': ['6', '7', 'y', 'u', 'h', 'j', 'n', 'm'], // 右食指
+  'R3': ['8', 'i', 'k', ','],                // 右中指
+  'R4': ['9', 'o', 'l', '.'],                // 右无名指
+  'R5': ['0', '-', '=', 'p', '[', ']', '\\', ';', "'"], // 右小指
+}
+
+// 手指名称映射
+const FINGER_NAMES: Record<string, string> = {
+  'L5': '左小',
+  'L4': '左无',
+  'L3': '左中',
+  'L2': '左食',
+  'T': '拇指',
+  'R2': '右食',
+  'R3': '右中',
+  'R4': '右无',
+  'R5': '右小',
+}
+
+// 手指顺序（从左到右）
+const FINGER_ORDER = ['L5', 'L4', 'L3', 'L2', 'T', 'R2', 'R3', 'R4', 'R5']
+
 // 计算相对使用率（百分比）
 const relativeUsage = computed(() => {
   let total = 0
@@ -95,6 +132,36 @@ const rightHandUsage = computed(() => {
     return total + spaceUsage / 2
   }
   return total
+})
+
+// 计算各手指使用占比
+const fingerUsage = computed(() => {
+  const result: Record<string, number> = {}
+  
+  for (const finger of FINGER_ORDER) {
+    const keys = FINGER_KEYS[finger]
+    let total = 0
+    
+    for (const key of keys) {
+      const normalizedKey = key.toLowerCase()
+      total += relativeUsage.value[normalizedKey] || 0
+    }
+    
+    result[finger] = total
+  }
+  
+  // 空格键由拇指按下
+  if (includeSpace.value) {
+    const spaceUsage = relativeUsage.value[' '] || 0
+    result['T'] = spaceUsage  // 拇指
+  }
+  
+  return result
+})
+
+// 获取手指使用占比的最大值（用于颜色渐变）
+const maxFingerUsage = computed(() => {
+  return Math.max(...Object.values(fingerUsage.value), 1)
 })
 
 // 获取键的颜色
@@ -217,6 +284,21 @@ function formatPercent(key: string): string {
           <div class="legend-gradient legend-gradient-space"></div>
         </div>
         <span class="legend-max">{{ spaceUsage.toFixed(1) }}%</span>
+      </div>
+    </div>
+    
+    <!-- 手指使用分布 -->
+    <div class="finger-distribution">
+      <div class="finger-title">手指使用分布</div>
+      <div class="finger-row">
+        <span
+          v-for="finger in FINGER_ORDER"
+          :key="finger"
+          class="finger-item"
+        >
+          <span class="finger-name">{{ FINGER_NAMES[finger] }}</span>
+          <span class="finger-percent">{{ fingerUsage[finger].toFixed(2) }}%</span>
+        </span>
       </div>
     </div>
   </div>
@@ -458,5 +540,47 @@ function formatPercent(key: string): string {
 
 .legend-max {
   text-align: right;
+}
+
+/* 手指使用分布 */
+.finger-distribution {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.finger-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 12px;
+}
+
+.finger-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 12px 24px;
+}
+
+.finger-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.finger-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.finger-percent {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text2);
+  font-family: 'SF Mono', 'Consolas', monospace;
 }
 </style>
