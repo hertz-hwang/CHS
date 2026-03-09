@@ -57,6 +57,8 @@ const FINGER_NAMES: Record<string, string> = {
 
 // 手指顺序（从左到右）
 const FINGER_ORDER = ['L5', 'L4', 'L3', 'L2', 'T', 'R2', 'R3', 'R4', 'R5']
+const LEFT_FINGERS = ['L2', 'L3', 'L4', 'L5']
+const RIGHT_FINGERS = ['R2', 'R3', 'R4', 'R5']
 
 // 计算相对使用率（百分比）
 const relativeUsage = computed(() => {
@@ -164,6 +166,39 @@ const maxFingerUsage = computed(() => {
   return Math.max(...Object.values(fingerUsage.value), 1)
 })
 
+function getFingerBaseHue(finger: string): number {
+  if (finger.startsWith('L')) return 208
+  if (finger === 'T') return 162
+  return 266
+}
+
+function buildUsageStyle(hue: number, usage: number, max: number): Record<string, string> {
+  const ratio = max > 0 ? usage / max : 0
+  const intensity = Math.pow(Math.min(ratio, 1), 0.7)
+  const saturation = 68 + intensity * 18
+  const accentLightness = 46 - intensity * 10
+
+  return {
+    '--usage-accent': `hsl(${hue}, ${saturation}%, ${accentLightness}%)`,
+    '--usage-bg-start': `hsla(${hue}, ${saturation}%, ${95 - intensity * 6}%, 0.95)`,
+    '--usage-bg-end': `hsla(${hue}, ${saturation}%, ${91 - intensity * 8}%, 0.9)`,
+    '--usage-border': `hsla(${hue}, ${saturation}%, ${70 - intensity * 14}%, ${0.28 + intensity * 0.2})`,
+    '--usage-chip-bg': `hsla(${hue}, ${saturation}%, ${90 - intensity * 12}%, ${0.42 + intensity * 0.18})`,
+    '--usage-shadow': `hsla(${hue}, ${saturation}%, 52%, ${0.12 + intensity * 0.12})`,
+  }
+}
+
+function getFingerStyle(finger: string): Record<string, string> {
+  return buildUsageStyle(getFingerBaseHue(finger), fingerUsage.value[finger] || 0, maxFingerUsage.value)
+}
+
+function getHandStyle(hand: 'left' | 'right'): Record<string, string> {
+  const usage = hand === 'left' ? leftHandUsage.value : rightHandUsage.value
+  const max = Math.max(leftHandUsage.value, rightHandUsage.value, 1)
+  const hue = hand === 'left' ? 208 : 266
+  return buildUsageStyle(hue, usage, max)
+}
+
 // 获取键的颜色
 function getKeyColor(key: string): string {
   const normalizedKey = key.toLowerCase()
@@ -250,17 +285,17 @@ function formatPercent(key: string): string {
           title="空格"
         >
           <div class="space-content">
-            <div class="hand-stats left-stats">
-              <span class="hand-label">左手</span>
-              <span class="hand-percent">{{ leftHandUsage.toFixed(2) }}%</span>
+            <div class="usage-card hand-stats left-stats" :style="getHandStyle('left')">
+              <span class="usage-name">左手</span>
+              <span class="usage-percent">{{ leftHandUsage.toFixed(2) }}%</span>
             </div>
             <div class="space-center">
               <span class="key-label">空格</span>
               <span class="key-usage">{{ formatPercent(' ') }}</span>
             </div>
-            <div class="hand-stats right-stats">
-              <span class="hand-label">右手</span>
-              <span class="hand-percent">{{ rightHandUsage.toFixed(2) }}%</span>
+            <div class="usage-card hand-stats right-stats" :style="getHandStyle('right')">
+              <span class="usage-name">右手</span>
+              <span class="usage-percent">{{ rightHandUsage.toFixed(2) }}%</span>
             </div>
           </div>
         </div>
@@ -290,15 +325,36 @@ function formatPercent(key: string): string {
     <!-- 手指使用分布 -->
     <div class="finger-distribution">
       <div class="finger-title">手指使用分布</div>
-      <div class="finger-row">
-        <span
-          v-for="finger in FINGER_ORDER"
-          :key="finger"
-          class="finger-item"
+      <div class="finger-layout">
+        <div
+          class="usage-card finger-item finger-thumb"
+          :style="getFingerStyle('T')"
         >
-          <span class="finger-name">{{ FINGER_NAMES[finger] }}</span>
-          <span class="finger-percent">{{ fingerUsage[finger].toFixed(2) }}%</span>
-        </span>
+          <span class="usage-name">{{ FINGER_NAMES.T }}</span>
+          <span class="usage-percent">{{ fingerUsage.T.toFixed(2) }}%</span>
+        </div>
+        <div class="finger-hand-row">
+          <div
+            v-for="finger in LEFT_FINGERS"
+            :key="finger"
+            class="usage-card finger-item"
+            :style="getFingerStyle(finger)"
+          >
+            <span class="usage-name">{{ FINGER_NAMES[finger] }}</span>
+            <span class="usage-percent">{{ fingerUsage[finger].toFixed(2) }}%</span>
+          </div>
+        </div>
+        <div class="finger-hand-row">
+          <div
+            v-for="finger in RIGHT_FINGERS"
+            :key="finger"
+            class="usage-card finger-item"
+            :style="getFingerStyle(finger)"
+          >
+            <span class="usage-name">{{ FINGER_NAMES[finger] }}</span>
+            <span class="usage-percent">{{ fingerUsage[finger].toFixed(2) }}%</span>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -398,29 +454,14 @@ function formatPercent(key: string): string {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
   width: 100%;
   height: 100%;
 }
 
 .hand-stats {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  min-width: 50px;
-}
-
-.hand-stats .hand-label {
-  font-size: 9px;
-  opacity: 0.8;
-  color: inherit;
-}
-
-.hand-stats .hand-percent {
-  font-size: 10px;
-  opacity: 0.8;
-  font-weight: 600;
-  color: inherit;
+  min-width: 92px;
+  flex: 0 0 auto;
 }
 
 .space-center {
@@ -429,6 +470,7 @@ function formatPercent(key: string): string {
   align-items: center;
   justify-content: center;
   flex: 1;
+  min-width: 0;
 }
 
 .space-center .key-label {
@@ -449,36 +491,48 @@ function formatPercent(key: string): string {
   margin-top: 4px;
 }
 
-.hand-usage {
+.usage-card {
   display: flex;
-  flex-direction: column;
   align-items: center;
-  justify-content: center;
-  padding: 4px 12px;
-  background: var(--bg3);
-  border-radius: 6px;
-  min-width: 60px;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 8px 6px 12px;
+  min-width: 0;
+  border-radius: 999px;
+  border: 1px solid var(--usage-border);
+  background:
+    linear-gradient(135deg, var(--usage-bg-start), var(--usage-bg-end)),
+    var(--bg2);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.45),
+    0 10px 24px -18px var(--usage-shadow);
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
 }
 
-.hand-label {
-  font-size: 11px;
-  color: var(--text2);
-  font-weight: 500;
+.usage-card:hover {
+  transform: translateY(-1px);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.5),
+    0 14px 26px -18px var(--usage-shadow);
 }
 
-.hand-percent {
+.usage-name {
   font-size: 13px;
-  color: var(--text);
-  font-weight: 600;
+  font-weight: 500;
+  color: var(--text2);
+}
+
+.usage-percent {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--usage-accent);
   font-family: 'SF Mono', 'Consolas', monospace;
-}
-
-.left-hand {
-  border-left: 3px solid hsl(200, 70%, 55%);
-}
-
-.right-hand {
-  border-right: 3px solid hsl(200, 70%, 55%);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--usage-chip-bg);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4);
 }
 
 .legend-container {
@@ -556,31 +610,86 @@ function formatPercent(key: string): string {
   margin-bottom: 12px;
 }
 
-.finger-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: center;
-  gap: 12px 24px;
+.finger-layout {
+  display: grid;
+  grid-template-columns: minmax(100px, 120px) minmax(0, 1fr);
+  grid-template-rows: repeat(2, auto);
+  gap: 10px 14px;
+  align-items: stretch;
 }
 
 .finger-item {
-  display: flex;
-  align-items: center;
-  gap: 6px;
+  width: 100%;
   white-space: nowrap;
 }
 
-.finger-name {
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--text);
+.finger-thumb {
+  grid-row: 1 / span 2;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 12px 14px;
+  border-radius: 18px;
 }
 
-.finger-percent {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text2);
-  font-family: 'SF Mono', 'Consolas', monospace;
+.finger-thumb .usage-name {
+  font-size: 14px;
+}
+
+.finger-thumb .usage-percent {
+  font-size: 15px;
+  padding-inline: 10px;
+}
+
+.finger-hand-row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px 12px;
+}
+
+@media (max-width: 720px) {
+  .key-space {
+    width: 100%;
+    max-width: none;
+    min-width: 0;
+    height: auto;
+    padding: 10px 12px;
+  }
+
+  .space-content {
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  .space-center {
+    order: -1;
+    width: 100%;
+  }
+
+  .hand-stats {
+    min-width: 0;
+    flex: 1 1 140px;
+  }
+
+  .finger-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .finger-thumb {
+    grid-row: auto;
+    flex-direction: row;
+    align-items: center;
+    border-radius: 999px;
+    padding: 6px 8px 6px 12px;
+  }
+
+  .finger-thumb .usage-name,
+  .finger-thumb .usage-percent {
+    font-size: 13px;
+  }
+
+  .finger-hand-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 </style>
