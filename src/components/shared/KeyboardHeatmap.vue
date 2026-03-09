@@ -44,15 +44,15 @@ const FINGER_KEYS: Record<string, string[]> = {
 
 // 手指名称映射
 const FINGER_NAMES: Record<string, string> = {
-  'L5': '左小',
-  'L4': '左无',
-  'L3': '左中',
-  'L2': '左食',
+  'L5': '小指',
+  'L4': '无名',
+  'L3': '中指',
+  'L2': '食指',
   'T': '拇指',
-  'R2': '右食',
-  'R3': '右中',
-  'R4': '右无',
-  'R5': '右小',
+  'R2': '食指',
+  'R3': '中指',
+  'R4': '无名',
+  'R5': '小指',
 }
 
 // 手指顺序（从左到右）
@@ -166,12 +166,6 @@ const maxFingerUsage = computed(() => {
   return Math.max(...Object.values(fingerUsage.value), 1)
 })
 
-function getFingerBaseHue(finger: string): number {
-  if (finger.startsWith('L')) return 208
-  if (finger === 'T') return 162
-  return 266
-}
-
 function buildUsageStyle(hue: number, usage: number, max: number): Record<string, string> {
   const ratio = max > 0 ? usage / max : 0
   const intensity = Math.pow(Math.min(ratio, 1), 0.7)
@@ -189,14 +183,28 @@ function buildUsageStyle(hue: number, usage: number, max: number): Record<string
 }
 
 function getFingerStyle(finger: string): Record<string, string> {
-  return buildUsageStyle(getFingerBaseHue(finger), fingerUsage.value[finger] || 0, maxFingerUsage.value)
+  const usage = fingerUsage.value[finger] || 0
+  const ratio = maxFingerUsage.value > 0 ? usage / maxFingerUsage.value : 0
+  const intensity = Math.pow(Math.min(ratio, 1), 0.4)
+  const isThumb = finger === 'T'
+  const hue = isThumb ? 155 : 214
+  const saturation = isThumb ? 76 + intensity * 14 : 60 + intensity * 22
+  const accentLightness = isThumb ? 44 - intensity * 12 : 58 - intensity * 28
+
+  return {
+    '--usage-accent': `hsl(${hue}, ${saturation}%, ${accentLightness}%)`,
+    '--usage-bg-start': `hsla(${hue}, ${saturation}%, ${98 - intensity * 14}%, 0.98)`,
+    '--usage-bg-end': `hsla(${hue}, ${saturation}%, ${94 - intensity * 24}%, 0.94)`,
+    '--usage-border': `hsla(${hue}, ${saturation}%, ${82 - intensity * 30}%, ${0.22 + intensity * 0.28})`,
+    '--usage-chip-bg': `hsla(${hue}, ${saturation}%, ${95 - intensity * 30}%, ${0.4 + intensity * 0.24})`,
+    '--usage-shadow': `hsla(${hue}, ${saturation}%, 46%, ${0.08 + intensity * 0.2})`,
+  }
 }
 
 function getHandStyle(hand: 'left' | 'right'): Record<string, string> {
   const usage = hand === 'left' ? leftHandUsage.value : rightHandUsage.value
   const max = Math.max(leftHandUsage.value, rightHandUsage.value, 1)
-  const hue = hand === 'left' ? 208 : 266
-  return buildUsageStyle(hue, usage, max)
+  return buildUsageStyle(210, usage, max)
 }
 
 // 获取键的颜色
@@ -248,6 +256,30 @@ function getTextColor(key: string): string {
   return intensity > 0.5 ? 'white' : 'var(--text)'
 }
 
+function getKeyUsageStyle(key: string): Record<string, string> {
+  const normalizedKey = key.toLowerCase()
+  const usage = relativeUsage.value[normalizedKey] || 0
+  const max = normalizedKey === ' ' ? Math.max(spaceUsage.value, 1) : maxUsage.value
+  const ratio = max > 0 ? usage / max : 0
+  const intensity = Math.pow(Math.min(ratio, 1), 0.45)
+  const isSpace = normalizedKey === ' '
+  const hue = isSpace ? 172 : 210
+  const saturation = isSpace ? 36 + intensity * 46 : 34 + intensity * 54
+  const bgStartLightness = isSpace ? 98 - intensity * 16 : 98 - intensity * 18
+  const bgEndLightness = isSpace ? 94 - intensity * 30 : 94 - intensity * 34
+  const chipTextColor = bgEndLightness <= 67 ? 'rgba(255, 255, 255, 0.97)' : 'rgba(15, 23, 42, 0.92)'
+  const highlightAlpha = chipTextColor.startsWith('rgba(255, 255, 255') ? 0.16 : 0.38
+
+  return {
+    '--key-chip-color': chipTextColor,
+    '--key-chip-bg-start': `hsla(${hue}, ${saturation}%, ${bgStartLightness}%, ${0.92 + intensity * 0.04})`,
+    '--key-chip-bg-end': `hsla(${hue}, ${saturation}%, ${bgEndLightness}%, ${0.9 + intensity * 0.06})`,
+    '--key-chip-border': `hsla(${hue}, ${saturation}%, ${84 - intensity * 28}%, ${0.34 + intensity * 0.24})`,
+    '--key-chip-shadow': `hsla(${hue}, ${saturation}%, ${40 - intensity * 6}%, ${0.08 + intensity * 0.1})`,
+    '--key-chip-highlight': `rgba(255, 255, 255, ${highlightAlpha})`,
+  }
+}
+
 // 格式化百分比（保留2位小数）
 function formatPercent(key: string): string {
   const usage = relativeUsage.value[key.toLowerCase()] || 0
@@ -271,7 +303,7 @@ function formatPercent(key: string): string {
           :title="`${key}: ${formatPercent(key)}`"
         >
           <span class="key-label">{{ key }}</span>
-          <span class="key-usage">{{ formatPercent(key) }}</span>
+          <span class="key-usage" :style="getKeyUsageStyle(key)">{{ formatPercent(key) }}</span>
         </div>
       </div>
       <!-- 空格键行：在空格键内部左侧显示左手占比，右侧显示右手占比 -->
@@ -291,7 +323,7 @@ function formatPercent(key: string): string {
             </div>
             <div class="space-center">
               <span class="key-label">空格</span>
-              <span class="key-usage">{{ formatPercent(' ') }}</span>
+              <span class="key-usage" :style="getKeyUsageStyle(' ')">{{ formatPercent(' ') }}</span>
             </div>
             <div class="usage-card hand-stats right-stats" :style="getHandStyle('right')">
               <span class="usage-name">右手</span>
@@ -333,26 +365,32 @@ function formatPercent(key: string): string {
           <span class="usage-name">{{ FINGER_NAMES.T }}</span>
           <span class="usage-percent">{{ fingerUsage.T.toFixed(2) }}%</span>
         </div>
-        <div class="finger-hand-row">
-          <div
-            v-for="finger in LEFT_FINGERS"
-            :key="finger"
-            class="usage-card finger-item"
-            :style="getFingerStyle(finger)"
-          >
-            <span class="usage-name">{{ FINGER_NAMES[finger] }}</span>
-            <span class="usage-percent">{{ fingerUsage[finger].toFixed(2) }}%</span>
+        <div class="finger-hand-section">
+          <div class="finger-hand-label">左手</div>
+          <div class="finger-hand-row">
+            <div
+              v-for="finger in LEFT_FINGERS"
+              :key="finger"
+              class="usage-card finger-item"
+              :style="getFingerStyle(finger)"
+            >
+              <span class="usage-name">{{ FINGER_NAMES[finger] }}</span>
+              <span class="usage-percent">{{ fingerUsage[finger].toFixed(2) }}%</span>
+            </div>
           </div>
         </div>
-        <div class="finger-hand-row">
-          <div
-            v-for="finger in RIGHT_FINGERS"
-            :key="finger"
-            class="usage-card finger-item"
-            :style="getFingerStyle(finger)"
-          >
-            <span class="usage-name">{{ FINGER_NAMES[finger] }}</span>
-            <span class="usage-percent">{{ fingerUsage[finger].toFixed(2) }}%</span>
+        <div class="finger-hand-section">
+          <div class="finger-hand-label">右手</div>
+          <div class="finger-hand-row">
+            <div
+              v-for="finger in RIGHT_FINGERS"
+              :key="finger"
+              class="usage-card finger-item"
+              :style="getFingerStyle(finger)"
+            >
+              <span class="usage-name">{{ FINGER_NAMES[finger] }}</span>
+              <span class="usage-percent">{{ fingerUsage[finger].toFixed(2) }}%</span>
+            </div>
           </div>
         </div>
       </div>
@@ -418,6 +456,9 @@ function formatPercent(key: string): string {
   flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 3px;
+  padding: 4px 2px;
+  box-sizing: border-box;
   border-radius: 6px;
   font-family: 'SF Mono', 'Consolas', monospace;
   transition: transform 0.15s ease;
@@ -433,11 +474,28 @@ function formatPercent(key: string): string {
 .key-label {
   font-size: clamp(10px, 2vw, 14px);
   font-weight: 600;
+  line-height: 1;
 }
 
 .key-usage {
-  font-size: clamp(8px, 1.5vw, 10px);
-  opacity: 0.8;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  max-width: calc(100% - 2px);
+  padding: 2px 4px;
+  border-radius: 999px;
+  border: 1px solid var(--key-chip-border);
+  background: linear-gradient(180deg, var(--key-chip-bg-start), var(--key-chip-bg-end));
+  box-shadow:
+    inset 0 1px 0 var(--key-chip-highlight),
+    0 4px 10px -8px var(--key-chip-shadow);
+  color: var(--key-chip-color);
+  font-size: clamp(7px, 1.35vw, 9px);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+  line-height: 1;
+  white-space: nowrap;
 }
 
 .key-space {
@@ -480,7 +538,7 @@ function formatPercent(key: string): string {
 
 .space-center .key-usage {
   font-size: 10px;
-  opacity: 0.8;
+  padding: 3px 8px;
 }
 
 .space-row {
@@ -612,7 +670,7 @@ function formatPercent(key: string): string {
 
 .finger-layout {
   display: grid;
-  grid-template-columns: minmax(100px, 120px) minmax(0, 1fr);
+  grid-template-columns: minmax(100px, 120px) 48px minmax(0, 1fr);
   grid-template-rows: repeat(2, auto);
   gap: 10px 14px;
   align-items: stretch;
@@ -624,6 +682,7 @@ function formatPercent(key: string): string {
 }
 
 .finger-thumb {
+  grid-column: 1;
   grid-row: 1 / span 2;
   flex-direction: column;
   align-items: flex-start;
@@ -639,6 +698,22 @@ function formatPercent(key: string): string {
 .finger-thumb .usage-percent {
   font-size: 15px;
   padding-inline: 10px;
+}
+
+.finger-hand-section {
+  display: contents;
+}
+
+.finger-hand-label {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  width: 48px;
+  min-width: 48px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text3);
+  letter-spacing: 0.08em;
 }
 
 .finger-hand-row {
@@ -676,6 +751,7 @@ function formatPercent(key: string): string {
   }
 
   .finger-thumb {
+    grid-column: auto;
     grid-row: auto;
     flex-direction: row;
     align-items: center;
@@ -686,6 +762,17 @@ function formatPercent(key: string): string {
   .finger-thumb .usage-name,
   .finger-thumb .usage-percent {
     font-size: 13px;
+  }
+
+  .finger-hand-section {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .finger-hand-label {
+    width: auto;
+    min-width: 0;
   }
 
   .finger-hand-row {
