@@ -689,6 +689,30 @@ export class CharsHijack {
     return (rootCode.main || '') + (rootCode.sub || '') + (rootCode.supplement || '')
   }
 
+  private _normalizePinyin(py: string): string {
+    // 仅保留字母，去掉声调数字及其它符号（如 "lü4" -> "lü"）
+    return py.toLowerCase().replace(/[^a-züv]/g, '')
+  }
+
+  private _extractPinyinPart(ch: string, part: 'first_letter' | 'last_letter' | 'initial' | 'final'): string {
+    const pyList = this.getPinyinList(ch)
+    if (pyList.length === 0) return ''
+    const firstSyllable = pyList[0].py.split(/\s+/)[0] || ''
+    const py = this._normalizePinyin(firstSyllable)
+    if (!py) return ''
+
+    if (part === 'first_letter') return py[0] || ''
+    if (part === 'last_letter') return py[py.length - 1] || ''
+
+    const initials = ['zh', 'ch', 'sh', 'b', 'p', 'm', 'f', 'd', 't', 'n', 'l', 'g', 'k', 'h', 'j', 'q', 'x', 'r', 'z', 'c', 's', 'y', 'w']
+    for (const initial of initials) {
+      if (py.startsWith(initial)) {
+        return part === 'initial' ? initial : py.slice(initial.length)
+      }
+    }
+    return part === 'initial' ? '' : py
+  }
+
   // 根据取码规则计算单字编码（公共方法）
   calculateCharCode(char: string): string {
     const rules = this.codeRules
@@ -722,35 +746,40 @@ export class CharsHijack {
           break
         }
       } else if (node.type === 'pick') {
-        const rootIdx = node.rootIndex || 1
-        const codeIdx = node.codeIndex || 1
-        
-        // 计算实际字根索引和码位索引
-        let actualRootIdx: number
-        let adjustedCodeIdx: number = codeIdx
-        
-        if (rootIdx === -1) {
-          actualRootIdx = roots.length - 1
-        } else if (rootIdx > roots.length) {
-          actualRootIdx = roots.length - 1
-          adjustedCodeIdx = codeIdx + (rootIdx - roots.length)
+        if (node.pickType === 'pinyin') {
+          const part = node.pinyinPart || 'first_letter'
+          code += this._extractPinyinPart(char, part)
         } else {
-          actualRootIdx = rootIdx - 1
-        }
-        
-        if (actualRootIdx >= 0 && actualRootIdx < roots.length) {
-          const root = roots[actualRootIdx]
-          const fullCode = this.getRootFullCode(root)
-          
-          if (fullCode) {
-            const actualCodeIdx = adjustedCodeIdx === -1 ? fullCode.length - 1 : adjustedCodeIdx - 1
-            
-            if (actualCodeIdx >= 0 && actualCodeIdx < fullCode.length) {
-              code += fullCode[actualCodeIdx]
+          const rootIdx = node.rootIndex || 1
+          const codeIdx = node.codeIndex || 1
+
+          // 计算实际字根索引和码位索引
+          let actualRootIdx: number
+          let adjustedCodeIdx: number = codeIdx
+
+          if (rootIdx === -1) {
+            actualRootIdx = roots.length - 1
+          } else if (rootIdx > roots.length) {
+            actualRootIdx = roots.length - 1
+            adjustedCodeIdx = codeIdx + (rootIdx - roots.length)
+          } else {
+            actualRootIdx = rootIdx - 1
+          }
+
+          if (actualRootIdx >= 0 && actualRootIdx < roots.length) {
+            const root = roots[actualRootIdx]
+            const fullCode = this.getRootFullCode(root)
+
+            if (fullCode) {
+              const actualCodeIdx = adjustedCodeIdx === -1 ? fullCode.length - 1 : adjustedCodeIdx - 1
+
+              if (actualCodeIdx >= 0 && actualCodeIdx < fullCode.length) {
+                code += fullCode[actualCodeIdx]
+              }
             }
           }
         }
-        
+
         if (node.nextNode) {
           currentNodeId = node.nextNode
         } else {

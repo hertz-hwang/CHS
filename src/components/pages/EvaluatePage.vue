@@ -187,97 +187,39 @@ function getRootFullCode(root: string): string {
   return ''
 }
 
+function normalizePinyin(py: string): string {
+  return py.toLowerCase().replace(/[^a-züv]/g, '')
+}
+
+function extractPinyinPart(ch: string, part: 'first_letter' | 'last_letter' | 'initial' | 'final'): string {
+  const pyList = engine.getPinyinList(ch)
+  if (pyList.length === 0) return ''
+  const firstSyllable = pyList[0].py.split(/\s+/)[0] || ''
+  const py = normalizePinyin(firstSyllable)
+  if (!py) return ''
+
+  if (part === 'first_letter') return py[0] || ''
+  if (part === 'last_letter') return py[py.length - 1] || ''
+
+  const initials = ['zh', 'ch', 'sh', 'b', 'p', 'm', 'f', 'd', 't', 'n', 'l', 'g', 'k', 'h', 'j', 'q', 'x', 'r', 'z', 'c', 's', 'y', 'w']
+  for (const initial of initials) {
+    if (py.startsWith(initial)) {
+      return part === 'initial' ? initial : py.slice(initial.length)
+    }
+  }
+  return part === 'initial' ? '' : py
+}
+
 // 检查字是否有缺失（与编码页面逻辑一致）
 function isCharMissing(char: string): boolean {
-  const decomp = engine.decompose(char)
-  const roots = decomp.leaves
-  
-  if (!roots.length) return true
-  
-  for (const root of roots) {
-    const fullCode = getRootFullCode(root)
-    if (!fullCode) return true
-  }
-  
   const code = calculateCharCode(char)
-  if (!code) return true
-  
-  return false
+  return !code
 }
 
 // 根据用户定义的规则计算编码
 function calculateCharCode(char: string): string {
   configVersion.value
-  const rules = engine.getCodeRules()
-  if (rules.length < 2) return ''
-  
-  const hasActualRules = rules.some(r => r.type !== 'start' && r.type !== 'end')
-  if (!hasActualRules) return ''
-  
-  const decomp = engine.decompose(char)
-  const roots = decomp.leaves
-  if (!roots.length) return ''
-  
-  let code = ''
-  let currentNodeId = 'start'
-  const visited = new Set<string>()
-  const maxIterations = 100
-  
-  while (currentNodeId !== 'end' && !visited.has(currentNodeId) && visited.size < maxIterations) {
-    visited.add(currentNodeId)
-    const node = rules.find(r => r.id === currentNodeId)
-    if (!node) break
-    
-    if (node.type === 'start') {
-      if (node.nextNode) currentNodeId = node.nextNode
-      else break
-    } else if (node.type === 'pick') {
-      const rootIdx = node.rootIndex || 1
-      const codeIdx = node.codeIndex || 1
-      const actualRootIdx = rootIdx === -1 ? roots.length - 1 : rootIdx - 1
-      
-      if (actualRootIdx >= 0 && actualRootIdx < roots.length) {
-        const root = roots[actualRootIdx]
-        const fullCode = getRootFullCode(root)
-        if (fullCode) {
-          const actualCodeIdx = codeIdx === -1 ? fullCode.length - 1 : codeIdx - 1
-          if (actualCodeIdx >= 0 && actualCodeIdx < fullCode.length) {
-            code += fullCode[actualCodeIdx]
-          }
-        }
-      }
-      
-      if (node.nextNode) currentNodeId = node.nextNode
-      else break
-    } else if (node.type === 'condition') {
-      let conditionMet = false
-      
-      if (node.conditionType === 'root_exists') {
-        const idx = (node.conditionValue || 1) - 1
-        conditionMet = idx >= 0 && idx < roots.length
-      } else if (node.conditionType === 'root_has_code') {
-        const rootIdx = (node.conditionValue || 1) - 1
-        const codeIdx = (node.conditionCodeIndex || 1) - 1
-        if (rootIdx >= 0 && rootIdx < roots.length) {
-          const root = roots[rootIdx]
-          const fullCode = getRootFullCode(root)
-          conditionMet = codeIdx >= 0 && codeIdx < fullCode.length
-        }
-      } else if (node.conditionType === 'root_count') {
-        conditionMet = roots.length >= (node.conditionValue || 1)
-      }
-      
-      if (conditionMet && node.trueBranch) currentNodeId = node.trueBranch
-      else if (!conditionMet && node.falseBranch) currentNodeId = node.falseBranch
-      else break
-    } else if (node.type === 'end') {
-      break
-    } else {
-      break
-    }
-  }
-  
-  return code
+  return engine.calculateCharCode(char)
 }
 
 // 执行当前编码方案的测评
@@ -376,8 +318,6 @@ function calculateWordCode(word: string): string {
       else break
     } else if (node.type === 'pick') {
       const charIdx = node.charIndex || 1
-      const rootIdx = node.rootIndex || 1
-      const codeIdx = node.codeIndex || 1
 
       // 计算实际字索引
       let actualCharIdx: number
@@ -388,30 +328,37 @@ function calculateWordCode(word: string): string {
       } else {
         actualCharIdx = charIdx - 1
       }
-
-      const charRoots = charsRoots[actualCharIdx] || []
-
-      // 计算实际字根索引
-      let actualRootIdx: number
-      let adjustedCodeIdx: number = codeIdx
-
-      if (rootIdx === -1) {
-        actualRootIdx = charRoots.length - 1
-      } else if (rootIdx > charRoots.length) {
-        actualRootIdx = charRoots.length - 1
-        adjustedCodeIdx = codeIdx + (rootIdx - charRoots.length)
+      if (node.pickType === 'pinyin') {
+        const part = node.pinyinPart || 'first_letter'
+        const targetChar = word[actualCharIdx]
+        if (targetChar) code += extractPinyinPart(targetChar, part)
       } else {
-        actualRootIdx = rootIdx - 1
-      }
+        const rootIdx = node.rootIndex || 1
+        const codeIdx = node.codeIndex || 1
+        const charRoots = charsRoots[actualCharIdx] || []
 
-      if (actualRootIdx >= 0 && actualRootIdx < charRoots.length) {
-        const root = charRoots[actualRootIdx]
-        const fullCode = getRootFullCode(root)
+        // 计算实际字根索引
+        let actualRootIdx: number
+        let adjustedCodeIdx: number = codeIdx
 
-        if (fullCode) {
-          const actualCodeIdx = adjustedCodeIdx === -1 ? fullCode.length - 1 : adjustedCodeIdx - 1
-          if (actualCodeIdx >= 0 && actualCodeIdx < fullCode.length) {
-            code += fullCode[actualCodeIdx]
+        if (rootIdx === -1) {
+          actualRootIdx = charRoots.length - 1
+        } else if (rootIdx > charRoots.length) {
+          actualRootIdx = charRoots.length - 1
+          adjustedCodeIdx = codeIdx + (rootIdx - charRoots.length)
+        } else {
+          actualRootIdx = rootIdx - 1
+        }
+
+        if (actualRootIdx >= 0 && actualRootIdx < charRoots.length) {
+          const root = charRoots[actualRootIdx]
+          const fullCode = getRootFullCode(root)
+
+          if (fullCode) {
+            const actualCodeIdx = adjustedCodeIdx === -1 ? fullCode.length - 1 : adjustedCodeIdx - 1
+            if (actualCodeIdx >= 0 && actualCodeIdx < fullCode.length) {
+              code += fullCode[actualCodeIdx]
+            }
           }
         }
       }
@@ -448,18 +395,6 @@ function calculateWordCode(word: string): string {
 
 // 检查多字词是否缺失
 function isWordMissing(word: string): boolean {
-  for (const char of word) {
-    const decomp = engine.decompose(char)
-    const roots = decomp.leaves
-
-    if (!roots.length) return true
-
-    for (const root of roots) {
-      const fullCode = getRootFullCode(root)
-      if (!fullCode) return true
-    }
-  }
-
   const code = calculateWordCode(word)
   return !code
 }

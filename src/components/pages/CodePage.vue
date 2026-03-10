@@ -57,26 +57,34 @@ function getRootFullCode(root: string): string {
   return ''
 }
 
+function normalizePinyin(py: string): string {
+  return py.toLowerCase().replace(/[^a-züv]/g, '')
+}
+
+function extractPinyinPart(ch: string, part: 'first_letter' | 'last_letter' | 'initial' | 'final'): string {
+  const pyList = engine.getPinyinList(ch)
+  if (pyList.length === 0) return ''
+  const firstSyllable = pyList[0].py.split(/\s+/)[0] || ''
+  const py = normalizePinyin(firstSyllable)
+  if (!py) return ''
+
+  if (part === 'first_letter') return py[0] || ''
+  if (part === 'last_letter') return py[py.length - 1] || ''
+
+  const initials = ['zh', 'ch', 'sh', 'b', 'p', 'm', 'f', 'd', 't', 'n', 'l', 'g', 'k', 'h', 'j', 'q', 'x', 'r', 'z', 'c', 's', 'y', 'w']
+  for (const initial of initials) {
+    if (py.startsWith(initial)) {
+      return part === 'initial' ? initial : py.slice(initial.length)
+    }
+  }
+  return part === 'initial' ? '' : py
+}
+
 // 根据用户定义的规则计算单字编码
 function calculateCharCode(char: string): string {
   // 触发 configVersion 依赖，确保规则变更时重新计算
   configVersion.value
-  
-  const rules = engine.getCodeRules()
-  
-  // 如果没有规则或只有开始/结束节点（空配置），返回空
-  if (rules.length < 2) return ''
-  
-  // 检查是否只有开始和结束节点（空配置）
-  const hasActualRules = rules.some(r => r.type !== 'start' && r.type !== 'end')
-  if (!hasActualRules) return ''
-  
-  const decomp = engine.decompose(char)
-  const roots = decomp.leaves
-  
-  if (!roots.length) return ''
-  
-  return executeCodeRules(rules, [roots])
+  return engine.calculateCharCode(char)
 }
 
 // 执行编码规则（通用函数，支持多字词）
@@ -236,8 +244,6 @@ function calculateWordCodeWithRoots(word: string): { code: string; usedRoots: { 
       }
     } else if (node.type === 'pick') {
       const charIdx = node.charIndex || 1
-      const rootIdx = node.rootIndex || 1
-      const codeIdx = node.codeIndex || 1
       
       // 计算实际字索引
       let actualCharIdx: number
@@ -249,46 +255,54 @@ function calculateWordCodeWithRoots(word: string): { code: string; usedRoots: { 
         actualCharIdx = charIdx - 1
       }
       
-      const charRoots = charsRoots[actualCharIdx] || []
-      
-      // 计算实际字根索引和码位索引
-      // -1 表示末根，如果请求的字根索引超出范围，回退到末根并调整码位索引
-      let actualRootIdx: number
-      let adjustedCodeIdx: number = codeIdx // 调整后的码位索引（1-indexed）
-      
-      if (rootIdx === -1) {
-        actualRootIdx = charRoots.length - 1
-      } else if (rootIdx > charRoots.length) {
-        // 如果请求的字根不存在，回退到末根
-        actualRootIdx = charRoots.length - 1
-        // 调整码位索引：加上 (请求的字根索引 - 实际字根数) 的差值
-        // 例如：请求第2根首码，只有1根，则取第1根的第(1 + 2 - 1) = 第2码
-        adjustedCodeIdx = codeIdx + (rootIdx - charRoots.length)
+      if (node.pickType === 'pinyin') {
+        const part = node.pinyinPart || 'first_letter'
+        const targetChar = word[actualCharIdx]
+        if (targetChar) code += extractPinyinPart(targetChar, part)
       } else {
-        actualRootIdx = rootIdx - 1
-      }
-      
-      if (actualRootIdx >= 0 && actualRootIdx < charRoots.length) {
-        const root = charRoots[actualRootIdx]
-        const fullCode = getRootFullCode(root)
-        
-        // 计算实际码位索引（使用调整后的码位索引）
-        const actualCodeIdx = adjustedCodeIdx === -1 ? (fullCode ? fullCode.length - 1 : 0) : adjustedCodeIdx - 1
-        
-        // 记录使用的字根和码位索引（使用复合键去重，但保持顺序）
-        const key = `${actualCharIdx}-${actualRootIdx}-${actualCodeIdx}`
-        if (!usedRootsSet.has(key)) {
-          usedRootsSet.add(key)
-          usedRootsList.push({ 
-            charIndex: actualCharIdx, 
-            root, 
-            codeIndex: actualCodeIdx // 码位索引（0-indexed）
-          })
+        const rootIdx = node.rootIndex || 1
+        const codeIdx = node.codeIndex || 1
+        const charRoots = charsRoots[actualCharIdx] || []
+
+        // 计算实际字根索引和码位索引
+        // -1 表示末根，如果请求的字根索引超出范围，回退到末根并调整码位索引
+        let actualRootIdx: number
+        let adjustedCodeIdx: number = codeIdx // 调整后的码位索引（1-indexed）
+
+        if (rootIdx === -1) {
+          actualRootIdx = charRoots.length - 1
+        } else if (rootIdx > charRoots.length) {
+          // 如果请求的字根不存在，回退到末根
+          actualRootIdx = charRoots.length - 1
+          // 调整码位索引：加上 (请求的字根索引 - 实际字根数) 的差值
+          // 例如：请求第2根首码，只有1根，则取第1根的第(1 + 2 - 1) = 第2码
+          adjustedCodeIdx = codeIdx + (rootIdx - charRoots.length)
+        } else {
+          actualRootIdx = rootIdx - 1
         }
-        
-        if (fullCode) {
-          if (actualCodeIdx >= 0 && actualCodeIdx < fullCode.length) {
-            code += fullCode[actualCodeIdx]
+
+        if (actualRootIdx >= 0 && actualRootIdx < charRoots.length) {
+          const root = charRoots[actualRootIdx]
+          const fullCode = getRootFullCode(root)
+
+          // 计算实际码位索引（使用调整后的码位索引）
+          const actualCodeIdx = adjustedCodeIdx === -1 ? (fullCode ? fullCode.length - 1 : 0) : adjustedCodeIdx - 1
+
+          // 记录使用的字根和码位索引（使用复合键去重，但保持顺序）
+          const key = `${actualCharIdx}-${actualRootIdx}-${actualCodeIdx}`
+          if (!usedRootsSet.has(key)) {
+            usedRootsSet.add(key)
+            usedRootsList.push({
+              charIndex: actualCharIdx,
+              root,
+              codeIndex: actualCodeIdx // 码位索引（0-indexed）
+            })
+          }
+
+          if (fullCode) {
+            if (actualCodeIdx >= 0 && actualCodeIdx < fullCode.length) {
+              code += fullCode[actualCodeIdx]
+            }
           }
         }
       }
@@ -396,41 +410,14 @@ const currentItems = computed(() => {
 
 // 检查单字编码状态
 function getCharCodeStatus(char: string): '完整' | '缺失' {
-  const decomp = engine.decompose(char)
-  const roots = decomp.leaves
-  
-  if (!roots.length) return '缺失'
-  
-  for (const root of roots) {
-    const fullCode = getRootFullCode(root)
-    if (!fullCode) return '缺失'
-  }
-  
   const code = calculateCharCode(char)
-  if (!code) return '缺失'
-  
-  return '完整'
+  return code ? '完整' : '缺失'
 }
 
 // 检查多字词编码状态
 function getWordCodeStatus(word: string): '完整' | '缺失' {
-  // 检查每个字的字根是否都有编码
-  for (const char of word) {
-    const decomp = engine.decompose(char)
-    const roots = decomp.leaves
-    
-    if (!roots.length) return '缺失'
-    
-    for (const root of roots) {
-      const fullCode = getRootFullCode(root)
-      if (!fullCode) return '缺失'
-    }
-  }
-  
   const code = calculateWordCode(word)
-  if (!code) return '缺失'
-  
-  return '完整'
+  return code ? '完整' : '缺失'
 }
 
 // 获取编码状态（通用）
@@ -668,35 +655,41 @@ function calculateElementSequence(char: string): string[] {
         break
       }
     } else if (node.type === 'pick') {
-      const rootIdx = node.rootIndex || 1
-      const codeIdx = node.codeIndex || 1
-      
-      // 计算实际字根索引和码位索引
-      // -1 表示末根，如果请求的字根索引超出范围，回退到末根并调整码位索引
-      let actualRootIdx: number
-      let adjustedCodeIdx: number = codeIdx // 调整后的码位索引（1-indexed）
-      
-      if (rootIdx === -1) {
-        actualRootIdx = roots.length - 1
-      } else if (rootIdx > roots.length) {
-        // 如果请求的字根不存在，回退到末根
-        actualRootIdx = roots.length - 1
-        // 调整码位索引
-        adjustedCodeIdx = codeIdx + (rootIdx - roots.length)
+      if (node.pickType === 'pinyin') {
+        const part = node.pinyinPart || 'first_letter'
+        const symbol = part === 'last_letter' ? '末字母' : part === 'initial' ? '声母' : part === 'final' ? '韵母' : '首字母'
+        elements.push(`字音.${symbol}`)
       } else {
-        actualRootIdx = rootIdx - 1
-      }
-      
-      if (actualRootIdx >= 0 && actualRootIdx < roots.length) {
-        const root = roots[actualRootIdx]
-        const fullCode = getRootFullCode(root)
-        
-        // 计算实际码位索引（使用调整后的码位索引）
-        const actualCodeIdx = adjustedCodeIdx === -1 ? (fullCode ? fullCode.length - 1 : 0) : adjustedCodeIdx - 1
-        
-        if (fullCode && actualCodeIdx >= 0 && actualCodeIdx < fullCode.length) {
-          // 添加元素：字根 + 码位索引
-          elements.push(`${root}.${actualCodeIdx}`)
+        const rootIdx = node.rootIndex || 1
+        const codeIdx = node.codeIndex || 1
+
+        // 计算实际字根索引和码位索引
+        // -1 表示末根，如果请求的字根索引超出范围，回退到末根并调整码位索引
+        let actualRootIdx: number
+        let adjustedCodeIdx: number = codeIdx // 调整后的码位索引（1-indexed）
+
+        if (rootIdx === -1) {
+          actualRootIdx = roots.length - 1
+        } else if (rootIdx > roots.length) {
+          // 如果请求的字根不存在，回退到末根
+          actualRootIdx = roots.length - 1
+          // 调整码位索引
+          adjustedCodeIdx = codeIdx + (rootIdx - roots.length)
+        } else {
+          actualRootIdx = rootIdx - 1
+        }
+
+        if (actualRootIdx >= 0 && actualRootIdx < roots.length) {
+          const root = roots[actualRootIdx]
+          const fullCode = getRootFullCode(root)
+
+          // 计算实际码位索引（使用调整后的码位索引）
+          const actualCodeIdx = adjustedCodeIdx === -1 ? (fullCode ? fullCode.length - 1 : 0) : adjustedCodeIdx - 1
+
+          if (fullCode && actualCodeIdx >= 0 && actualCodeIdx < fullCode.length) {
+            // 添加元素：字根 + 码位索引
+            elements.push(`${root}.${actualCodeIdx}`)
+          }
         }
       }
       
@@ -783,8 +776,6 @@ function calculateWordElementSequence(word: string): string[] {
       }
     } else if (node.type === 'pick') {
       const charIdx = node.charIndex || 1
-      const rootIdx = node.rootIndex || 1
-      const codeIdx = node.codeIndex || 1
       
       // 计算实际字索引
       let actualCharIdx: number
@@ -796,29 +787,37 @@ function calculateWordElementSequence(word: string): string[] {
         actualCharIdx = charIdx - 1
       }
       
-      const charRoots = charsRoots[actualCharIdx] || []
-      
-      // 计算实际字根索引和码位索引
-      let actualRootIdx: number
-      let adjustedCodeIdx: number = codeIdx
-      
-      if (rootIdx === -1) {
-        actualRootIdx = charRoots.length - 1
-      } else if (rootIdx > charRoots.length) {
-        actualRootIdx = charRoots.length - 1
-        adjustedCodeIdx = codeIdx + (rootIdx - charRoots.length)
+      if (node.pickType === 'pinyin') {
+        const part = node.pinyinPart || 'first_letter'
+        const symbol = part === 'last_letter' ? '末字母' : part === 'initial' ? '声母' : part === 'final' ? '韵母' : '首字母'
+        elements.push(`${word[actualCharIdx] || '?'}.字音.${symbol}`)
       } else {
-        actualRootIdx = rootIdx - 1
-      }
-      
-      if (actualRootIdx >= 0 && actualRootIdx < charRoots.length) {
-        const root = charRoots[actualRootIdx]
-        const fullCode = getRootFullCode(root)
-        
-        const actualCodeIdx = adjustedCodeIdx === -1 ? (fullCode ? fullCode.length - 1 : 0) : adjustedCodeIdx - 1
-        
-        if (fullCode && actualCodeIdx >= 0 && actualCodeIdx < fullCode.length) {
-          elements.push(`${root}.${actualCodeIdx}`)
+        const rootIdx = node.rootIndex || 1
+        const codeIdx = node.codeIndex || 1
+        const charRoots = charsRoots[actualCharIdx] || []
+
+        // 计算实际字根索引和码位索引
+        let actualRootIdx: number
+        let adjustedCodeIdx: number = codeIdx
+
+        if (rootIdx === -1) {
+          actualRootIdx = charRoots.length - 1
+        } else if (rootIdx > charRoots.length) {
+          actualRootIdx = charRoots.length - 1
+          adjustedCodeIdx = codeIdx + (rootIdx - charRoots.length)
+        } else {
+          actualRootIdx = rootIdx - 1
+        }
+
+        if (actualRootIdx >= 0 && actualRootIdx < charRoots.length) {
+          const root = charRoots[actualRootIdx]
+          const fullCode = getRootFullCode(root)
+
+          const actualCodeIdx = adjustedCodeIdx === -1 ? (fullCode ? fullCode.length - 1 : 0) : adjustedCodeIdx - 1
+
+          if (fullCode && actualCodeIdx >= 0 && actualCodeIdx < fullCode.length) {
+            elements.push(`${root}.${actualCodeIdx}`)
+          }
         }
       }
       

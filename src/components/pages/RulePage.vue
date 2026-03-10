@@ -185,6 +185,7 @@ function addNodeFromTemplate(template: NodeTemplate) {
         id,
         type: 'pick',
         label: '取第1字第1根首码',
+        pickType: 'root',
         charIndex: 1,
         rootIndex: 1,
         codeIndex: 1,
@@ -194,6 +195,7 @@ function addNodeFromTemplate(template: NodeTemplate) {
         id,
         type: 'pick',
         label: '取第1根首码',
+        pickType: 'root',
         rootIndex: 1,
         codeIndex: 1,
       }
@@ -458,6 +460,9 @@ function onNodeClick(event: NodeMouseEvent) {
   const rule = currentRules.value.find(r => r.id === nodeId)
   if (rule && rule.type !== 'start' && rule.type !== 'end') {
     selectedRule.value = { ...rule }
+    if (selectedRule.value.type === 'pick' && !selectedRule.value.pickType) {
+      selectedRule.value.pickType = 'root'
+    }
   } else {
     selectedRule.value = null
   }
@@ -552,6 +557,13 @@ function getCodeLabel(codeIndex: number | undefined): string {
   return `第${codeIndex}码`
 }
 
+function getPinyinPartLabel(part: CodeRuleNode['pinyinPart']): string {
+  if (part === 'last_letter') return '末字母'
+  if (part === 'initial') return '声母'
+  if (part === 'final') return '韵母'
+  return '首字母'
+}
+
 function getRootLabel(rootIndex: number | undefined): string {
   if (rootIndex === undefined || rootIndex === null) return '第1根'
   if (rootIndex === -1) return '末根'
@@ -572,13 +584,21 @@ function onRuleChange() {
   if (selectedRule.value.type === 'pick') {
     if (activeTab.value === 'word') {
       const charLabel = getCharLabel(selectedRule.value.charIndex)
-      const rootLabel = getRootLabel(selectedRule.value.rootIndex)
-      const codeLabel = getCodeLabel(selectedRule.value.codeIndex)
-      selectedRule.value.label = `取${charLabel}${rootLabel}${codeLabel}`
+      if (selectedRule.value.pickType === 'pinyin') {
+        selectedRule.value.label = `取${charLabel}字音${getPinyinPartLabel(selectedRule.value.pinyinPart)}`
+      } else {
+        const rootLabel = getRootLabel(selectedRule.value.rootIndex)
+        const codeLabel = getCodeLabel(selectedRule.value.codeIndex)
+        selectedRule.value.label = `取${charLabel}${rootLabel}${codeLabel}`
+      }
     } else {
-      const rootLabel = getRootLabel(selectedRule.value.rootIndex)
-      const codeLabel = getCodeLabel(selectedRule.value.codeIndex)
-      selectedRule.value.label = `取${rootLabel}${codeLabel}`
+      if (selectedRule.value.pickType === 'pinyin') {
+        selectedRule.value.label = `取字音${getPinyinPartLabel(selectedRule.value.pinyinPart)}`
+      } else {
+        const rootLabel = getRootLabel(selectedRule.value.rootIndex)
+        const codeLabel = getCodeLabel(selectedRule.value.codeIndex)
+        selectedRule.value.label = `取${rootLabel}${codeLabel}`
+      }
     }
   } else if (selectedRule.value.type === 'condition') {
     if (activeTab.value === 'word') {
@@ -602,6 +622,16 @@ function onRuleChange() {
     currentRules.value[index] = { ...selectedRule.value }
     saveRules()
   }
+}
+
+function onPickTypeChange() {
+  if (!selectedRule.value || selectedRule.value.type !== 'pick') return
+  if (selectedRule.value.pickType === 'pinyin') {
+    selectedRule.value.pinyinPart = selectedRule.value.pinyinPart || 'first_letter'
+  } else {
+    selectedRule.value.pickType = 'root'
+  }
+  onRuleChange()
 }
 
 // ============ 保存规则 ============
@@ -801,6 +831,16 @@ onMounted(() => {
           <div class="edit-panel-body">
             <!-- 取码节点编辑 -->
             <template v-if="selectedRule.type === 'pick'">
+              <div class="form-row">
+                <label>取码类型</label>
+                <select
+                  v-model="selectedRule.pickType"
+                  @change="onPickTypeChange"
+                >
+                  <option value="root">字根</option>
+                  <option value="pinyin">字音</option>
+                </select>
+              </div>
               <!-- 多字词模式：显示字位置选择 -->
               <div v-if="activeTab === 'word'" class="form-row">
                 <label>字位置</label>
@@ -814,7 +854,7 @@ onMounted(() => {
                   <option :value="-2">末2字</option>
                 </select>
               </div>
-              <div class="form-row">
+              <div v-if="selectedRule.pickType !== 'pinyin'" class="form-row">
                 <label>字根位置</label>
                 <select v-model="selectedRule.rootIndex" @change="onRuleChange">
                   <option :value="1">第1根</option>
@@ -825,13 +865,22 @@ onMounted(() => {
                   <option :value="-1">末根</option>
                 </select>
               </div>
-              <div class="form-row">
+              <div v-if="selectedRule.pickType !== 'pinyin'" class="form-row">
                 <label>码位位置</label>
                 <select v-model="selectedRule.codeIndex" @change="onRuleChange">
                   <option :value="1">首码</option>
                   <option :value="2">次码</option>
                   <option :value="3">三码</option>
                   <option :value="-1">末码</option>
+                </select>
+              </div>
+              <div v-if="selectedRule.pickType === 'pinyin'" class="form-row">
+                <label>音素</label>
+                <select v-model="selectedRule.pinyinPart" @change="onRuleChange">
+                  <option value="first_letter">首字母</option>
+                  <option value="last_letter">末字母</option>
+                  <option value="initial">声母</option>
+                  <option value="final">韵母</option>
                 </select>
               </div>
             </template>

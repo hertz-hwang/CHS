@@ -36,6 +36,8 @@ export interface CodeRuleNode {
   id: string
   type: 'start' | 'end' | 'pick' | 'condition'
   label: string
+  pickType?: 'root' | 'pinyin' // 取码类型：字根 / 字音
+  pinyinPart?: 'first_letter' | 'last_letter' | 'initial' | 'final' // 字音取码音素
   rootIndex?: number
   codeIndex?: number
   charIndex?: number      // 多字词取码：第几个字（1-indexed）
@@ -225,6 +227,8 @@ export function exportConfig(config: UserConfig): string {
     lines.push(`label = "${codeRule.label}"`)
     if (codeRule.rootIndex !== undefined) lines.push(`rootIndex = ${codeRule.rootIndex}`)
     if (codeRule.codeIndex !== undefined) lines.push(`codeIndex = ${codeRule.codeIndex}`)
+    if (codeRule.pickType !== undefined) lines.push(`pickType = "${codeRule.pickType}"`)
+    if (codeRule.pinyinPart !== undefined) lines.push(`pinyinPart = "${codeRule.pinyinPart}"`)
     if (codeRule.charIndex !== undefined) lines.push(`charIndex = ${codeRule.charIndex}`)
     if (codeRule.nextNode !== undefined) lines.push(`nextNode = "${codeRule.nextNode}"`)
     if (codeRule.conditionType !== undefined) lines.push(`conditionType = "${codeRule.conditionType}"`)
@@ -247,6 +251,8 @@ export function exportConfig(config: UserConfig): string {
       lines.push(`label = "${codeRule.label}"`)
       if (codeRule.rootIndex !== undefined) lines.push(`rootIndex = ${codeRule.rootIndex}`)
       if (codeRule.codeIndex !== undefined) lines.push(`codeIndex = ${codeRule.codeIndex}`)
+      if (codeRule.pickType !== undefined) lines.push(`pickType = "${codeRule.pickType}"`)
+      if (codeRule.pinyinPart !== undefined) lines.push(`pinyinPart = "${codeRule.pinyinPart}"`)
       if (codeRule.charIndex !== undefined) lines.push(`charIndex = ${codeRule.charIndex}`)
       if (codeRule.nextNode !== undefined) lines.push(`nextNode = "${codeRule.nextNode}"`)
       if (codeRule.conditionType !== undefined) lines.push(`conditionType = "${codeRule.conditionType}"`)
