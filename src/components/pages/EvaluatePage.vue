@@ -693,6 +693,7 @@ function getWordWeightPercent(line: EvaluateWordLine, column: string): string {
 // 详情弹窗相关
 const showDetailModal = ref(false)
 const detailTitle = ref('')
+const detailColumn = ref('')
 const detailItems = ref<EvaluateHanziItem[]>([])
 const detailWordItems = ref<EvaluateWordItem[]>([])
 const isWordDetail = ref(false)
@@ -908,6 +909,7 @@ function handleCellClick(line: EvaluateLine, column: string, rangeLabel: string)
   if (items.length === 0) return
   
   detailTitle.value = `${rangeLabel} - ${COLUMN_NAMES[column] || column}（共 ${items.length} 字）`
+  detailColumn.value = column
   detailItems.value = items
   isWordDetail.value = false
   showDetailModal.value = true
@@ -1811,11 +1813,11 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                   <td>{{ (detailCurrentPage - 1) * detailPageSize + idx + 1 }}</td>
                   <td class="char-col">
                     {{ item.char }}
-                    <span v-if="item.primaryChar && item.primaryChar !== item.char" class="primary-char">({{ item.primaryChar }})</span>
+                    <span v-if="detailColumn === 'fullCollision' ? (item.fullPrimaryChar && item.fullPrimaryChar !== item.char) : (item.primaryChar && item.primaryChar !== item.char)" class="primary-char">({{ detailColumn === 'fullCollision' ? item.fullPrimaryChar : item.primaryChar }})</span>
                   </td>
-                  <td class="code-col">{{ item.code || '-' }}</td>
+                  <td class="code-col">{{ detailColumn === 'fullCollision' ? (item.longestCode || '-') : (item.code || '-') }}</td>
                   <td>{{ item.selectKey || '-' }}</td>
-                  <td>{{ item.collision > 1 ? item.collision : '-' }}</td>
+                  <td>{{ (detailColumn === 'fullCollision' ? item.fullCollision : item.collision) > 1 ? (detailColumn === 'fullCollision' ? item.fullCollision : item.collision) : '-' }}</td>
                   <td>{{ item.isLack || item.overKey > 0 ? '-' : fmt(item.ziEqCombo) }}</td>
                   <td>{{ item.isLack || item.overKey > 0 ? '-' : fmt(item.keyEqCombo) }}</td>
                   <td>{{ item.freq }}</td>

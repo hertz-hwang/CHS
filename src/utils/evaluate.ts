@@ -270,6 +270,7 @@ export interface EvaluateHanziItem {
   
   // 首选字（同编码下的首位候选字）
   primaryChar?: string
+  fullPrimaryChar?: string  // 全码重首选字
 }
 
 // 每一行的测评结果
@@ -454,11 +455,12 @@ export function evaluateScheme(
   
   // 构建编码到字的映射（用于找出首选字）
   const codeToChars = new Map<string, string[]>()
+  const fullCodeToChars = new Map<string, string[]>()
   for (let i = 0; i < sortedChars.length; i++) {
     const [char, freq] = sortedChars[i]
     const isMissing = missingSet?.has(char) ?? false
     if (isMissing) continue
-    
+
     let codes: string[] | undefined
     if (isArrayCodeMap) {
       codes = (codeMap as Map<string, string[]>).get(char)
@@ -466,19 +468,26 @@ export function evaluateScheme(
       const code = (codeMap as Map<string, string>).get(char)
       if (code) codes = [code]
     }
-    
+
     if (!codes || codes.length === 0) continue
-    
-    // 找到最短编码
+
+    // 找到最短编码和最长编码
     let shortestCode = codes[0]
+    let longestCode = codes[0]
     for (const code of codes) {
       if (code.length < shortestCode.length) shortestCode = code
+      if (code.length > longestCode.length) longestCode = code
     }
-    
+
     if (!codeToChars.has(shortestCode)) {
       codeToChars.set(shortestCode, [])
     }
     codeToChars.get(shortestCode)!.push(char)
+
+    if (!fullCodeToChars.has(longestCode)) {
+      fullCodeToChars.set(longestCode, [])
+    }
+    fullCodeToChars.get(longestCode)!.push(char)
   }
   
   for (const [start, end] of sections) {
@@ -566,6 +575,13 @@ export function evaluateScheme(
           primaryChar = charsWithSameCode[0]
         }
       }
+      let fullPrimaryChar: string | undefined
+      if (fullCollision > 1) {
+        const charsWithSameCode = fullCodeToChars.get(longestCode)
+        if (charsWithSameCode && charsWithSameCode.length > 0) {
+          fullPrimaryChar = charsWithSameCode[0]
+        }
+      }
       
       // 计算选重键
       let selectKey = ''
@@ -636,6 +652,7 @@ export function evaluateScheme(
         overKey,
         isLack: false,
         primaryChar,
+        fullPrimaryChar,
       }
       
       // 超标键位，跳过手感计算
