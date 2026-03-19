@@ -51,7 +51,7 @@ function parseRootsFromText(text: string): Set<string> {
   while (i < text.length) {
     if (text[i] === '{') {
       let end = text.indexOf('}', i)
-      if (end < 0) end = text.length - 1
+      if (end < 0) end = text.length
       roots.add(text.substring(i, end + 1))
       i = end + 1
     } else if (!/\s/.test(text[i])) {
@@ -303,19 +303,16 @@ export class CharsHijack {
       chars = [...this.charsets.get(name)!]
     } else {
       // 未指定字集时，返回所有有拆分的字符，并添加字根
-      chars = [...this.decomp.keys()]
+      const charSet = new Set(this.decomp.keys())
       // 确保所有字根也在列表中
       for (const root of this.roots) {
-        if (!chars.includes(root)) {
-          chars.push(root)
-        }
+        charSet.add(root)
       }
       // 确保所有有编码的字根也在列表中
       for (const root of this.rootCodes.keys()) {
-        if (!chars.includes(root)) {
-          chars.push(root)
-        }
+        charSet.add(root)
       }
+      chars = [...charSet]
     }
     return chars.sort()
   }
@@ -1004,7 +1001,7 @@ export class CharsHijack {
     }
     
     const sourceCodeChar = this.getRootCodeAt(source.root, source.codeIndex)
-    if (!sourceCodeChar) {
+    if (sourceCodeChar === undefined || sourceCodeChar === '') {
       console.warn(`Source root "${source.root}" has no code at index ${source.codeIndex}`)
       return false
     }
@@ -1030,24 +1027,24 @@ export class CharsHijack {
     const codeChars = targetFullCode.split('')
     
     while (codeChars.length <= target.codeIndex) {
-      codeChars.push('')
+      codeChars.push('\x00')
     }
-    
+
     codeChars[target.codeIndex] = sourceCodeChar
-    
+
     const newCode = codeChars.join('')
     const parsed = parseCode(newCode)
-    
-    this.rootCodes.set(target.root, { 
-      root: target.root, 
+
+    this.rootCodes.set(target.root, {
+      root: target.root,
       ...parsed,
-      codeEquivFrom: sourceRef 
+      codeEquivFrom: sourceRef
     })
-    
+
     this.codeEquivalences.set(targetRef, sourceRef)
     this.roots.add(target.root)
     this._cache.clear()
-    
+
     return true
   }
 
@@ -1116,7 +1113,7 @@ export class CharsHijack {
     if (!target || !source) return
     
     const sourceCodeChar = this.getRootCodeAt(source.root, source.codeIndex)
-    if (!sourceCodeChar) return
+    if (sourceCodeChar === undefined || sourceCodeChar === '') return
     
     let targetCode = this.rootCodes.get(target.root)
     if (!targetCode) {
@@ -1127,18 +1124,18 @@ export class CharsHijack {
     const codeChars = targetFullCode.split('')
     
     while (codeChars.length <= target.codeIndex) {
-      codeChars.push('')
+      codeChars.push('\x00')
     }
-    
+
     codeChars[target.codeIndex] = sourceCodeChar
-    
+
     const newCode = codeChars.join('')
     const parsed = parseCode(newCode)
-    
-    this.rootCodes.set(target.root, { 
-      root: target.root, 
+
+    this.rootCodes.set(target.root, {
+      root: target.root,
       ...parsed,
-      codeEquivFrom: sourceRef 
+      codeEquivFrom: sourceRef
     })
     this.roots.add(target.root)
   }

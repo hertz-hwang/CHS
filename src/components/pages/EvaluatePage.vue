@@ -297,8 +297,9 @@ function calculateWordCode(word: string): string {
   if (!hasActualRules) return ''
 
   // 获取每个字的字根
+  const chars = [...word]
   const charsRoots: string[][] = []
-  for (const char of word) {
+  for (const char of chars) {
     const decomp = engine.decompose(char)
     charsRoots.push(decomp.leaves)
   }
@@ -330,7 +331,7 @@ function calculateWordCode(word: string): string {
       }
       if (node.pickType === 'pinyin') {
         const part = node.pinyinPart || 'first_letter'
-        const targetChar = word[actualCharIdx]
+        const targetChar = chars[actualCharIdx]
         if (targetChar) code += extractPinyinPart(targetChar, part)
       } else {
         const rootIdx = node.rootIndex || 1
@@ -509,11 +510,12 @@ function parseWordRule(rule: string): RulePart[] {
 // 根据规则计算上传码表的词组编码
 function calculateUploadedWordCode(word: string, rule: string): string {
   if (!uploadedCodeMap.value) return ''
-  
+
   const parts = parseWordRule(rule)
-  const wordLen = word.length
+  const wordChars = [...word]
+  const wordLen = wordChars.length
   let code = ''
-  
+
   for (const part of parts) {
     // 计算实际的字索引
     let actualCharIdx: number
@@ -522,13 +524,13 @@ function calculateUploadedWordCode(word: string, rule: string): string {
     } else {
       actualCharIdx = part.charIndex
     }
-    
+
     // 检查字索引是否有效
     if (actualCharIdx < 0 || actualCharIdx >= wordLen) {
       continue
     }
-    
-    const char = word[actualCharIdx]
+
+    const char = wordChars[actualCharIdx]
     const charCodes = uploadedCodeMap.value.get(char)
     
     if (!charCodes || charCodes.length === 0) {

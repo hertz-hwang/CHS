@@ -59,7 +59,7 @@ export function parseIDS(s: string): IDSNode | null {
     }
     if (ch === '{') {
       let end = s.indexOf('}', pos)
-      if (end < 0) end = s.length - 1
+      if (end < 0) end = s.length
       const tok = s.substring(pos, end + 1)
       pos = end + 1
       return new IDSNode(tok)

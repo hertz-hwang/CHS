@@ -216,8 +216,9 @@ function calculateWordCodeWithRoots(word: string): { code: string; usedRoots: { 
   if (!hasActualRules) return { code: '', usedRoots: [] }
   
   // 获取每个字的字根
+  const chars = [...word]
   const charsRoots: string[][] = []
-  for (const char of word) {
+  for (const char of chars) {
     const decomp = engine.decompose(char)
     charsRoots.push(decomp.leaves)
   }
@@ -257,7 +258,7 @@ function calculateWordCodeWithRoots(word: string): { code: string; usedRoots: { 
       
       if (node.pickType === 'pinyin') {
         const part = node.pinyinPart || 'first_letter'
-        const targetChar = word[actualCharIdx]
+        const targetChar = chars[actualCharIdx]
         if (targetChar) code += extractPinyinPart(targetChar, part)
       } else {
         const rootIdx = node.rootIndex || 1
@@ -489,16 +490,17 @@ function getWordInfo(word: string) {
   const freq = engine.freq.get(word) || 0
   
   // 获取每个字的拆分（所有字根）
+  const wordChars = [...word]
   const allCharsRoots: string[][] = []
-  for (const char of word) {
+  for (const char of wordChars) {
     const decomp = engine.decompose(char)
     allCharsRoots.push(decomp.leaves)
   }
-  
+
   // 构建每个字的信息，显示被使用的字根及其码位索引
   const charInfos = []
   for (let i = 0; i < allCharsRoots.length; i++) {
-    const char = word[i]
+    const char = wordChars[i]
     const allRoots = allCharsRoots[i]
     
     // 获取该字被使用的字根（按使用顺序）
@@ -751,8 +753,9 @@ function calculateWordElementSequence(word: string): string[] {
   if (!hasActualRules) return []
   
   // 获取每个字的字根
+  const chars = [...word]
   const charsRoots: string[][] = []
-  for (const char of word) {
+  for (const char of chars) {
     const decomp = engine.decompose(char)
     charsRoots.push(decomp.leaves)
   }
@@ -790,7 +793,7 @@ function calculateWordElementSequence(word: string): string[] {
       if (node.pickType === 'pinyin') {
         const part = node.pinyinPart || 'first_letter'
         const symbol = part === 'last_letter' ? '末字母' : part === 'initial' ? '声母' : part === 'final' ? '韵母' : '首字母'
-        elements.push(`${word[actualCharIdx] || '?'}.字音.${symbol}`)
+        elements.push(`${chars[actualCharIdx] || '?'}.字音.${symbol}`)
       } else {
         const rootIdx = node.rootIndex || 1
         const codeIdx = node.codeIndex || 1

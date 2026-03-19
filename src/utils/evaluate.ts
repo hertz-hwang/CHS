@@ -294,8 +294,8 @@ export interface EvaluationResult {
 export function parseCodeTable(content: string, filename?: string): Map<string, string[]> {
   const codeMap = new Map<string, string[]>()
   
-  const isYaml = filename?.endsWith('.yaml') || filename?.endsWith('.yml') || 
-                 content.includes('---')
+  const isYaml = filename?.endsWith('.yaml') || filename?.endsWith('.yml') ||
+                 /^---\s*$/m.test(content)
   
   if (isYaml) {
     parseYamlCodeTable(content, codeMap)
@@ -317,7 +317,7 @@ function parseTxtCodeTable(content: string, codeMap: Map<string, string[]>): voi
     if (parts.length >= 2) {
       const char = parts[0]
       const code = parts[1].toLowerCase()
-      if (char.length === 1) {
+      if ([...char].length === 1) {
         if (!codeMap.has(char)) {
           codeMap.set(char, [])
         }
@@ -333,23 +333,23 @@ function parseTxtCodeTable(content: string, codeMap: Map<string, string[]>): voi
 function parseYamlCodeTable(content: string, codeMap: Map<string, string[]>): void {
   const lines = content.split('\n')
   let passedHeader = false
-  
+
   for (const line of lines) {
     const trimmed = line.trim()
     if (!trimmed || trimmed.startsWith('#')) continue
-    
+
     if (trimmed === '---') {
       passedHeader = true
       continue
     }
     if (trimmed === '...') continue
-    
+
     if (passedHeader && !trimmed.includes(':')) {
       const parts = trimmed.split(/[\t\s]+/)
       if (parts.length >= 2) {
         const char = parts[0]
         const code = parts[1].toLowerCase()
-        if (char.length === 1) {
+        if ([...char].length === 1) {
           if (!codeMap.has(char)) {
             codeMap.set(char, [])
           }

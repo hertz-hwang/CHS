@@ -163,6 +163,7 @@ function selectKey(key: string) {
 function deleteRoot(root: string) {
   engine.rootCodes.delete(root)
   engine.roots.delete(root)
+  saveCurrentConfig()
   refreshStats()
   toast(`已删除字根: ${root}`)
 }

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { VueFlow, useVueFlow, Position, MarkerType, Handle, type NodeMouseEvent, type NodeDragEvent } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
@@ -692,12 +692,19 @@ onMounted(() => {
   const { charRules, wordRules } = loadRulesFromEngine()
   codeRules.value = charRules
   wordCodeRules.value = wordRules
-  
+
   // 同步到 engine
   engine.setCodeRules(charRules)
   engine.setWordCodeRules(wordRules)
-  
+
   setTimeout(() => fitView({ padding: 0.2 }), 100)
+
+  // 全局点击关闭右键菜单
+  document.addEventListener('click', hideContextMenu)
+})
+
+onUnmounted(() => {
+  document.removeEventListener('click', hideContextMenu)
 })
 </script>
 

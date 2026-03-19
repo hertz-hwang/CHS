@@ -339,7 +339,10 @@ export function setCurrentSchemeId(id: string): void {
 
 // 生成唯一ID
 function generateId(): string {
-  return `scheme_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return `scheme_${crypto.randomUUID()}`
+  }
+  return `scheme_${Date.now()}_${Math.random().toString(36).substr(2, 9)}_${Math.random().toString(36).substr(2, 9)}`
 }
 
 // 获取方案存储键

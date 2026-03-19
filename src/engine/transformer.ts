@@ -114,18 +114,20 @@ export class IDSTransformer {
 
     // 根据位置查找要替换的部件
     let targetIndex = -1
+    if (!targetComponent) return ids
+
     if (position === 'first') {
-      targetIndex = children.findIndex(c => c === targetComponent || this.containsComponent(c, targetComponent!))
+      targetIndex = children.findIndex(c => c === targetComponent || this.containsComponent(c, targetComponent))
     } else if (position === 'second') {
       // 从后往前找
       for (let i = children.length - 1; i >= 0; i--) {
-        if (children[i] === targetComponent || this.containsComponent(children[i], targetComponent!)) {
+        if (children[i] === targetComponent || this.containsComponent(children[i], targetComponent)) {
           targetIndex = i
           break
         }
       }
     } else {
-      targetIndex = children.findIndex(c => c === targetComponent || this.containsComponent(c, targetComponent!))
+      targetIndex = children.findIndex(c => c === targetComponent || this.containsComponent(c, targetComponent))
     }
 
     if (targetIndex === -1) return ids
