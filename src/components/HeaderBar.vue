@@ -1,15 +1,16 @@
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue'
-import { useEngine, CHARSET_OPTIONS, FREQ_SOURCE_OPTIONS, CharsetOption, FreqSourceOption } from "../composables/useEngine"
+import { useEngine, CHARSET_OPTIONS, FREQ_SOURCE_OPTIONS } from "../composables/useEngine"
 import { useTheme } from "../composables/useTheme"
 import { exportConfig, parseConfig, saveConfigToStorage, createDefaultConfig } from "../engine/config"
 import Icon from './Icon.vue'
 import ConfigManager from './ConfigManager.vue'
 
-const { engine, refreshStats, toast, stats, configVersion, getConfig, applyConfig, currentCharsetId, setCharset, getCurrentCharsetName, initSchemes, getCurrentScheme, currentFreqSourceId, setFreqSource, getCurrentFreqSourceName } = useEngine()
+const { engine, refreshStats, toast, stats, configVersion, getConfig, applyConfig, currentCharsetId, setCharset, getCurrentCharsetName, initSchemes, getCurrentScheme, currentFreqSourceId, freqVersion, getFreqSourceOptions, setFreqSource, setCustomFreqText, getCurrentFreqSourceName } = useEngine()
 const { theme, toggleTheme, isDark } = useTheme()
 
 const fileInput = ref<HTMLInputElement>()
+const freqFileInput = ref<HTMLInputElement>()
 
 // 配置名和作者名（计算属性，依赖 configVersion 实现响应式更新）
 const configName = computed(() => {
@@ -19,6 +20,10 @@ const configName = computed(() => {
 const configAuthor = computed(() => {
   configVersion.value // 依赖 configVersion，当配置更新时重新计算
   return getConfig().meta?.author || '未知作者'
+})
+const freqSourceOptions = computed(() => {
+  freqVersion.value
+  return getFreqSourceOptions()
 })
 
 // 新建配置对话框
@@ -141,14 +146,49 @@ function onCharsetChange(event: Event) {
 async function onFreqSourceChange(event: Event) {
   const target = event.target as HTMLSelectElement
   const freqSourceId = target.value
-  const option = FREQ_SOURCE_OPTIONS.find(o => o.id === freqSourceId)
+  if (freqSourceId === 'custom') {
+    target.value = currentFreqSourceId.value
+    return
+  }
+  const option = freqSourceOptions.value.find(o => o.id === freqSourceId)
   if (await setFreqSource(freqSourceId)) {
     toast(`已切换到字频数据: ${option?.name || freqSourceId}`)
   }
 }
+
+function triggerFreqFileInput() {
+  freqFileInput.value?.click()
+}
+
+function importCustomFreq(e: Event) {
+  const file = (e.target as HTMLInputElement).files?.[0]
+  if (!file) return
+  const reader = new FileReader()
+  reader.onload = () => {
+    const text = String(reader.result || '')
+    if (setCustomFreqText(text, file.name)) {
+      toast(`已加载自定义字频: ${file.name}`)
+    } else {
+      toast('自定义字频加载失败')
+    }
+  }
+  reader.onerror = () => {
+    toast('读取字频文件失败')
+  }
+  reader.readAsText(file)
+  if (freqFileInput.value) freqFileInput.value.value = ''
+}
 </script>
 
 <template>
+  <input
+    ref="freqFileInput"
+    type="file"
+    accept=".txt,text/plain"
+    style="display: none"
+    @change="importCustomFreq"
+  />
+
   <!-- 新建配置对话框 -->
   <Teleport to="body">
     <div class="overlay" :class="{ show: showNewConfigDialog }" @click.self="showNewConfigDialog = false">
@@ -278,16 +318,21 @@ async function onFreqSourceChange(event: Event) {
       <!-- 字词频数据源选择器 -->
       <div class="stat-item freq-item">
         <span class="stat-label">字频</span>
-        <select 
-          class="stat-value freq-select" 
-          :value="currentFreqSourceId" 
-          @change="onFreqSourceChange($event)"
-          title="选择字频数据源"
-        >
-          <option v-for="option in FREQ_SOURCE_OPTIONS" :key="option.id" :value="option.id">
-            {{ option.name }}
-          </option>
-        </select>
+        <div class="freq-controls">
+          <select 
+            class="stat-value freq-select" 
+            :value="currentFreqSourceId" 
+            @change="onFreqSourceChange($event)"
+            :title="`选择字频数据源，当前：${getCurrentFreqSourceName()}`"
+          >
+            <option v-for="option in freqSourceOptions" :key="option.id" :value="option.id">
+              {{ option.name }}
+            </option>
+          </select>
+          <button class="freq-upload-btn" @click="triggerFreqFileInput" title="上传自定义字词频">
+            上传
+          </button>
+        </div>
       </div>
     </div>
   </header>
@@ -643,6 +688,12 @@ h1 {
   margin-left: 4px;
 }
 
+.freq-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .freq-select {
   padding: 2px 8px;
   font-size: 14px;
@@ -665,6 +716,24 @@ h1 {
 
 .freq-select:focus {
   box-shadow: 0 0 0 2px rgba(0, 180, 42, 0.2);
+}
+
+.freq-upload-btn {
+  padding: 2px 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--success);
+  background: rgba(0, 180, 42, 0.08);
+  border: 1px solid var(--success);
+  border-radius: 4px;
+  cursor: pointer;
+  outline: none;
+  transition: all 0.2s ease;
+}
+
+.freq-upload-btn:hover {
+  background: var(--success);
+  color: white;
 }
 
 @media (max-width: 900px) {

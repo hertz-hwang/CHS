@@ -13,6 +13,9 @@ import { loadRoots2PuaMap, bracedRootToPua, convertBracedRootsToPua, isBracedRoo
 const CACHE_VERSION = '0.1.9'
 const CACHE_KEY_PREFIX = 'chars_hijack_cache_'
 const CACHE_VERSION_KEY = `${CACHE_KEY_PREFIX}version`
+const CUSTOM_FREQ_KEY = 'chars_hijack_custom_freq'
+const CUSTOM_FREQ_NAME_KEY = 'chars_hijack_custom_freq_name'
+const CURRENT_FREQ_SOURCE_KEY = 'chars_hijack_current_freq_source'
 
 // 缓存的数据项定义
 interface CachedData {
@@ -57,12 +60,13 @@ export const CHARSET_OPTIONS: CharsetOption[] = [
 export interface FreqSourceOption {
   id: string        // 数据源ID
   name: string      // 显示名称
-  file: string      // 文件路径
+  file?: string     // 文件路径
 }
 
 export const FREQ_SOURCE_OPTIONS: FreqSourceOption[] = [
   { id: 'kc6000', name: '科测', file: `${BASE}data/kc6000.txt` },
   { id: 'dictionary', name: '自带', file: `${BASE}data/dictionary.txt` },
+  { id: 'custom', name: '自定义上传' },
 ]
 
 const engine = new CharsHijack()
@@ -72,6 +76,18 @@ const currentCharsetId = ref<string>('all')
 
 // 当前字词频数据源ID（默认值 'kc6000'，即科测数据）
 const currentFreqSourceId = ref<string>('kc6000')
+const customFreqFileName = ref<string>('自定义上传')
+
+if (typeof window !== 'undefined') {
+  const savedFreqSourceId = localStorage.getItem(CURRENT_FREQ_SOURCE_KEY)
+  if (savedFreqSourceId && FREQ_SOURCE_OPTIONS.some(o => o.id === savedFreqSourceId)) {
+    currentFreqSourceId.value = savedFreqSourceId
+  }
+  const savedCustomFreqName = localStorage.getItem(CUSTOM_FREQ_NAME_KEY)
+  if (savedCustomFreqName) {
+    customFreqFileName.value = savedCustomFreqName
+  }
+}
 
 // 字词频版本号，用于触发相关更新
 const freqVersion = ref(0)
@@ -168,6 +184,37 @@ async function fetchText(path: string): Promise<string | null> {
   }
 }
 
+function getCustomFreqText(): string | null {
+  if (typeof window === 'undefined') return null
+  return localStorage.getItem(CUSTOM_FREQ_KEY)
+}
+
+function saveCustomFreqFileName(fileName: string): void {
+  customFreqFileName.value = fileName || '自定义上传'
+  if (typeof window === 'undefined') return
+  trySetStorageItem(CUSTOM_FREQ_NAME_KEY, customFreqFileName.value)
+}
+
+function saveCurrentFreqSourceId(freqSourceId: string): void {
+  if (typeof window === 'undefined') return
+  trySetStorageItem(CURRENT_FREQ_SOURCE_KEY, freqSourceId)
+}
+
+function syncFreqCache(text: string): void {
+  if (typeof window === 'undefined') return
+  trySetStorageItem(`${CACHE_KEY_PREFIX}freq`, text)
+  trySetStorageItem(CACHE_VERSION_KEY, CACHE_VERSION)
+}
+
+async function getFreqSourceText(freqSourceId: string): Promise<string | null> {
+  if (freqSourceId === 'custom') {
+    return getCustomFreqText()
+  }
+  const option = FREQ_SOURCE_OPTIONS.find(o => o.id === freqSourceId)
+  if (!option?.file) return null
+  return fetchText(option.file)
+}
+
 async function loadDefaultData(): Promise<{ loaded: string[]; failed: string[] }> {
   const loaded: string[] = []
   const failed: string[] = []
@@ -190,13 +237,11 @@ async function loadDefaultData(): Promise<{ loaded: string[]; failed: string[] }
   if (dict) { engine.loadPinyin(dict); loaded.push('拼音') }
 
   // 加载默认字词频数据（科测数据）
+  const freqText = await getFreqSourceText(currentFreqSourceId.value)
   const defaultFreqSource = FREQ_SOURCE_OPTIONS.find(o => o.id === currentFreqSourceId.value)
-  if (defaultFreqSource) {
-    const freqText = await fetchText(defaultFreqSource.file)
-    if (freqText) {
-      engine.loadFreq(freqText)
-      loaded.push(`${defaultFreqSource.name}字频`)
-    }
+  if (freqText) {
+    engine.loadFreq(freqText)
+    loaded.push(`${defaultFreqSource?.name || '当前'}字频`)
   }
 
   // 加载所有字集文件
@@ -225,19 +270,25 @@ function isCacheValid(): boolean {
   return version === CACHE_VERSION
 }
 
+function trySetStorageItem(key: string, value: string): boolean {
+  try {
+    localStorage.setItem(key, value)
+    return true
+  } catch (e) {
+    console.warn(`localStorage 写入失败: ${key}`, e)
+    return false
+  }
+}
+
 // 保存数据到缓存
 function saveDataToCache(data: CachedData): void {
-  try {
-    localStorage.setItem(`${CACHE_KEY_PREFIX}ids`, data.ids || '')
-    localStorage.setItem(`${CACHE_KEY_PREFIX}customIds`, data.customIds || '')
-    localStorage.setItem(`${CACHE_KEY_PREFIX}stroke`, data.stroke || '')
-    localStorage.setItem(`${CACHE_KEY_PREFIX}pinyin`, data.pinyin || '')
-    localStorage.setItem(`${CACHE_KEY_PREFIX}freq`, data.freq || '')
-    localStorage.setItem(`${CACHE_KEY_PREFIX}charsets`, JSON.stringify(data.charsets))
-    localStorage.setItem(CACHE_VERSION_KEY, CACHE_VERSION)
-  } catch (e) {
-    console.warn('保存缓存失败:', e)
-  }
+  trySetStorageItem(`${CACHE_KEY_PREFIX}ids`, data.ids || '')
+  trySetStorageItem(`${CACHE_KEY_PREFIX}customIds`, data.customIds || '')
+  trySetStorageItem(`${CACHE_KEY_PREFIX}stroke`, data.stroke || '')
+  trySetStorageItem(`${CACHE_KEY_PREFIX}pinyin`, data.pinyin || '')
+  trySetStorageItem(`${CACHE_KEY_PREFIX}freq`, data.freq || '')
+  trySetStorageItem(`${CACHE_KEY_PREFIX}charsets`, JSON.stringify(data.charsets))
+  trySetStorageItem(CACHE_VERSION_KEY, CACHE_VERSION)
 }
 
 // 从缓存加载数据
@@ -327,8 +378,15 @@ async function loadDefaultDataWithProgress(
       loaded.push('IDS')
       setItemStatus('ids', 'done')
     } else {
-      failed.push('IDS')
-      setItemStatus('ids', 'error')
+      const ids = await fetchText(`${BASE}data/sky_ids.txt`)
+      if (ids) {
+        engine.loadSkyIDS(ids)
+        loaded.push('IDS')
+        setItemStatus('ids', 'done')
+      } else {
+        failed.push('IDS')
+        setItemStatus('ids', 'error')
+      }
     }
     
     // 自定义 IDS
@@ -348,8 +406,15 @@ async function loadDefaultDataWithProgress(
       loaded.push('笔画')
       setItemStatus('stroke', 'done')
     } else {
-      failed.push('笔画')
-      setItemStatus('stroke', 'error')
+      const stroke = await fetchText(`${BASE}data/stroke.txt`)
+      if (stroke) {
+        engine.loadStrokes(stroke)
+        loaded.push('笔画')
+        setItemStatus('stroke', 'done')
+      } else {
+        failed.push('笔画')
+        setItemStatus('stroke', 'error')
+      }
     }
     
     // 拼音数据
@@ -360,8 +425,15 @@ async function loadDefaultDataWithProgress(
       loaded.push('拼音')
       setItemStatus('pinyin', 'done')
     } else {
-      failed.push('拼音')
-      setItemStatus('pinyin', 'error')
+      const dict = await fetchText(`${BASE}data/dictionary.txt`)
+      if (dict) {
+        engine.loadPinyin(dict)
+        loaded.push('拼音')
+        setItemStatus('pinyin', 'done')
+      } else {
+        failed.push('拼音')
+        setItemStatus('pinyin', 'error')
+      }
     }
     
     // 字词频数据
@@ -372,21 +444,36 @@ async function loadDefaultDataWithProgress(
       loaded.push('字频')
       setItemStatus('freq', 'done')
     } else {
-      failed.push('字频')
-      setItemStatus('freq', 'error')
+      const freqText = await getFreqSourceText(currentFreqSourceId.value)
+      if (freqText) {
+        engine.loadFreq(freqText)
+        loaded.push('字频')
+        setItemStatus('freq', 'done')
+      } else {
+        failed.push('字频')
+        setItemStatus('freq', 'error')
+      }
     }
     
     // 字集数据
-    for (const [id, content] of Object.entries(cachedData.charsets)) {
-      setItemStatus(id, 'loading')
-      updateProgress(`${id} 字集`)
+    for (const option of CHARSET_OPTIONS) {
+      const content = cachedData.charsets[option.id]
+      setItemStatus(option.id, 'loading')
+      updateProgress(`${option.name} 字集`)
       if (content) {
-        engine.loadCharset(id, content)
-        loaded.push(`${id}字集`)
-        setItemStatus(id, 'done')
+        engine.loadCharset(option.id, content)
+        loaded.push(`${option.id}字集`)
+        setItemStatus(option.id, 'done')
       } else {
-        failed.push(`${id}字集`)
-        setItemStatus(id, 'error')
+        const text = await fetchText(option.file)
+        if (text) {
+          engine.loadCharset(option.id, text)
+          loaded.push(`${option.name}字集`)
+          setItemStatus(option.id, 'done')
+        } else {
+          failed.push(`${option.name}字集`)
+          setItemStatus(option.id, 'error')
+        }
       }
     }
     
@@ -469,18 +556,15 @@ async function loadDefaultDataWithProgress(
   // 加载字词频数据
   setItemStatus('freq', 'loading')
   updateProgress('字词频数据')
-  const defaultFreqSource = FREQ_SOURCE_OPTIONS.find(o => o.id === currentFreqSourceId.value)
-  if (defaultFreqSource) {
-    const freqText = await fetchText(defaultFreqSource.file)
-    if (freqText) {
-      engine.loadFreq(freqText)
-      cacheData.freq = freqText
-      loaded.push('字频')
-      setItemStatus('freq', 'done')
-    } else {
-      failed.push('字频')
-      setItemStatus('freq', 'error')
-    }
+  const freqText = await getFreqSourceText(currentFreqSourceId.value)
+  if (freqText) {
+    engine.loadFreq(freqText)
+    cacheData.freq = freqText
+    loaded.push('字频')
+    setItemStatus('freq', 'done')
+  } else {
+    failed.push('字频')
+    setItemStatus('freq', 'error')
   }
   
   // 加载所有字集文件
@@ -554,15 +638,43 @@ async function setFreqSource(freqSourceId: string): Promise<boolean> {
   engine.clearFreq()
   
   // 加载新的字词频数据
-  const text = await fetchText(option.file)
+  const text = await getFreqSourceText(freqSourceId)
   if (!text) return false
   
   engine.loadFreq(text)
   currentFreqSourceId.value = freqSourceId
+  saveCurrentFreqSourceId(freqSourceId)
+  syncFreqCache(text)
   freqVersion.value++
   refreshStats()
   
   return true
+}
+
+function setCustomFreqText(text: string, fileName = '自定义上传'): boolean {
+  if (typeof window === 'undefined') return false
+  trySetStorageItem(CUSTOM_FREQ_KEY, text)
+  saveCustomFreqFileName(fileName)
+  currentFreqSourceId.value = 'custom'
+  saveCurrentFreqSourceId('custom')
+  syncFreqCache(text)
+  engine.clearFreq()
+  engine.loadFreq(text)
+  freqVersion.value++
+  refreshStats()
+  return true
+}
+
+function hasCustomFreqText(): boolean {
+  return !!getCustomFreqText()
+}
+
+function getFreqSourceOptions(): FreqSourceOption[] {
+  return FREQ_SOURCE_OPTIONS.map(option => (
+    option.id === 'custom'
+      ? { ...option, name: customFreqFileName.value }
+      : option
+  ))
 }
 
 // 获取当前字词频数据源名称
@@ -874,8 +986,12 @@ export function useEngine() {
     getCurrentCharset,
     // 字词频数据源管理
     currentFreqSourceId: readonly(currentFreqSourceId),
+    customFreqFileName: readonly(customFreqFileName),
     freqVersion,
+    getFreqSourceOptions,
     setFreqSource,
+    setCustomFreqText,
+    hasCustomFreqText,
     getCurrentFreqSourceName,
     // PUA 字根转换
     bracedRootToPua,

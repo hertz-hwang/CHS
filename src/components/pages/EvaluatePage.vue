@@ -136,42 +136,15 @@ function removeSelectKeyPosition(index: number) {
 // 键位热力图配置
 const includeSpaceInStats = ref(true)
 
-// 默认字频数据（kc6000.txt）
-const defaultFreqMap = ref<Map<string, number> | null>(null)
-
-// 加载默认字频数据
-async function loadDefaultFreq() {
-  if (defaultFreqMap.value) return defaultFreqMap.value
-  
-  try {
-    const base = import.meta.env.BASE_URL
-    const res = await fetch(`${base}data/kc6000.txt`)
-    if (!res.ok) throw new Error('加载字频数据失败')
-    
-    const text = await res.text()
-    const freqMap = new Map<string, number>()
-    const lines = text.split('\n')
-    
-    for (const line of lines) {
-      const trimmed = line.trim()
-      if (!trimmed) continue
-      
-      const parts = trimmed.split('\t')
-      if (parts.length >= 2) {
-        const char = parts[0]
-        const freq = parseInt(parts[1], 10)
-        if (char.length === 1 && freq > 0) {
-          freqMap.set(char, freq)
-        }
-      }
+// 从当前字词频数据源提取单字频
+function loadDefaultFreq() {
+  const freqMap = new Map<string, number>()
+  for (const [text, freq] of engine.freq) {
+    if ([...text].length === 1 && freq > 0) {
+      freqMap.set(text, freq)
     }
-    
-    defaultFreqMap.value = freqMap
-    return freqMap
-  } catch (e) {
-    toast('加载字频数据失败')
-    return null
   }
+  return freqMap
 }
 
 // 获取字根的完整编码字符串
@@ -230,8 +203,8 @@ async function runEvaluation() {
     await loadEquivalenceData()
 
     // 加载字频数据（用于单字测评）
-    const freqMap = await loadDefaultFreq()
-    if (!freqMap) {
+    const freqMap = loadDefaultFreq()
+    if (!freqMap.size) {
       toast('无法加载字频数据')
       return
     }
@@ -253,8 +226,8 @@ async function runEvaluation() {
     evaluationResult.value = result
 
     // 词组测评
-    const wordFreqMap = await loadWordFreq()
-    if (wordFreqMap) {
+    const wordFreqMap = loadWordFreq()
+    if (wordFreqMap.size) {
       const wordCodeMap = new Map<string, string>()
 
       for (const [word, freq] of wordFreqMap) {
@@ -272,7 +245,7 @@ async function runEvaluation() {
 
     // 统计词数
     let wordCount = 0
-    if (wordFreqMap) {
+    if (wordFreqMap.size) {
       for (const [word] of wordFreqMap) {
         if (word.length >= 2) wordCount++
       }
@@ -400,42 +373,15 @@ function isWordMissing(word: string): boolean {
   return !code
 }
 
-// 默认词频数据
-const defaultWordFreqMap = ref<Map<string, number> | null>(null)
-
-// 加载词频数据（包含多字词）
-async function loadWordFreq(): Promise<Map<string, number> | null> {
-  if (defaultWordFreqMap.value) return defaultWordFreqMap.value
-
-  try {
-    const base = import.meta.env.BASE_URL
-    const res = await fetch(`${base}data/kc6000.txt`)
-    if (!res.ok) throw new Error('加载词频数据失败')
-
-    const text = await res.text()
-    const freqMap = new Map<string, number>()
-    const lines = text.split('\n')
-
-    for (const line of lines) {
-      const trimmed = line.trim()
-      if (!trimmed) continue
-
-      const parts = trimmed.split('\t')
-      if (parts.length >= 2) {
-        const word = parts[0]
-        const freq = parseInt(parts[1], 10)
-        if (freq > 0) {
-          freqMap.set(word, freq)
-        }
-      }
+// 从当前字词频数据源提取多字词频
+function loadWordFreq(): Map<string, number> {
+  const freqMap = new Map<string, number>()
+  for (const [text, freq] of engine.freq) {
+    if ([...text].length >= 2 && freq > 0) {
+      freqMap.set(text, freq)
     }
-
-    defaultWordFreqMap.value = freqMap
-    return freqMap
-  } catch (e) {
-    toast('加载词频数据失败')
-    return null
   }
+  return freqMap
 }
 
 // 处理码表上传
@@ -570,8 +516,8 @@ async function runUploadedEvaluation() {
   try {
     await loadEquivalenceData()
     
-    const freqMap = await loadDefaultFreq()
-    if (!freqMap) {
+    const freqMap = loadDefaultFreq()
+    if (!freqMap.size) {
       toast('无法加载字频数据')
       return
     }
@@ -581,8 +527,8 @@ async function runUploadedEvaluation() {
     uploadedResult.value = result
     
     // 词组测评
-    const wordFreqMap = await loadWordFreq()
-    if (wordFreqMap) {
+    const wordFreqMap = loadWordFreq()
+    if (wordFreqMap.size) {
       const wordCodeMap = new Map<string, string>()
       
       for (const [word, freq] of wordFreqMap) {
@@ -610,7 +556,7 @@ async function runUploadedEvaluation() {
     
     // 统计词数
     let wordCount = 0
-    if (wordFreqMap) {
+    if (wordFreqMap.size) {
       for (const [word] of wordFreqMap) {
         if (word.length >= 2) wordCount++
       }
