@@ -164,9 +164,9 @@ function importCustomFreq(e: Event) {
   const file = (e.target as HTMLInputElement).files?.[0]
   if (!file) return
   const reader = new FileReader()
-  reader.onload = () => {
+  reader.onload = async () => {
     const text = String(reader.result || '')
-    if (setCustomFreqText(text, file.name)) {
+    if (await setCustomFreqText(text, file.name)) {
       toast(`已加载自定义字频: ${file.name}`)
     } else {
       toast('自定义字频加载失败')

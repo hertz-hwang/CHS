@@ -16,6 +16,13 @@ const CACHE_VERSION_KEY = `${CACHE_KEY_PREFIX}version`
 const CUSTOM_FREQ_KEY = 'chars_hijack_custom_freq'
 const CUSTOM_FREQ_NAME_KEY = 'chars_hijack_custom_freq_name'
 const CURRENT_FREQ_SOURCE_KEY = 'chars_hijack_current_freq_source'
+const CACHE_DB_NAME = 'chars_hijack_cache_db'
+const CACHE_DB_STORE = 'kv'
+const LARGE_CACHE_KEYS = {
+  pinyin: `${CACHE_KEY_PREFIX}pinyin`,
+  freq: `${CACHE_KEY_PREFIX}freq`,
+  customFreq: CUSTOM_FREQ_KEY,
+} as const
 
 // 缓存的数据项定义
 interface CachedData {
@@ -136,6 +143,7 @@ const searchChar = ref<string | null>(null)  // 用于页面间传递查询字
 const toastMsg = ref('')
 const toastVisible = ref(false)
 let toastTimer: ReturnType<typeof setTimeout> | null = null
+let cacheDbPromise: Promise<IDBDatabase | null> | null = null
 
 // 响应式版本号，用于触发计算属性更新
 const rootsVersion = ref(0)
@@ -184,9 +192,72 @@ async function fetchText(path: string): Promise<string | null> {
   }
 }
 
-function getCustomFreqText(): string | null {
-  if (typeof window === 'undefined') return null
-  return localStorage.getItem(CUSTOM_FREQ_KEY)
+function openCacheDb(): Promise<IDBDatabase | null> {
+  if (typeof window === 'undefined' || !('indexedDB' in window)) return Promise.resolve(null)
+  if (cacheDbPromise) return cacheDbPromise
+
+  cacheDbPromise = new Promise((resolve) => {
+    const request = window.indexedDB.open(CACHE_DB_NAME, 1)
+    request.onupgradeneeded = () => {
+      const db = request.result
+      if (!db.objectStoreNames.contains(CACHE_DB_STORE)) {
+        db.createObjectStore(CACHE_DB_STORE)
+      }
+    }
+    request.onsuccess = () => resolve(request.result)
+    request.onerror = () => {
+      console.warn('IndexedDB 打开失败:', request.error)
+      resolve(null)
+    }
+  })
+
+  return cacheDbPromise
+}
+
+async function idbGet(key: string): Promise<string | null> {
+  const db = await openCacheDb()
+  if (!db) return null
+
+  return new Promise((resolve) => {
+    const request = db.transaction(CACHE_DB_STORE, 'readonly').objectStore(CACHE_DB_STORE).get(key)
+    request.onsuccess = () => resolve(typeof request.result === 'string' ? request.result : null)
+    request.onerror = () => {
+      console.warn(`IndexedDB 读取失败: ${key}`, request.error)
+      resolve(null)
+    }
+  })
+}
+
+async function idbSet(key: string, value: string): Promise<boolean> {
+  const db = await openCacheDb()
+  if (!db) return false
+
+  return new Promise((resolve) => {
+    const request = db.transaction(CACHE_DB_STORE, 'readwrite').objectStore(CACHE_DB_STORE).put(value, key)
+    request.onsuccess = () => resolve(true)
+    request.onerror = () => {
+      console.warn(`IndexedDB 写入失败: ${key}`, request.error)
+      resolve(false)
+    }
+  })
+}
+
+async function idbDelete(key: string): Promise<void> {
+  const db = await openCacheDb()
+  if (!db) return
+
+  await new Promise<void>((resolve) => {
+    const request = db.transaction(CACHE_DB_STORE, 'readwrite').objectStore(CACHE_DB_STORE).delete(key)
+    request.onsuccess = () => resolve()
+    request.onerror = () => {
+      console.warn(`IndexedDB 删除失败: ${key}`, request.error)
+      resolve()
+    }
+  })
+}
+
+function getCustomFreqText(): Promise<string | null> {
+  return idbGet(LARGE_CACHE_KEYS.customFreq)
 }
 
 function saveCustomFreqFileName(fileName: string): void {
@@ -200,15 +271,15 @@ function saveCurrentFreqSourceId(freqSourceId: string): void {
   trySetStorageItem(CURRENT_FREQ_SOURCE_KEY, freqSourceId)
 }
 
-function syncFreqCache(text: string): void {
+async function syncFreqCache(text: string): Promise<void> {
   if (typeof window === 'undefined') return
-  trySetStorageItem(`${CACHE_KEY_PREFIX}freq`, text)
+  await idbSet(LARGE_CACHE_KEYS.freq, text)
   trySetStorageItem(CACHE_VERSION_KEY, CACHE_VERSION)
 }
 
 async function getFreqSourceText(freqSourceId: string): Promise<string | null> {
   if (freqSourceId === 'custom') {
-    return getCustomFreqText()
+    return await getCustomFreqText()
   }
   const option = FREQ_SOURCE_OPTIONS.find(o => o.id === freqSourceId)
   if (!option?.file) return null
@@ -281,18 +352,26 @@ function trySetStorageItem(key: string, value: string): boolean {
 }
 
 // 保存数据到缓存
-function saveDataToCache(data: CachedData): void {
+async function saveDataToCache(data: CachedData): Promise<void> {
   trySetStorageItem(`${CACHE_KEY_PREFIX}ids`, data.ids || '')
   trySetStorageItem(`${CACHE_KEY_PREFIX}customIds`, data.customIds || '')
   trySetStorageItem(`${CACHE_KEY_PREFIX}stroke`, data.stroke || '')
-  trySetStorageItem(`${CACHE_KEY_PREFIX}pinyin`, data.pinyin || '')
-  trySetStorageItem(`${CACHE_KEY_PREFIX}freq`, data.freq || '')
   trySetStorageItem(`${CACHE_KEY_PREFIX}charsets`, JSON.stringify(data.charsets))
+  if (data.pinyin !== null) {
+    await idbSet(LARGE_CACHE_KEYS.pinyin, data.pinyin)
+  } else {
+    await idbDelete(LARGE_CACHE_KEYS.pinyin)
+  }
+  if (data.freq !== null) {
+    await idbSet(LARGE_CACHE_KEYS.freq, data.freq)
+  } else {
+    await idbDelete(LARGE_CACHE_KEYS.freq)
+  }
   trySetStorageItem(CACHE_VERSION_KEY, CACHE_VERSION)
 }
 
 // 从缓存加载数据
-function loadDataFromCache(): CachedData | null {
+async function loadDataFromCache(): Promise<CachedData | null> {
   try {
     if (!isCacheValid()) return null
     
@@ -303,8 +382,8 @@ function loadDataFromCache(): CachedData | null {
       ids: localStorage.getItem(`${CACHE_KEY_PREFIX}ids`) || null,
       customIds: localStorage.getItem(`${CACHE_KEY_PREFIX}customIds`) || null,
       stroke: localStorage.getItem(`${CACHE_KEY_PREFIX}stroke`) || null,
-      pinyin: localStorage.getItem(`${CACHE_KEY_PREFIX}pinyin`) || null,
-      freq: localStorage.getItem(`${CACHE_KEY_PREFIX}freq`) || null,
+      pinyin: await idbGet(LARGE_CACHE_KEYS.pinyin),
+      freq: await idbGet(LARGE_CACHE_KEYS.freq),
       charsets,
     }
   } catch (e) {
@@ -315,9 +394,11 @@ function loadDataFromCache(): CachedData | null {
 
 // 清除缓存
 function clearCache(): void {
-  const keys = ['ids', 'customIds', 'stroke', 'pinyin', 'freq', 'charsets']
+  const keys = ['ids', 'customIds', 'stroke', 'charsets']
   keys.forEach(key => localStorage.removeItem(`${CACHE_KEY_PREFIX}${key}`))
   localStorage.removeItem(CACHE_VERSION_KEY)
+  void idbDelete(LARGE_CACHE_KEYS.pinyin)
+  void idbDelete(LARGE_CACHE_KEYS.freq)
 }
 
 // 带进度回调的数据加载函数
@@ -365,7 +446,7 @@ async function loadDefaultDataWithProgress(
   }
 
   // 先尝试从缓存加载
-  const cachedData = loadDataFromCache()
+  const cachedData = await loadDataFromCache()
   if (cachedData) {
     // 从缓存加载
     updateProgress('正在从缓存加载...')
@@ -591,7 +672,7 @@ async function loadDefaultDataWithProgress(
   setItemStatus('pua', 'done')
   
   // 保存到缓存
-  saveDataToCache(cacheData)
+  await saveDataToCache(cacheData)
   
   refreshStats()
   updateProgress('加载完成')
@@ -644,20 +725,20 @@ async function setFreqSource(freqSourceId: string): Promise<boolean> {
   engine.loadFreq(text)
   currentFreqSourceId.value = freqSourceId
   saveCurrentFreqSourceId(freqSourceId)
-  syncFreqCache(text)
+  await syncFreqCache(text)
   freqVersion.value++
   refreshStats()
   
   return true
 }
 
-function setCustomFreqText(text: string, fileName = '自定义上传'): boolean {
+async function setCustomFreqText(text: string, fileName = '自定义上传'): Promise<boolean> {
   if (typeof window === 'undefined') return false
-  trySetStorageItem(CUSTOM_FREQ_KEY, text)
+  await idbSet(LARGE_CACHE_KEYS.customFreq, text)
   saveCustomFreqFileName(fileName)
   currentFreqSourceId.value = 'custom'
   saveCurrentFreqSourceId('custom')
-  syncFreqCache(text)
+  await syncFreqCache(text)
   engine.clearFreq()
   engine.loadFreq(text)
   freqVersion.value++
@@ -665,8 +746,8 @@ function setCustomFreqText(text: string, fileName = '自定义上传'): boolean 
   return true
 }
 
-function hasCustomFreqText(): boolean {
-  return !!getCustomFreqText()
+async function hasCustomFreqText(): Promise<boolean> {
+  return !!(await getCustomFreqText())
 }
 
 function getFreqSourceOptions(): FreqSourceOption[] {
