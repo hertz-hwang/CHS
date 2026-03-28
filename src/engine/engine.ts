@@ -333,7 +333,47 @@ export class CharsHijack {
 
   removeRoots(input: string | Iterable<string>): void {
     const tr = typeof input === 'string' ? parseRootsFromText(input) : new Set(input)
-    for (const r of tr) this.roots.delete(r)
+    for (const r of tr) {
+      this.roots.delete(r)
+      this.rootCodes.delete(r)
+
+      if (this.mergedRoots.has(r)) {
+        this.mergedRoots.delete(r)
+      }
+
+      const mergedTargetsToDelete: string[] = []
+      for (const [targetRoot, sourceRoot] of this.mergedRoots) {
+        if (sourceRoot === r) {
+          mergedTargetsToDelete.push(targetRoot)
+        }
+      }
+      for (const targetRoot of mergedTargetsToDelete) {
+        this.mergedRoots.delete(targetRoot)
+        const targetCode = this.rootCodes.get(targetRoot)
+        if (targetCode?.mergedFrom === r) {
+          this.rootCodes.set(targetRoot, { ...targetCode, mergedFrom: undefined })
+        }
+      }
+
+      const codeEquivsToDelete: string[] = []
+      for (const [targetRef, sourceRef] of this.codeEquivalences) {
+        const targetParsed = this.parseCodeRef(targetRef)
+        const sourceParsed = this.parseCodeRef(sourceRef)
+        if (targetParsed?.root === r || sourceParsed?.root === r) {
+          codeEquivsToDelete.push(targetRef)
+        }
+      }
+      for (const targetRef of codeEquivsToDelete) {
+        const targetParsed = this.parseCodeRef(targetRef)
+        this.codeEquivalences.delete(targetRef)
+        if (targetParsed && targetParsed.root !== r) {
+          const targetCode = this.rootCodes.get(targetParsed.root)
+          if (targetCode?.codeEquivFrom) {
+            this.rootCodes.set(targetParsed.root, { ...targetCode, codeEquivFrom: undefined })
+          }
+        }
+      }
+    }
     this._cache.clear()
     this._saveRoots()
   }

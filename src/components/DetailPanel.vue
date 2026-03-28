@@ -4,31 +4,32 @@ import { useEngine } from '../composables/useEngine'
 import { unicodeBlock, unicodeHex } from '../engine/unicode'
 import { isBracedRoot, bracedRootToPua } from '../utils/pua'
 import type { PinyinInfo } from '../engine/engine'
+import KeySelect from './element/KeySelect.vue'
 
-const { engine, selectedChar, refreshStats, toast, switchPage, setSearchChar, saveCurrentConfig } = useEngine()
+const {
+  engine, selectedChar, refreshStats, toast, switchPage, setSearchChar,
+  saveCurrentConfig, setTransformerDraft
+} = useEngine()
 
-// 字根编码对话框状态
 const showRootCodeDialog = ref(false)
-const rootCodeInput = ref('')
-const editingRoot = ref<string | null>(null)  // 当前正在编辑的字根元素
+const editingRoot = ref<string | null>(null)
+const codePositions = ref<string[]>(['', '', '', ''])
+const mergeTarget = ref('')
+const mergeSearchQuery = ref('')
 
 const detail = computed(() => {
   const ch = selectedChar.value
   if (!ch) return null
   const { leaves, ids } = engine.decompose(ch)
-  
-  // 获取所有拼音（已按词频降序）
   const pinyinList = engine.getPinyinList(ch)
-  
-  // 获取所有笔画编码
   const strokeList = engine.getStrokes(ch)
-  
+
   return {
     char: ch, leaves, ids,
     origIDS: engine.decomp.get(ch) || '—',
     sc: engine.strokeCount(ch),
-    strokeList,         // 所有笔画编码
-    pinyinList,         // 所有拼音信息
+    strokeList,
+    pinyinList,
     fq: engine.freq.has(ch) ? engine.freq.get(ch) : '—',
     isRoot: engine.roots.has(ch),
     block: unicodeBlock(ch),
@@ -36,17 +37,33 @@ const detail = computed(() => {
   }
 })
 
-// 格式化拼音显示
-function formatPinyin(list: PinyinInfo[]): string {
-  if (list.length === 0) return '—'
-  return list.map(p => p.py).join(', ')
-}
-
-// 格式化词频显示
 function formatFreq(freq: number): string {
   if (freq >= 100000000) return (freq / 100000000).toFixed(1) + '亿'
   if (freq >= 10000) return (freq / 10000).toFixed(1) + '万'
   return freq.toLocaleString()
+}
+
+function getActiveRoot(): string | null {
+  return editingRoot.value || detail.value?.char || null
+}
+
+function initCodePositions(root: string) {
+  mergeTarget.value = engine.getMergedFrom(root) || ''
+  mergeSearchQuery.value = ''
+  const codeEquivs = engine.getCodeEquivalencesForRoot(root)
+  const code = engine.rootCodes.get(root)
+  const fullCode = code ? `${code.main || ''}${code.sub || ''}${code.supplement || ''}` : ''
+
+  codePositions.value = ['', '', '', '']
+  for (let i = 0; i < 4; i++) {
+    codePositions.value[i] = codeEquivs.get(i) || fullCode[i] || ''
+  }
+}
+
+function openRootDialog(root: string) {
+  editingRoot.value = root
+  initCodePositions(root)
+  showRootCodeDialog.value = true
 }
 
 function toggleRoot() {
@@ -59,141 +76,216 @@ function toggleRoot() {
     selectedChar.value = null
     setTimeout(() => { selectedChar.value = ch }, 0)
   } else {
-    // 打开对话框让用户输入字根编码
-    rootCodeInput.value = engine.getRootCodeString(ch) || ''
-    showRootCodeDialog.value = true
+    openRootDialog(ch)
   }
 }
 
-// 确认设置字根编码
-function confirmSetRoot() {
-  if (!detail.value) return
-  const ch = detail.value.char
-  const code = rootCodeInput.value.trim()
-  
-  if (code) {
-    engine.setRootCode(ch, code)
-    toast(`已设为字根: ${ch}，编码: ${code}`)
-  } else {
-    engine.addRoots(ch)
-    toast(`已设为字根: ${ch}`)
-  }
-  
-  saveCurrentConfig()
-  refreshStats()
-  showRootCodeDialog.value = false
-  selectedChar.value = null
-  setTimeout(() => { selectedChar.value = ch }, 0)
-}
-
-// 点击字根元素按钮，打开设置编码对话框
 function openLeafDialog(leaf: string) {
-  // 如果是等效字根，不允许设置编码
   if (engine.isEquivalentRoot(leaf)) {
     const mainRoot = engine.getMainRoot(leaf)
     toast(`"${leaf}" 是 "${mainRoot}" 的等效字根，无法单独设置编码`)
     return
   }
-  
-  editingRoot.value = leaf
-  rootCodeInput.value = engine.getRootCodeString(leaf) || ''
-  showRootCodeDialog.value = true
+  openRootDialog(leaf)
 }
 
-// 确认设置字根元素编码
-function confirmSetLeafRoot() {
-  if (!editingRoot.value) return
-  const leaf = editingRoot.value
-  const code = rootCodeInput.value.trim()
-  
-  if (code) {
-    engine.setRootCode(leaf, code)
-    toast(`已添加字根: ${leaf}，编码: ${code}`)
-  } else {
-    engine.addRoots(leaf)
-    toast(`已添加字根: ${leaf}`)
+function finalizeDialog() {
+  const currentChar = detail.value?.char || null
+  closeRootCodeDialog()
+  if (!currentChar) return
+  selectedChar.value = null
+  setTimeout(() => { selectedChar.value = currentChar }, 0)
+}
+
+function isCodeRef(value: string): boolean {
+  return value.includes('.')
+}
+
+function confirmSetRoot() {
+  const root = getActiveRoot()
+  if (!root) return
+
+  if (!mergeTarget.value && engine.isMergedRoot(root)) {
+    engine.removeMergedRoot(root)
   }
-  
+
+  const hasAnyCode = codePositions.value.some(pos => !!pos)
+
+  if (!mergeTarget.value && !hasAnyCode) {
+    engine.removeRoots(root)
+    saveCurrentConfig()
+    refreshStats()
+    toast(`已清除字根设置: ${root}`)
+    finalizeDialog()
+    return
+  }
+
+  if (mergeTarget.value) {
+    engine.setMergedRoot(root, mergeTarget.value)
+    saveCurrentConfig()
+    refreshStats()
+    toast(`已将「${root}」归并到「${mergeTarget.value}」`)
+    finalizeDialog()
+    return
+  }
+
+  const mainKey = codePositions.value[0]
+  if (!mainKey) {
+    engine.addRoots(root)
+    saveCurrentConfig()
+    refreshStats()
+    toast(`已添加字根: ${root}`)
+    finalizeDialog()
+    return
+  }
+
+  const codeEquivalences: { targetIndex: number; sourceRef: string }[] = []
+  const codeChars: string[] = []
+
+  for (let i = 0; i < codePositions.value.length; i++) {
+    const pos = codePositions.value[i]
+    if (!pos) continue
+    if (isCodeRef(pos)) {
+      const parsed = engine.parseCodeRef(pos)
+      if (!parsed) continue
+      const sourceCodeChar = engine.getRootCodeAt(parsed.root, parsed.codeIndex)
+      if (!sourceCodeChar) continue
+      codeChars.push(sourceCodeChar)
+      codeEquivalences.push({ targetIndex: i, sourceRef: pos })
+    } else {
+      codeChars.push(pos)
+    }
+  }
+
+  engine.setRootCode(root, codeChars.join(''))
+  for (const equiv of codeEquivalences) {
+    engine.setCodeEquivalence(`${root}.${equiv.targetIndex}`, equiv.sourceRef)
+  }
+
   saveCurrentConfig()
   refreshStats()
-  closeRootCodeDialog()
+
+  let msg = `已添加字根: ${root}`
+  if (codeChars.length > 0) {
+    msg += `，编码: ${codeChars.join('')}`
+  }
+  if (codeEquivalences.length > 0) {
+    msg += `（含 ${codeEquivalences.length} 个半归并）`
+  }
+  toast(msg)
+  finalizeDialog()
 }
 
-// 关闭对话框
 function closeRootCodeDialog() {
   showRootCodeDialog.value = false
   editingRoot.value = null
+  codePositions.value = ['', '', '', '']
+  mergeTarget.value = ''
+  mergeSearchQuery.value = ''
 }
 
-// 检查字根元素是否已存在于字根集
 function isLeafRoot(leaf: string): boolean {
   return engine.roots.has(leaf)
 }
 
-// 检查字根元素是否是等效字根
 function isLeafEquivRoot(leaf: string): boolean {
   return engine.isEquivalentRoot(leaf)
 }
 
-// 获取等效字根的主字根
 function getLeafMainRoot(leaf: string): string | undefined {
   return engine.getMainRoot(leaf)
 }
 
-// 对话框确认处理
-function handleDialogConfirm() {
-  if (editingRoot.value) {
-    confirmSetLeafRoot()
-  } else {
-    confirmSetRoot()
-  }
-}
-
-// 获取对话框标题
 const dialogTitle = computed(() => {
-  if (editingRoot.value) {
-    return `添加字根: ${editingRoot.value}`
-  }
-  return '设为字根'
+  const root = getActiveRoot()
+  return root ? `设置字根: ${root}` : '设为字根'
 })
 
-// 判断当前字符是否是花括号字根
 const isCharBracedRoot = computed(() => {
   return detail.value ? isBracedRoot(detail.value.char) : false
 })
 
-// 获取用于显示的字符（花括号字根转换为 PUA 字符）
 const displayChar = computed(() => {
   if (!detail.value) return ''
   return bracedRootToPua(detail.value.char)
 })
 
-// 跳转到指定页面并带上当前字
 function goToPage(page: string) {
   if (!detail.value) return
   setSearchChar(detail.value.char)
   switchPage(page)
 }
+
+const activeRootIds = computed(() => {
+  const root = getActiveRoot()
+  if (!root) return ''
+  return engine.decompose(root).ids || engine.decomp.get(root) || ''
+})
+
+const mergeSearchResults = computed(() => {
+  const query = mergeSearchQuery.value.trim().toLowerCase()
+  const currentRoot = getActiveRoot()
+  if (!query || !currentRoot) return []
+
+  const results: { root: string; code: string }[] = []
+  for (const [root, code] of engine.rootCodes) {
+    if (!code?.main || root === currentRoot) continue
+    const codeStr = `${code.main || ''}${code.sub || ''}${code.supplement || ''}`
+    if (root.toLowerCase().includes(query) || codeStr.toLowerCase().includes(query)) {
+      results.push({ root, code: codeStr })
+    }
+  }
+  return results.slice(0, 20)
+})
+
+function selectMergeTarget(root: string) {
+  mergeTarget.value = root
+  mergeSearchQuery.value = ''
+}
+
+function clearMergeTarget() {
+  mergeTarget.value = ''
+  mergeSearchQuery.value = ''
+}
+
+function openTransformerWithCurrentIds() {
+  const root = getActiveRoot()
+  const ids = activeRootIds.value
+  if (!root || !ids || ids === '—') {
+    toast('当前字根没有可用的 IDS 结构式')
+    return
+  }
+
+  setTransformerDraft({
+    name: `${root} IDS 变换`,
+    mode: 'regex',
+    pattern: ids,
+    replacement: '',
+  })
+  closeRootCodeDialog()
+  switchPage('data')
+}
 </script>
+
 <template>
   <aside class="detail-panel">
     <h3>字详情</h3>
     <div v-if="!detail" class="empty">点击任意汉字查看详情</div>
     <template v-else>
       <div class="char-display" :class="{ 'pua-font': isCharBracedRoot }">{{ displayChar }}</div>
-      
+
       <div class="info-row">
         <div class="label">拆分结果</div>
         <div class="leaves-container">
           <template v-for="(leaf, index) in detail.leaves" :key="index">
             <button
               class="leaf-btn"
-              :class="{ 
+              :class="{
                 'is-root': isLeafRoot(leaf),
                 'is-equiv': isLeafEquivRoot(leaf)
               }"
               @click="openLeafDialog(leaf)"
-              :title="isLeafRoot(leaf) ? '已是字根，点击修改编码' : isLeafEquivRoot(leaf) ? `等效字根，主字根: ${getLeafMainRoot(leaf)}` : '点击添加为字根'"
+              :title="isLeafRoot(leaf) ? '点击编辑字根设置' : isLeafEquivRoot(leaf) ? `等效字根，主字根: ${getLeafMainRoot(leaf)}` : '点击添加为字根'"
             >
               <span class="leaf-char" :class="{ 'pua-font': isBracedRoot(leaf) }">{{ bracedRootToPua(leaf) }}</span>
               <span v-if="isLeafRoot(leaf)" class="leaf-badge">✓</span>
@@ -203,17 +295,17 @@ function goToPage(page: string) {
           </template>
         </div>
       </div>
-      
+
       <div class="info-row">
         <div class="label">结构式</div>
         <div class="value mono">{{ detail.ids }}</div>
       </div>
-      
+
       <div class="info-row">
         <div class="label">原始 IDS</div>
         <div class="value mono small">{{ detail.origIDS }}</div>
       </div>
-      
+
       <div class="info-grid">
         <div class="info-item">
           <div class="label">笔画数</div>
@@ -234,7 +326,7 @@ function goToPage(page: string) {
           </div>
         </div>
       </div>
-      
+
       <div class="info-row">
         <div class="label">拼音</div>
         <div class="value">
@@ -247,7 +339,7 @@ function goToPage(page: string) {
           <span v-else>—</span>
         </div>
       </div>
-      
+
       <div class="info-row">
         <div class="label">笔画编码</div>
         <div class="value">
@@ -260,7 +352,7 @@ function goToPage(page: string) {
           <span v-else>—</span>
         </div>
       </div>
-      
+
       <div class="info-row">
         <div class="label">状态</div>
         <div class="value">
@@ -268,7 +360,7 @@ function goToPage(page: string) {
           <span v-else class="tag tag-warning">非字根</span>
         </div>
       </div>
-      
+
       <div class="actions">
         <button class="btn btn-sm" :class="detail.isRoot ? 'btn-danger' : 'btn-success'" @click="toggleRoot">
           {{ detail.isRoot ? '移除字根' : '设为字根' }}
@@ -276,31 +368,60 @@ function goToPage(page: string) {
       </div>
     </template>
 
-    <!-- 字根编码输入对话框 -->
     <Teleport to="body">
       <div class="overlay" :class="{ show: showRootCodeDialog }" @click.self="closeRootCodeDialog">
         <div class="modal">
           <h2>{{ dialogTitle }}</h2>
           <div class="form-group">
-            <label>字根编码</label>
+            <label>编码设置</label>
+            <div class="code-inputs">
+              <KeySelect v-model="codePositions[0]" :allow-empty="true" placeholder="主码" />
+              <KeySelect v-model="codePositions[1]" :allow-empty="true" placeholder="2码" />
+              <KeySelect v-model="codePositions[2]" :allow-empty="true" placeholder="3码" />
+              <KeySelect v-model="codePositions[3]" :allow-empty="true" placeholder="4码" />
+            </div>
+            <div class="hint">可直接选键位，也可选字根码位创建半归并；留空则只加入字根集</div>
+          </div>
+          <div class="form-group">
+            <label>归并至</label>
             <input
-              v-model="rootCodeInput"
-              type="text"
+              v-model="mergeSearchQuery"
+              type="search"
               class="input"
-              placeholder="输入字根编码（如：a、ab、abc）"
-              @keyup.enter="handleDialogConfirm"
+              placeholder="搜索已有字根（留空表示不归并）"
             />
-            <div class="hint">编码由字母组成，第一个字母为主码，第二个为小码（可选），其余为补码（可选）</div>
+            <div v-if="mergeSearchResults.length > 0" class="merge-results">
+              <button
+                v-for="item in mergeSearchResults"
+                :key="item.root"
+                type="button"
+                class="merge-result-item"
+                @click="selectMergeTarget(item.root)"
+              >
+                <span :class="{ 'pua-font': isBracedRoot(item.root) }">{{ bracedRootToPua(item.root) }}</span>
+                <span class="mono small">{{ item.code.toUpperCase() }}</span>
+              </button>
+            </div>
+            <div v-if="mergeTarget" class="merge-target-row">
+              <div class="hint">当前归并目标：{{ mergeTarget }}</div>
+              <button type="button" class="btn btn-sm btn-outline" @click="clearMergeTarget">取消归并</button>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>IDS 变换器</label>
+            <div class="hint mono">{{ activeRootIds || '—' }}</div>
+            <button type="button" class="btn btn-sm" @click="openTransformerWithCurrentIds">添加 IDS 变换器</button>
           </div>
           <div class="modal-actions">
             <button class="btn" @click="closeRootCodeDialog">取消</button>
-            <button class="btn btn-primary" @click="handleDialogConfirm">确定</button>
+            <button class="btn btn-primary" @click="confirmSetRoot">确定</button>
           </div>
         </div>
       </div>
     </Teleport>
   </aside>
 </template>
+
 <style scoped>
 .detail-panel {
   background: var(--bg2);
@@ -345,11 +466,6 @@ h3 {
 .value {
   font-size: 14px;
   color: var(--text);
-}
-.value.primary {
-  color: var(--primary);
-  font-weight: 500;
-  font-size: 15px;
 }
 .value.mono {
   font-family: monospace;
@@ -402,15 +518,12 @@ h3 {
   padding: 1px 4px;
   border-radius: 3px;
 }
-
-/* 拆分结果按钮样式 */
 .leaves-container {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 4px;
 }
-
 .leaf-btn {
   position: relative;
   display: inline-flex;
@@ -427,7 +540,6 @@ h3 {
   cursor: pointer;
   transition: all 0.15s ease;
 }
-
 .leaf-btn:hover {
   background: var(--primary);
   border-color: var(--primary);
@@ -435,35 +547,28 @@ h3 {
   transform: translateY(-1px);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
 }
-
 .leaf-btn.is-root {
   background: var(--primary);
   border-color: var(--primary);
   color: white;
 }
-
 .leaf-btn.is-root:hover {
   background: var(--primary-dark, #0066cc);
   border-color: var(--primary-dark, #0066cc);
 }
-
-/* 等效字根样式 */
 .leaf-btn.is-equiv {
   background: rgba(19, 194, 194, 0.15);
   border-color: #13c2c2;
   color: #0d8a8a;
 }
-
 .leaf-btn.is-equiv:hover {
   background: rgba(19, 194, 194, 0.25);
   border-color: #13c2c2;
   color: #0d8a8a;
 }
-
 .leaf-char {
   font-weight: 500;
 }
-
 .leaf-badge {
   position: absolute;
   top: -4px;
@@ -478,19 +583,15 @@ h3 {
   color: white;
   border-radius: 50%;
 }
-
 .leaf-badge.equiv {
   background: #13c2c2;
 }
-
 .leaf-sep {
   color: var(--text2);
   font-weight: 600;
   font-size: 12px;
   margin: 0 2px;
 }
-
-/* 对话框样式 */
 .overlay {
   position: fixed;
   inset: 0;
@@ -513,7 +614,7 @@ h3 {
   border-radius: 8px;
   padding: 24px;
   min-width: 320px;
-  max-width: 400px;
+  max-width: 520px;
   box-shadow: var(--shadow2);
 }
 .modal h2 {
@@ -546,11 +647,50 @@ h3 {
 .form-group .input:focus {
   border-color: var(--primary);
 }
+.code-inputs {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
 .form-group .hint {
   margin-top: 6px;
   font-size: 11px;
   color: var(--text2);
   line-height: 1.4;
+}
+.merge-results {
+  margin-top: 8px;
+  max-height: 160px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+}
+.merge-result-item {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  padding: 8px 10px;
+  cursor: pointer;
+}
+.merge-result-item:last-child {
+  border-bottom: none;
+}
+.merge-result-item:hover {
+  background: var(--bg3);
+}
+.merge-target-row {
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 .modal-actions {
   display: flex;

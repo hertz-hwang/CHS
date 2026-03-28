@@ -4,6 +4,7 @@ import {
   UserConfig, parseConfig, exportConfig, saveConfigToStorage, loadConfigFromStorage,
   ConfigScheme, ConfigSchemeWithData, listSchemes, loadScheme, saveScheme, deleteScheme, 
   renameScheme, createScheme, importSchemeFromToml, exportSchemeToToml, duplicateScheme,
+  TransformRuleConfig,
   getCurrentSchemeId, setCurrentSchemeId, initExampleSchemes, loadExampleScheme,
   createDefaultConfig
 } from '@/engine/config'
@@ -140,6 +141,7 @@ if (typeof window !== 'undefined') {
 }
 const selectedChar = ref<string | null>(null)
 const searchChar = ref<string | null>(null)  // 用于页面间传递查询字
+const transformerDraft = ref<TransformRuleConfig | null>(null)
 const toastMsg = ref('')
 const toastVisible = ref(false)
 let toastTimer: ReturnType<typeof setTimeout> | null = null
@@ -181,6 +183,8 @@ function switchPage(name: string) {
 function selectChar(ch: string) { selectedChar.value = ch }
 function setSearchChar(ch: string) { searchChar.value = ch }
 function clearSearchChar() { searchChar.value = null }
+function setTransformerDraft(rule: TransformRuleConfig | null) { transformerDraft.value = rule ? { ...rule } : null }
+function clearTransformerDraft() { transformerDraft.value = null }
 
 async function fetchText(path: string): Promise<string | null> {
   try {
@@ -1050,6 +1054,7 @@ export function useEngine() {
     navCollapsed: readonly(navCollapsed), toggleNavCollapsed,
     selectedChar, selectChar,
     searchChar: readonly(searchChar), setSearchChar, clearSearchChar,
+    transformerDraft: readonly(transformerDraft), setTransformerDraft, clearTransformerDraft,
     toastMsg: readonly(toastMsg), toastVisible: readonly(toastVisible), toast,
     loadDefaultData,
     // 带进度的数据加载

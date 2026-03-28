@@ -5,7 +5,7 @@ import { useEngine } from '../../composables/useEngine'
 import { TransformRuleConfig } from '../../engine/config'
 import { IDSTransformer, TransformResult } from '../../engine/transformer'
 
-const { engine, toast, refreshStats, saveCurrentConfig } = useEngine()
+const { engine, toast, refreshStats, saveCurrentConfig, transformerDraft, clearTransformerDraft } = useEngine()
 
 const rules = ref<TransformRuleConfig[]>([])
 const previewResults = ref<Map<string, TransformResult>>(new Map())
@@ -37,6 +37,14 @@ onMounted(() => {
 watch(rules, () => {
   saveCurrentConfig()
 }, { deep: true })
+
+watch(transformerDraft, (draft) => {
+  if (!draft) return
+  editingIndex.value = null
+  form.value = { ...draft }
+  showModal.value = true
+  clearTransformerDraft()
+}, { immediate: true })
 
 function openAddModal() {
   editingIndex.value = null

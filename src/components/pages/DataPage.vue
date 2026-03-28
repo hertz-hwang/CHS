@@ -6,7 +6,7 @@ import { unicodeHex, unicodeBlock } from '../../engine/unicode'
 import Icon from '../Icon.vue'
 
 const { 
-  engine, stats, selectChar, charsetVersion, getCurrentCharset,
+  engine, stats, selectChar, charsetVersion, getCurrentCharset, transformerDraft,
   bracedRootToPua, isBracedRoot 
 } = useEngine()
 
@@ -109,6 +109,12 @@ function getCharInfo(char: string) {
 watch(searchQuery, () => {
   currentPage.value = 1
 })
+
+watch(transformerDraft, (draft) => {
+  if (draft) {
+    showTransformer.value = true
+  }
+}, { immediate: true })
 
 // 跳转页码
 function goToPage(page: number) {
