@@ -87,6 +87,131 @@ function calculateCharCode(char: string): string {
   return engine.calculateCharCode(char)
 }
 
+// 计算单字编码，同时收集取码过程中使用的字根和码位索引
+function calculateCharCodeWithRoots(char: string): { code: string; usedRoots: { root: string; codeIndex: number }[] } {
+  configVersion.value
+
+  const rules = engine.getCodeRules()
+
+  if (rules.length < 2) return { code: '', usedRoots: [] }
+
+  const hasActualRules = rules.some(r => r.type !== 'start' && r.type !== 'end')
+  if (!hasActualRules) return { code: '', usedRoots: [] }
+
+  const decomp = engine.decompose(char)
+  const roots = decomp.leaves
+
+  if (!roots.length) return { code: '', usedRoots: [] }
+
+  const usedRoots: { root: string; codeIndex: number }[] = []
+  const usedRootsSet = new Set<string>()
+  let code = ''
+  let currentNodeId = 'start'
+  const visited = new Set<string>()
+  const maxIterations = 100
+
+  while (currentNodeId !== 'end' && !visited.has(currentNodeId) && visited.size < maxIterations) {
+    visited.add(currentNodeId)
+
+    const node = rules.find(r => r.id === currentNodeId)
+    if (!node) break
+
+    if (node.type === 'start') {
+      if (node.nextNode) {
+        currentNodeId = node.nextNode
+      } else {
+        break
+      }
+    } else if (node.type === 'pick') {
+      if (node.pickType === 'pinyin') {
+        const part = node.pinyinPart || 'first_letter'
+        code += extractPinyinPart(char, part)
+      } else {
+        const rootIdx = node.rootIndex || 1
+        const codeIdx = node.codeIndex || 1
+
+        // 计算实际字根索引和码位索引
+        // -1 表示末根，如果请求的字根索引超出范围，回退到末根并调整码位索引
+        let actualRootIdx: number
+        let adjustedCodeIdx: number = codeIdx
+
+        if (rootIdx === -1) {
+          actualRootIdx = roots.length - 1
+        } else if (rootIdx > roots.length) {
+          actualRootIdx = roots.length - 1
+          adjustedCodeIdx = codeIdx + (rootIdx - roots.length)
+        } else {
+          actualRootIdx = rootIdx - 1
+        }
+
+        if (actualRootIdx >= 0 && actualRootIdx < roots.length) {
+          const root = roots[actualRootIdx]
+          const fullCode = getRootFullCode(root)
+          const actualCodeIdx = adjustedCodeIdx === -1 ? (fullCode ? fullCode.length - 1 : 0) : adjustedCodeIdx - 1
+
+          const key = `${actualRootIdx}-${actualCodeIdx}`
+          if (!usedRootsSet.has(key)) {
+            usedRootsSet.add(key)
+            usedRoots.push({
+              root,
+              codeIndex: actualCodeIdx
+            })
+          }
+
+          if (fullCode) {
+            if (actualCodeIdx >= 0 && actualCodeIdx < fullCode.length) {
+              code += fullCode[actualCodeIdx]
+            }
+          }
+        }
+      }
+
+      if (node.nextNode) {
+        currentNodeId = node.nextNode
+      } else {
+        break
+      }
+    } else if (node.type === 'condition') {
+      let conditionMet = false
+
+      if (node.conditionType === 'root_exists') {
+        const idx = (node.conditionValue || 1) - 1
+        conditionMet = idx >= 0 && idx < roots.length
+      } else if (node.conditionType === 'root_has_code') {
+        const rootIdx = (node.conditionValue || 1) - 1
+        const codeIdx = (node.conditionCodeIndex || 1) - 1
+
+        if (rootIdx >= 0 && rootIdx < roots.length) {
+          const root = roots[rootIdx]
+          const fullCode = getRootFullCode(root)
+          conditionMet = codeIdx >= 0 && codeIdx < fullCode.length
+        }
+      } else if (node.conditionType === 'root_count') {
+        conditionMet = roots.length >= (node.conditionValue || 1)
+      }
+
+      if (conditionMet && node.trueBranch) {
+        currentNodeId = node.trueBranch
+      } else if (!conditionMet && node.falseBranch) {
+        currentNodeId = node.falseBranch
+      } else {
+        const currentIdx = rules.findIndex(r => r.id === node.id)
+        if (currentIdx >= 0 && currentIdx < rules.length - 1) {
+          currentNodeId = rules[currentIdx + 1].id
+        } else {
+          break
+        }
+      }
+    } else if (node.type === 'end') {
+      break
+    } else {
+      break
+    }
+  }
+
+  return { code, usedRoots }
+}
+
 // 执行编码规则（通用函数，支持多字词）
 function executeCodeRules(rules: ReturnType<typeof engine.getCodeRules>, charsRoots: string[][]): string {
   let code = ''
@@ -411,14 +536,16 @@ const currentItems = computed(() => {
 
 // 检查单字编码状态
 function getCharCodeStatus(char: string): '完整' | '缺失' {
-  const code = calculateCharCode(char)
-  return code ? '完整' : '缺失'
+  const { code, usedRoots } = calculateCharCodeWithRoots(char)
+  if (!code) return '缺失'
+  return usedRoots.every(({ root }) => !!getRootFullCode(root)) ? '完整' : '缺失'
 }
 
 // 检查多字词编码状态
 function getWordCodeStatus(word: string): '完整' | '缺失' {
-  const code = calculateWordCode(word)
-  return code ? '完整' : '缺失'
+  const { code, usedRoots } = calculateWordCodeWithRoots(word)
+  if (!code) return '缺失'
+  return usedRoots.every(({ root }) => !!getRootFullCode(root)) ? '完整' : '缺失'
 }
 
 // 获取编码状态（通用）
@@ -460,7 +587,7 @@ const pagedItems = computed(() => {
 // 获取单字完整信息
 function getCharInfo(char: string) {
   const decomp = engine.decompose(char)
-  const code = calculateCharCode(char)
+  const { code } = calculateCharCodeWithRoots(char)
   const pyList = engine.getPinyinList(char)
   const freq = engine.freq.get(char) || 0
   
