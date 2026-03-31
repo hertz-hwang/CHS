@@ -51,6 +51,11 @@ const allElements = computed(() => {
 
   const elementSet = new Set<string>()
 
+  // 添加当前字根集合
+  for (const c of engine.roots) {
+    elementSet.add(c)
+  }
+
   // 添加原子字根
   for (const c of engine.atomicComponents()) {
     elementSet.add(c)

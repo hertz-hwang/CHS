@@ -74,7 +74,7 @@ export class IDSTransformer {
   private applyRegexRule(rule: RegexRuleConfig, ids: string): string {
     try {
       const regex = new RegExp(rule.pattern, 'g')
-      return ids.replace(regex, rule.replacement)
+      return this.replaceRegexOutsideBraces(ids, regex, rule.replacement)
     } catch {
       return ids
     }
@@ -247,6 +247,45 @@ export class IDSTransformer {
     return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
   }
 
+  private replaceRegexOutsideBraces(ids: string, regex: RegExp, replacement: string): string {
+    let result = ''
+    let pos = 0
+
+    while (pos < ids.length) {
+      if (ids[pos] === '{') {
+        const end = ids.indexOf('}', pos)
+        if (end < 0) {
+          result += ids.slice(pos)
+          break
+        }
+        const unit = ids.slice(pos, end + 1)
+        result += this.replaceWholeUnitWithRegex(unit, regex, replacement)
+        pos = end + 1
+        continue
+      }
+
+      let nextBrace = ids.indexOf('{', pos)
+      if (nextBrace < 0) nextBrace = ids.length
+      result += ids.slice(pos, nextBrace).replace(regex, replacement)
+      pos = nextBrace
+    }
+
+    return result
+  }
+
+  private replaceWholeUnitWithRegex(unit: string, regex: RegExp, replacement: string): string {
+    const match = this.matchWholeUnit(regex, unit)
+    if (!match) return unit
+    return unit.replace(regex, replacement)
+  }
+
+  private matchWholeUnit(regex: RegExp, unit: string): boolean {
+    const flags = regex.flags.replace(/g/g, '')
+    const wholeRegex = new RegExp(regex.source, flags)
+    const match = wholeRegex.exec(unit)
+    return !!match && match.index === 0 && match[0].length === unit.length
+  }
+
   private replaceComponentOutsideBraces(ids: string, component: string, replacement: string): string {
     let result = ''
     let pos = 0
@@ -328,25 +367,19 @@ export class IDSTransformer {
   }
 
   /**
-   * 获取所有规则中涉及的命名字根
-   * 包括 pattern 和 replacement 中的字根
+   * 获取所有规则中需要保留在字根集中的命名字根
+   * 仅包含替换结果中的字根；仅出现在匹配条件中的描述性字根不自动加入
    */
   getNamedRoots(): string[] {
     const roots = new Set<string>()
     for (const rule of this.rules) {
       if (rule.enabled === false) continue
       
-      // 从正则模式的 pattern 和 replacement 中提取
       if (rule.mode === 'regex') {
-        const patternRoots = IDSTransformer.extractNamedRoots(rule.pattern)
         const replacementRoots = IDSTransformer.extractNamedRoots(rule.replacement)
-        patternRoots.forEach(r => roots.add(r))
         replacementRoots.forEach(r => roots.add(r))
       } else {
-        // 从可视化模式的字段中提取
-        const componentRoots = rule.component ? IDSTransformer.extractNamedRoots(rule.component) : []
         const replaceWithRoots = rule.replace_with ? IDSTransformer.extractNamedRoots(rule.replace_with) : []
-        componentRoots.forEach(r => roots.add(r))
         replaceWithRoots.forEach(r => roots.add(r))
       }
     }

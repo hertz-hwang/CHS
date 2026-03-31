@@ -6,7 +6,7 @@ import { exportConfig, parseConfig, saveConfigToStorage, createDefaultConfig } f
 import Icon from './Icon.vue'
 import ConfigManager from './ConfigManager.vue'
 
-const { engine, refreshStats, toast, stats, configVersion, getConfig, applyConfig, currentCharsetId, setCharset, getCurrentCharsetName, initSchemes, getCurrentScheme, currentFreqSourceId, freqVersion, getFreqSourceOptions, setFreqSource, setCustomFreqText, getCurrentFreqSourceName } = useEngine()
+const { engine, refreshStats, toast, stats, configVersion, getConfig, applyConfig, currentCharsetId, setCharset, getCurrentCharsetName, initSchemes, getCurrentScheme, currentFreqSourceId, freqVersion, getFreqSourceOptions, setFreqSource, setCustomFreqText, getCurrentFreqSourceName, currentSchemeId, renameSchemeById, saveCurrentAsNewScheme } = useEngine()
 const { theme, toggleTheme, isDark } = useTheme()
 
 const fileInput = ref<HTMLInputElement>()
@@ -117,13 +117,26 @@ function openEditMetaDialog() {
 
 // 确认编辑方案信息
 function confirmEditMeta() {
+  const name = editConfigName.value.trim() || '未命名配置'
+  const author = editConfigAuthor.value.trim() || '未知作者'
+  const description = editConfigDesc.value.trim()
+  const scheme = getCurrentScheme()
+
+  if (!scheme || currentSchemeId.value?.startsWith('example_')) {
+    saveCurrentAsNewScheme(name, author, description)
+    showEditMetaDialog.value = false
+    toast(`已另存为新方案: ${name}`)
+    return
+  }
+
   const config = getConfig()
   config.meta = config.meta || { version: '1.0' }
-  config.meta.name = editConfigName.value.trim() || '未命名配置'
-  config.meta.author = editConfigAuthor.value.trim() || '未知作者'
-  config.meta.description = editConfigDesc.value.trim()
+  config.meta.name = name
+  config.meta.author = author
+  config.meta.description = description
   applyConfig(config)
-  saveConfigToStorage(config)
+  renameSchemeById(scheme.id, name, author, description)
+  saveConfigToStorage(getConfig())
   showEditMetaDialog.value = false
   toast('配置信息已更新')
 }

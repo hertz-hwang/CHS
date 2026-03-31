@@ -117,8 +117,8 @@ function jumpToPage() {
         <span class="element-char" :class="getFontClass(element)">
           {{ displayElement(element) }}
         </span>
-        <span v-if="engine.roots.has(element)" class="element-code">
-          {{ codeToString(engine.rootCodes.get(element)!) }}
+        <span v-if="getElementInfo(element).code" class="element-code">
+          {{ getElementInfo(element).code }}
         </span>
       </div>
     </div>

@@ -939,6 +939,32 @@ function createNewScheme(name: string, author: string, description: string = '')
   return scheme
 }
 
+// 基于当前配置创建新方案，并切换到该方案
+function saveCurrentAsNewScheme(name: string, author: string, description: string = ''): ConfigScheme {
+  const scheme = createScheme(name, author, description)
+  const config = getConfig()
+  config.meta = {
+    ...config.meta,
+    version: config.meta?.version || '1.0',
+    name,
+    author,
+    created: scheme.created,
+    description,
+  }
+
+  saveScheme(scheme, config)
+
+  withSuppressedSchemeSync(() => {
+    currentSchemeId.value = scheme.id
+    setCurrentSchemeId(scheme.id)
+    applyConfig(config)
+    saveConfigToStorage(getConfig())
+  })
+
+  schemesVersion.value++
+  return scheme
+}
+
 // 导入方案
 function importScheme(toml: string, name?: string, author?: string): ConfigSchemeWithData | null {
   const schemeData = importSchemeFromToml(toml, name, author)
@@ -1134,6 +1160,7 @@ export function useEngine() {
     switchScheme,
     saveCurrentToScheme,
     createNewScheme,
+    saveCurrentAsNewScheme,
     importScheme,
     exportScheme,
     exportSchemeAsync,
