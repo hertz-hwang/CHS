@@ -11,7 +11,7 @@ import {
 import { loadRoots2PuaMap, bracedRootToPua, convertBracedRootsToPua, isBracedRoot, needsPuaFont, getPuaFontName } from '@/utils/pua'
 
 // 缓存版本号 - 更新此版本号会强制重新加载数据
-const CACHE_VERSION = '0.1.9'
+const CACHE_VERSION = __APP_VERSION__
 const CACHE_KEY_PREFIX = 'chars_hijack_cache_'
 const CACHE_VERSION_KEY = `${CACHE_KEY_PREFIX}version`
 const CUSTOM_FREQ_KEY = 'chars_hijack_custom_freq'
@@ -156,6 +156,18 @@ const configVersion = ref(0)
 // 字集版本号，用于触发字集相关的更新
 const charsetVersion = ref(0)
 
+let suppressCurrentSchemeSync = false
+
+function withSuppressedSchemeSync<T>(fn: () => T): T {
+  const prev = suppressCurrentSchemeSync
+  suppressCurrentSchemeSync = true
+  try {
+    return fn()
+  } finally {
+    suppressCurrentSchemeSync = prev
+  }
+}
+
 function refreshStats() {
   stats.decomp = engine.decomp.size
   stats.roots = engine.roots.size
@@ -164,6 +176,7 @@ function refreshStats() {
   engine.clearCache() // 清除拆分缓存，确保重新计算
   rootsVersion.value++ // 触发依赖 roots 的计算属性更新
   configVersion.value++ // 触发配置相关的更新
+  syncCurrentSchemeSnapshot()
 }
 
 function toast(msg: string, duration = 2500) {
@@ -771,14 +784,16 @@ function getCurrentFreqSourceName(): string {
 // ============ 配置管理方法 ============
 
 function applyConfig(config: UserConfig): void {
-  engine.applyConfig(config)
-  // 恢复字集设置（优先使用配置中的字集，否则使用默认值 'all'）
-  const charsetId = config.charset || 'all'
-  if (CHARSET_OPTIONS.some(o => o.id === charsetId)) {
-    currentCharsetId.value = charsetId
-    charsetVersion.value++
-  }
-  refreshStats()
+  withSuppressedSchemeSync(() => {
+    engine.applyConfig(config)
+    // 恢复字集设置（优先使用配置中的字集，否则使用默认值 'all'）
+    const charsetId = config.charset || 'all'
+    if (CHARSET_OPTIONS.some(o => o.id === charsetId)) {
+      currentCharsetId.value = charsetId
+      charsetVersion.value++
+    }
+    refreshStats()
+  })
 }
 
 function getConfig(): UserConfig {
@@ -802,6 +817,7 @@ function exportConfigToToml(): string {
 
 function saveCurrentConfig(): void {
   saveConfigToStorage(getConfig())
+  syncCurrentSchemeSnapshot()
 }
 
 function loadSavedConfig(): boolean {
@@ -824,6 +840,27 @@ const currentSchemeId = ref<string | null>(null)
 
 // 方案列表版本号（用于触发更新）
 const schemesVersion = ref(0)
+
+function syncCurrentSchemeSnapshot(): void {
+  const id = currentSchemeId.value
+  if (!id || id.startsWith('example_') || suppressCurrentSchemeSync) return
+
+  const schemes = listSchemes()
+  const scheme = schemes.find(s => s.id === id)
+  if (!scheme) return
+
+  const config = getConfig()
+  scheme.updated = new Date().toISOString().split('T')[0]
+  config.meta = {
+    ...config.meta,
+    name: scheme.name,
+    author: scheme.author,
+    description: scheme.description,
+  }
+
+  saveScheme(scheme, config)
+  schemesVersion.value++
+}
 
 // 初始化配置方案系统
 async function initSchemes(): Promise<void> {
@@ -860,12 +897,14 @@ async function switchScheme(id: string): Promise<boolean> {
 
     if (!schemeData) return false
 
-    applyConfig(schemeData.config)
-    currentSchemeId.value = id
-    setCurrentSchemeId(id)
-    // 保存配置到 localStorage，确保刷新后能恢复
-    saveConfigToStorage(getConfig())
-    schemesVersion.value++
+    withSuppressedSchemeSync(() => {
+      applyConfig(schemeData.config)
+      currentSchemeId.value = id
+      setCurrentSchemeId(id)
+      // 保存配置到 localStorage，确保刷新后能恢复
+      saveConfigToStorage(getConfig())
+      schemesVersion.value++
+    })
     return true
   } catch (e) {
     console.error('Failed to switch scheme:', e)
@@ -875,26 +914,16 @@ async function switchScheme(id: string): Promise<boolean> {
 
 // 保存当前配置到方案
 function saveCurrentToScheme(id: string): boolean {
-  const schemes = listSchemes()
-  const scheme = schemes.find(s => s.id === id)
-  if (!scheme) return false
-  
-  const config = getConfig()
-  
-  // 更新方案的更新时间
-  scheme.updated = new Date().toISOString().split('T')[0]
-  
-  // 同步 meta 信息
-  config.meta = {
-    ...config.meta,
-    name: scheme.name,
-    author: scheme.author,
-    description: scheme.description,
+  if (!listSchemes().some(s => s.id === id)) return false
+
+  const prevId = currentSchemeId.value
+  currentSchemeId.value = id
+  try {
+    syncCurrentSchemeSnapshot()
+    return true
+  } finally {
+    currentSchemeId.value = prevId
   }
-  
-  saveScheme(scheme, config)
-  schemesVersion.value++
-  return true
 }
 
 // 创建新方案
@@ -927,6 +956,12 @@ function exportScheme(id: string): string | null {
     // 示例需要异步加载，这里返回 null，需要用 exportSchemeAsync
     return null
   }
+
+  if (id === currentSchemeId.value) {
+    const scheme = getCurrentScheme()
+    if (!scheme) return null
+    return exportSchemeToToml({ ...scheme, config: getConfig() })
+  }
   
   const schemeData = loadScheme(id)
   if (!schemeData) return null
@@ -936,6 +971,12 @@ function exportScheme(id: string): string | null {
 
 // 异步导出方案（支持示例）
 async function exportSchemeAsync(id: string): Promise<string | null> {
+  if (id === currentSchemeId.value && !id.startsWith('example_')) {
+    const scheme = getCurrentScheme()
+    if (!scheme) return null
+    return exportSchemeToToml({ ...scheme, config: getConfig() })
+  }
+
   let schemeData = await loadExampleScheme(id)
   if (!schemeData) {
     schemeData = loadScheme(id)

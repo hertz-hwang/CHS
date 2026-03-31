@@ -144,13 +144,7 @@ export class IDSTransformer {
    */
   private applyComponentMatch(rule: VisualRuleConfig, ids: string): string {
     if (!rule.component) return ids
-
-    // 简单替换：直接替换部件
-    const regex = new RegExp(this.escapeRegex(rule.component), 'g')
-    if (regex.test(ids)) {
-      return ids.replace(regex, rule.replace_with)
-    }
-    return ids
+    return this.replaceComponentOutsideBraces(ids, rule.component, rule.replace_with)
   }
 
   /**
@@ -233,11 +227,49 @@ export class IDSTransformer {
   }
 
   private containsComponent(ids: string, component: string): boolean {
-    return ids.includes(component)
+    if (ids === component) return true
+
+    let pos = 0
+    while (pos < ids.length) {
+      const unit = this.extractOne(ids, pos)
+      if (!unit) break
+      if (unit === component) return true
+      if (this.isStructureChar(unit[0]) && this.containsComponent(unit.slice(1), component)) {
+        return true
+      }
+      pos += unit.length
+    }
+
+    return false
   }
 
   private escapeRegex(str: string): string {
     return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  }
+
+  private replaceComponentOutsideBraces(ids: string, component: string, replacement: string): string {
+    let result = ''
+    let pos = 0
+
+    while (pos < ids.length) {
+      const unit = this.extractOne(ids, pos)
+      if (!unit) break
+      result += this.replaceInUnit(unit, component, replacement)
+      pos += unit.length
+    }
+
+    return result
+  }
+
+  private replaceInUnit(unit: string, component: string, replacement: string): string {
+    if (unit === component) return replacement
+    if (!unit || unit[0] === '{' || !this.isStructureChar(unit[0])) return unit
+
+    const op = unit[0]
+    const children = this.extractChildren(unit, op)
+    if (!children) return unit
+
+    return op + children.map(child => this.replaceInUnit(child, component, replacement)).join('')
   }
 
   // ============ 预览方法 ============

@@ -11,6 +11,7 @@ const { theme, toggleTheme, isDark } = useTheme()
 
 const fileInput = ref<HTMLInputElement>()
 const freqFileInput = ref<HTMLInputElement>()
+const appVersion = __APP_VERSION__
 
 // 配置名和作者名（计算属性，依赖 configVersion 实现响应式更新）
 const configName = computed(() => {
@@ -262,7 +263,7 @@ function importCustomFreq(e: Event) {
   <header class="header">
     <div class="header-left">
       <div class="title">
-        <h1>字劫 <span class="title-suffix">CHS</span><span class="ver">v0.1.9</span></h1>
+        <h1>字劫 <span class="title-suffix">CHS</span><span class="ver">v{{ appVersion }}</span></h1>
       </div>
       
       <!-- 配置操作 -->
