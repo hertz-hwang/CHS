@@ -55,6 +55,79 @@
 // 数据结构
 // ════════════════════════════════════════════════════════════════
 
+/** 手指名称映射 */
+const FINGER_NAMES: Record<number, string> = {
+  0: '小指', 1: '无名指', 2: '中指', 3: '食指', 4: '拇指',
+}
+
+/** 分类名称映射 */
+const CATEGORY_NAMES: Record<string, string> = {
+  same_key: '同键连击',
+  same_finger: '同指异键',
+  same_hand: '同手异指',
+  diff_hand: '异手交替',
+}
+
+/**
+ * 逐键对的详细分解信息（debug 输出）
+ */
+export interface KeyPairDetail {
+  /** 键对标签，如 "f→s" */
+  label: string
+  /** 分类名称 */
+  category: string
+  /** 手指路径描述，如 "左食指→左无名指" */
+  fingerPath: string
+  /** 神经延迟 (ms) */
+  neural: number
+  /** 原始移动时间 (ms)，未折扣 */
+  rawMove: number
+  /** 移动折扣描述（滚动折扣/并行准备），无折扣时为 null */
+  moveDiscountDesc: string | null
+  /** 最终移动时间 (ms) */
+  move: number
+  /** 耦合惩罚 (ms) */
+  coupling: number
+  /** 跨行惩罚 (ms) */
+  rowJump: number
+  /** 同指跨排惩罚 (ms) */
+  sfJump: number
+  /** 小指干扰惩罚 (ms) */
+  pinky: number
+  /** 伸展惩罚 (ms) */
+  stretch: number
+  /** 滚动奖励 (ms)，负值 */
+  roll: number
+  /** 连击惩罚 (ms) */
+  repeat: number
+  /** 连击次数（≥2 时显示） */
+  repeatCount: number
+  /** 联动偏移描述 */
+  couplingDesc: string
+  /** 该步间隔时间 (ms) */
+  interval: number
+}
+
+/**
+ * 整个序列的 debug 分解结果
+ */
+export interface SequenceDebugResult {
+  /** 输入序列 */
+  sequence: string
+  /** 总时间 (ms) */
+  totalTime: number
+  /** 首键定位成本 (ms) */
+  firstKeyCost: number
+  /** 逐步累加总计 (ms) */
+  stepwiseTotal: number
+  /** 左手子序列下界 (ms) */
+  leftHandTime: number
+  /** 右手子序列下界 (ms) */
+  rightHandTime: number
+  /** 逐键对详细信息 */
+  pairs: KeyPairDetail[]
+}
+
 /**
  * 单个键的物理信息
  */
@@ -979,6 +1052,220 @@ class TypingModel {
     const rightTime = this.computeSingleHandTime(infos.filter((item) => item.hand === 'R'))
     return Math.round(Math.max(stepwiseTotal, leftTime, rightTime) * 100) / 100
   }
+
+  /**
+   * 返回击键序列的逐键对详细分解信息（debug 模式）
+   *
+   * 与 sequenceTime 相同的计算流程，但记录每一步的各项分量。
+   * 对应 Python 版 key_soul_equiv_v2.3.py --debug 的输出。
+   *
+   * @param keys - 击键序列字符串（如 "fssi"）
+   * @returns 详细分解结果，< 2 键或包含未知键时返回 null
+   */
+  debugSequence(keys: string): SequenceDebugResult | null {
+    if (keys.length < 2) return null
+    const infos: KeyInfo[] = []
+    for (const ch of keys) {
+      const key = this.kb.get(ch)
+      if (!key) return null
+      infos.push(key)
+    }
+
+    const handLabel = (h: 'L' | 'R') => h === 'L' ? '左' : '右'
+    const fingerLabel = (h: 'L' | 'R', f: number) => `${handLabel(h)}${FINGER_NAMES[f] ?? f}`
+
+    // v2.3: 首键定位成本
+    const firstKeyCostVal = this.firstKeyCost(infos[0])
+
+    const fingerStates = this.initAllFingerStates()
+    const first = infos[0]
+    const firstKey = `${first.hand}:${first.finger}` as FingerKey
+
+    const firstState = fingerStates.get(firstKey)
+    if (firstState) {
+      firstState.effX = first.x
+      firstState.effY = first.y
+      firstState.lastKey = first
+      firstState.releaseTime = firstKeyCostVal + TypingModel.RELEASE_DELAY
+      firstState.repeatCount = 1
+    } else {
+      fingerStates.set(firstKey, {
+        effX: first.x, effY: first.y, lastKey: first,
+        releaseTime: firstKeyCostVal + TypingModel.RELEASE_DELAY, repeatCount: 1,
+      })
+    }
+    this.applyTendonCoupling(first.finger, first, first.hand, fingerStates)
+
+    let curTime = firstKeyCostVal
+    let stepwiseTotal = firstKeyCostVal
+    const pairs: KeyPairDetail[] = []
+
+    for (let i = 1; i < infos.length; i++) {
+      const prev = infos[i - 1]
+      const curr = infos[i]
+      const cat = this.classify(prev, curr)
+      const fk = `${curr.hand}:${curr.finger}` as FingerKey
+
+      const tNeural = TypingModel.NEURAL[cat]
+
+      // 各项分量
+      const moveDiscount = cat === 'same_hand' ? this.rollMoveDiscount(prev, curr) : 1.0
+      let tMove = 0
+      let rawMove = 0
+      let moveDiscountDesc: string | null = null
+
+      if (cat === 'same_key') {
+        // 同键连击不移动
+      } else if (cat === 'diff_hand') {
+        const state = fingerStates.get(fk)
+        if (state) {
+          rawMove = this.fitts(this.effectiveDist(state, curr), curr.finger)
+        } else {
+          const home = this.kb.homeOf(curr.hand, curr.finger)
+          rawMove = home ? this.fitts(this.kb.dist(home, curr), curr.finger) : 0
+        }
+        if (rawMove > 0) {
+          const earliest = state && state.releaseTime > 0 ? state.releaseTime : Math.max(0, curTime - 200)
+          const available = Math.max(0, curTime - earliest)
+          const effectivePrep = available * TypingModel.PARALLEL_EFFICIENCY
+          tMove = Math.max(0, rawMove - effectivePrep)
+          moveDiscountDesc = `并行准备=${effectivePrep.toFixed(1)}ms 可用=${available.toFixed(1)}ms`
+        }
+      } else if (cat === 'same_finger') {
+        const state = fingerStates.get(fk)
+        if (state) {
+          rawMove = this.fitts(this.effectiveDist(state, curr), curr.finger)
+        } else {
+          const home = this.kb.homeOf(curr.hand, curr.finger)
+          rawMove = home ? this.fitts(this.kb.dist(home, curr), curr.finger) : 0
+        }
+        tMove = rawMove
+      } else {
+        // same_hand
+        const state = fingerStates.get(fk)
+        if (state) {
+          rawMove = this.fitts(this.effectiveDist(state, curr), curr.finger)
+        } else {
+          const home = this.kb.homeOf(curr.hand, curr.finger)
+          rawMove = home ? this.fitts(this.kb.dist(home, curr), curr.finger) : 0
+        }
+        tMove = rawMove * moveDiscount
+        if (moveDiscount < 1.0) {
+          moveDiscountDesc = `滚动折扣×${moveDiscount.toFixed(2)}`
+        }
+      }
+
+      const tCouple = cat === 'same_hand' ? (TypingModel.COUPLING[`${prev.finger}:${curr.finger}`] ?? 0) : 0
+      const rowDiff = Math.abs(prev.row - curr.row)
+      const tRow = cat === 'same_hand' || cat === 'same_finger' ? (TypingModel.ROW_JUMP_BASE[rowDiff] ?? 40) : 0
+      const tSfJump = cat === 'same_finger' ? this.sameFingerRowPenalty(prev, curr) : 0
+      const tPinky = cat === 'same_hand' ? this.pinkyInterference(prev, curr) : 0
+      const tStretch = cat === 'same_hand' ? this.stretchPenalty(prev, curr) : 0
+      const tRoll = cat === 'same_hand' ? this.roll(prev, curr) : 0
+
+      let tRepeat = 0
+      let repeatCount = 0
+      if (cat === 'same_key') {
+        const state = fingerStates.get(fk)
+        repeatCount = state ? state.repeatCount + 1 : 2
+        tRepeat = this.repeatEscalationPenalty(curr.finger, repeatCount)
+      }
+
+      const interval = Math.max(
+        TypingModel.MINIMUM_INTERVAL,
+        tNeural + tMove + tCouple + tRow + tSfJump + tPinky + tStretch + tRoll + tRepeat,
+      )
+
+      // 联动偏移描述
+      const state = fingerStates.get(fk)
+      const effDist = state ? this.effectiveDist(state, curr) : 0
+      const nomDist = state ? this.nominalDist(state, curr) : 0
+      const couplingOffset = effDist - nomDist
+      let couplingDesc: string
+      if (cat === 'same_key') {
+        couplingDesc = `同键连击: ${fingerLabel(curr.hand, curr.finger)}保持在[${curr.char}]上`
+      } else if (cat === 'diff_hand') {
+        const homeKey = this.kb.homeOf(curr.hand, curr.finger)
+        const fromChar = state?.lastKey?.char ?? homeKey?.char ?? '?'
+        couplingDesc = `异手移动: ${fingerLabel(curr.hand, curr.finger)} [${fromChar}]→[${curr.char}]`
+          + ` 有效距离=${effDist.toFixed(1)}mm`
+          + ` 联动偏移=${couplingOffset >= 0 ? '+' : ''}${couplingOffset.toFixed(1)}mm`
+      } else {
+        const homeKey = this.kb.homeOf(curr.hand, curr.finger)
+        const fromChar = state?.lastKey?.char ?? homeKey?.char ?? '?'
+        couplingDesc = `同手移动: ${fingerLabel(curr.hand, curr.finger)} [${fromChar}]→[${curr.char}]`
+          + ` 有效距离=${effDist.toFixed(1)}mm`
+          + ` 名义距离=${nomDist.toFixed(1)}mm`
+          + ` 联动偏移=${couplingOffset >= 0 ? '+' : ''}${couplingOffset.toFixed(1)}mm`
+      }
+
+      pairs.push({
+        label: `${prev.char}→${curr.char}`,
+        category: CATEGORY_NAMES[cat] ?? cat,
+        fingerPath: `${fingerLabel(prev.hand, prev.finger)}→${fingerLabel(curr.hand, curr.finger)}`,
+        neural: tNeural,
+        rawMove: Math.round(rawMove * 100) / 100,
+        moveDiscountDesc,
+        move: Math.round(tMove * 100) / 100,
+        coupling: tCouple,
+        rowJump: tRow,
+        sfJump: tSfJump,
+        pinky: tPinky,
+        stretch: tStretch,
+        roll: Math.round(tRoll * 100) / 100,
+        repeat: Math.round(tRepeat * 100) / 100,
+        repeatCount,
+        couplingDesc,
+        interval: Math.round(interval * 100) / 100,
+      })
+
+      curTime += interval
+      stepwiseTotal += interval
+
+      // 更新手指状态（与 sequenceTime 相同）
+      if (cat === 'same_key') {
+        const st = fingerStates.get(fk)
+        if (st) {
+          st.repeatCount += 1
+          st.releaseTime = curTime + TypingModel.RELEASE_DELAY
+        } else {
+          fingerStates.set(fk, {
+            effX: curr.x, effY: curr.y, lastKey: curr,
+            releaseTime: curTime + TypingModel.RELEASE_DELAY, repeatCount: 2,
+          })
+        }
+      } else {
+        const st = fingerStates.get(fk)
+        if (st) {
+          st.effX = curr.x
+          st.effY = curr.y
+          st.lastKey = curr
+          st.releaseTime = curTime + TypingModel.RELEASE_DELAY
+          st.repeatCount = 1
+        } else {
+          fingerStates.set(fk, {
+            effX: curr.x, effY: curr.y, lastKey: curr,
+            releaseTime: curTime + TypingModel.RELEASE_DELAY, repeatCount: 1,
+          })
+        }
+      }
+      this.applyTendonCoupling(curr.finger, curr, curr.hand, fingerStates)
+    }
+
+    const leftTime = this.computeSingleHandTime(infos.filter((item) => item.hand === 'L'))
+    const rightTime = this.computeSingleHandTime(infos.filter((item) => item.hand === 'R'))
+    const totalTime = Math.round(Math.max(stepwiseTotal, leftTime, rightTime) * 100) / 100
+
+    return {
+      sequence: keys,
+      totalTime,
+      firstKeyCost: Math.round(firstKeyCostVal * 100) / 100,
+      stepwiseTotal: Math.round(stepwiseTotal * 100) / 100,
+      leftHandTime: Math.round(leftTime * 100) / 100,
+      rightHandTime: Math.round(rightTime * 100) / 100,
+      pairs,
+    }
+  }
 }
 
 // 全局单例模型
@@ -991,6 +1278,15 @@ const model = new TypingModel()
  */
 export function calcKeySoulEquivalence(code: string): number {
   return model.sequenceTime(code)
+}
+
+/**
+ * 获取编码序列的键魂当量逐键对详细分解
+ * @param code - 编码字符串（如 "fssi"）
+ * @returns 详细分解结果，< 2 键或包含未知键时返回 null
+ */
+export function debugKeySoulEquivalence(code: string): SequenceDebugResult | null {
+  return model.debugSequence(code)
 }
 
 /**
