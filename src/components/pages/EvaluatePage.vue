@@ -1016,7 +1016,7 @@ watch(ksDetailCurrentPage, () => {
   if (modalBody) modalBody.scrollTop = 0
 })
 
-// 键魂词均当量详情弹窗相关
+// 键魂词当量详情弹窗相关
 const showKsWordDetailModal = ref(false)
 const ksWordDetailTitle = ref('')
 const ksWordDetailItems = ref<EvaluateWordItem[]>([])
@@ -1041,7 +1041,7 @@ const paginatedKsWordDetailItems = computed(() => {
   return filteredKsWordDetailItems.value.slice(start, end)
 })
 
-// 键魂词均当量分页控制
+// 键魂词当量分页控制
 function goToKsWordDetailFirstPage() { ksWordDetailCurrentPage.value = 1 }
 function goToKsWordDetailPrevPage() { if (ksWordDetailCurrentPage.value > 1) ksWordDetailCurrentPage.value-- }
 function goToKsWordDetailNextPage() { if (ksWordDetailCurrentPage.value < ksWordDetailTotalPages.value) ksWordDetailCurrentPage.value++ }
@@ -1056,13 +1056,13 @@ function handleKsWordDetailJump() {
   }
 }
 
-// 点击键魂词均当量单元格
+// 点击键魂词当量单元格
 function handleKsWordEqClick(line: EvaluateWordLine, rangeLabel: string) {
   // 收集该范围内所有有效词组（非缺词、非超标键位）
   const items = line.items.filter(item => !item.isLack && item.overKey === 0)
   if (items.length === 0) return
 
-  ksWordDetailTitle.value = `${rangeLabel} - 键魂词均当量详情（共 ${items.length} 词）`
+  ksWordDetailTitle.value = `${rangeLabel} - 键魂词当量详情（共 ${items.length} 词）`
   ksWordDetailItems.value = items.sort((a, b) => b.freq - a.freq)
   ksWordDetailCurrentPage.value = 1
   ksWordDetailSearchQuery.value = ''
@@ -2043,8 +2043,8 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                 <th>序号</th>
                 <th>汉字</th>
                 <th>编码</th>
-                <th>键魂字均当量</th>
-                <th>键魂键均当量</th>
+                <th>键魂字当量</th>
+                <th>键魂键当量</th>
                 <th>字均当量</th>
                 <th>键均当量</th>
                 <th>字频</th>
@@ -2102,7 +2102,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                 <th>序号</th>
                 <th>词组</th>
                 <th>编码</th>
-                <th>键魂词均当量</th>
+                <th>键魂词当量</th>
                 <th>词均当量</th>
                 <th>词频</th>
               </tr>
