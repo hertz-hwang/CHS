@@ -3,6 +3,7 @@ import { ref, watch, computed, shallowRef } from 'vue'
 import { useEngine } from '../../composables/useEngine'
 import KeyboardHeatmap from '../shared/KeyboardHeatmap.vue'
 import Icon from '../Icon.vue'
+import { calcKeySoulEquivalence } from '../../utils/keySoulEquiv'
 import {
   evaluateScheme,
   evaluateWords,
@@ -14,9 +15,11 @@ import {
   getWordColumnValue,
   getWeightedValue,
   getWordWeightedEq,
+  getWordWeightedKsEq,
   getWordComboWeightPercent,
   getWordLackWeightPercent,
   calcFingerBalance,
+  calcEquivalence as calcEquivalenceForDisplay,
   type EvaluationResult,
   type EvaluateLine,
   type EvaluateHanziItem,
@@ -644,33 +647,53 @@ const detailItems = ref<EvaluateHanziItem[]>([])
 const detailWordItems = ref<EvaluateWordItem[]>([])
 const isWordDetail = ref(false)
 
+// 弹窗检索
+const detailSearchQuery = ref('')
+const detailWordSearchQuery = ref('')
+
 // 弹窗分页相关
 const detailPageSize = 10  // 每页显示数量
 const detailCurrentPage = ref(1)
 const detailWordCurrentPage = ref(1)
 
+// 过滤后的数据（单字）
+const filteredDetailItems = computed(() => {
+  if (!detailSearchQuery.value) return detailItems.value
+  return detailItems.value.filter(item =>
+    item.char.includes(detailSearchQuery.value)
+  )
+})
+
+// 过滤后的数据（词组）
+const filteredDetailWordItems = computed(() => {
+  if (!detailWordSearchQuery.value) return detailWordItems.value
+  return detailWordItems.value.filter(item =>
+    item.word.includes(detailWordSearchQuery.value)
+  )
+})
+
 // 总页数（单字）
 const detailTotalPages = computed(() => {
-  return Math.ceil(detailItems.value.length / detailPageSize)
+  return Math.ceil(filteredDetailItems.value.length / detailPageSize)
 })
 
 // 总页数（词组）
 const detailWordTotalPages = computed(() => {
-  return Math.ceil(detailWordItems.value.length / detailPageSize)
+  return Math.ceil(filteredDetailWordItems.value.length / detailPageSize)
 })
 
 // 获取当前页显示的详情数据（单字）
 const paginatedDetailItems = computed(() => {
   const start = (detailCurrentPage.value - 1) * detailPageSize
   const end = start + detailPageSize
-  return detailItems.value.slice(start, end)
+  return filteredDetailItems.value.slice(start, end)
 })
 
 // 获取当前页显示的详情数据（词组）
 const paginatedDetailWordItems = computed(() => {
   const start = (detailWordCurrentPage.value - 1) * detailPageSize
   const end = start + detailPageSize
-  return detailWordItems.value.slice(start, end)
+  return filteredDetailWordItems.value.slice(start, end)
 })
 
 // 分页控制函数（单字）
@@ -923,8 +946,140 @@ function closeDetailModal() {
   showDetailModal.value = false
   detailItems.value = []
   detailWordItems.value = []
+  detailSearchQuery.value = ''
+  detailWordSearchQuery.value = ''
   resetDetailPagination()
 }
+
+// 键魂键均当量详情弹窗相关
+const showKsDetailModal = ref(false)
+const ksDetailTitle = ref('')
+const ksDetailItems = ref<EvaluateHanziItem[]>([])
+const ksDetailCurrentPage = ref(1)
+const ksDetailPageSize = 10
+const ksDetailSearchQuery = ref('')
+
+const filteredKsDetailItems = computed(() => {
+  if (!ksDetailSearchQuery.value) return ksDetailItems.value
+  return ksDetailItems.value.filter(item =>
+    item.char.includes(ksDetailSearchQuery.value)
+  )
+})
+
+const ksDetailTotalPages = computed(() => {
+  return Math.ceil(filteredKsDetailItems.value.length / ksDetailPageSize)
+})
+
+const paginatedKsDetailItems = computed(() => {
+  const start = (ksDetailCurrentPage.value - 1) * ksDetailPageSize
+  const end = start + ksDetailPageSize
+  return filteredKsDetailItems.value.slice(start, end)
+})
+
+// 键魂键均当量分页控制
+function goToKsDetailFirstPage() { ksDetailCurrentPage.value = 1 }
+function goToKsDetailPrevPage() { if (ksDetailCurrentPage.value > 1) ksDetailCurrentPage.value-- }
+function goToKsDetailNextPage() { if (ksDetailCurrentPage.value < ksDetailTotalPages.value) ksDetailCurrentPage.value++ }
+function goToKsDetailLastPage() { ksDetailCurrentPage.value = ksDetailTotalPages.value }
+
+const ksDetailJumpPage = ref('')
+function handleKsDetailJump() {
+  const page = parseInt(ksDetailJumpPage.value)
+  if (!isNaN(page) && page >= 1 && page <= ksDetailTotalPages.value) {
+    ksDetailCurrentPage.value = page
+    ksDetailJumpPage.value = ''
+  }
+}
+
+// 点击键魂键均当量单元格
+function handleKsKeyEqClick(line: EvaluateLine, rangeLabel: string) {
+  // 收集该范围内所有有效汉字（非缺字、非超标键位）
+  const items = line.items.filter(item => !item.isLack && item.overKey === 0)
+  if (items.length === 0) return
+
+  ksDetailTitle.value = `${rangeLabel} - 键魂当量详情（共 ${items.length} 字）`
+  ksDetailItems.value = items.sort((a, b) => b.freq - a.freq)
+  ksDetailCurrentPage.value = 1
+  ksDetailSearchQuery.value = ''
+  showKsDetailModal.value = true
+}
+
+function closeKsDetailModal() {
+  showKsDetailModal.value = false
+  ksDetailItems.value = []
+  ksDetailCurrentPage.value = 1
+  ksDetailSearchQuery.value = ''
+}
+
+watch(ksDetailCurrentPage, () => {
+  const modalBody = document.querySelector('.ks-modal-body')
+  if (modalBody) modalBody.scrollTop = 0
+})
+
+// 键魂词均当量详情弹窗相关
+const showKsWordDetailModal = ref(false)
+const ksWordDetailTitle = ref('')
+const ksWordDetailItems = ref<EvaluateWordItem[]>([])
+const ksWordDetailCurrentPage = ref(1)
+const ksWordDetailPageSize = 10
+const ksWordDetailSearchQuery = ref('')
+
+const filteredKsWordDetailItems = computed(() => {
+  if (!ksWordDetailSearchQuery.value) return ksWordDetailItems.value
+  return ksWordDetailItems.value.filter(item =>
+    item.word.includes(ksWordDetailSearchQuery.value)
+  )
+})
+
+const ksWordDetailTotalPages = computed(() => {
+  return Math.ceil(filteredKsWordDetailItems.value.length / ksWordDetailPageSize)
+})
+
+const paginatedKsWordDetailItems = computed(() => {
+  const start = (ksWordDetailCurrentPage.value - 1) * ksWordDetailPageSize
+  const end = start + ksWordDetailPageSize
+  return filteredKsWordDetailItems.value.slice(start, end)
+})
+
+// 键魂词均当量分页控制
+function goToKsWordDetailFirstPage() { ksWordDetailCurrentPage.value = 1 }
+function goToKsWordDetailPrevPage() { if (ksWordDetailCurrentPage.value > 1) ksWordDetailCurrentPage.value-- }
+function goToKsWordDetailNextPage() { if (ksWordDetailCurrentPage.value < ksWordDetailTotalPages.value) ksWordDetailCurrentPage.value++ }
+function goToKsWordDetailLastPage() { ksWordDetailCurrentPage.value = ksWordDetailTotalPages.value }
+
+const ksWordDetailJumpPage = ref('')
+function handleKsWordDetailJump() {
+  const page = parseInt(ksWordDetailJumpPage.value)
+  if (!isNaN(page) && page >= 1 && page <= ksWordDetailTotalPages.value) {
+    ksWordDetailCurrentPage.value = page
+    ksWordDetailJumpPage.value = ''
+  }
+}
+
+// 点击键魂词均当量单元格
+function handleKsWordEqClick(line: EvaluateWordLine, rangeLabel: string) {
+  // 收集该范围内所有有效词组（非缺词、非超标键位）
+  const items = line.items.filter(item => !item.isLack && item.overKey === 0)
+  if (items.length === 0) return
+
+  ksWordDetailTitle.value = `${rangeLabel} - 键魂词均当量详情（共 ${items.length} 词）`
+  ksWordDetailItems.value = items.sort((a, b) => b.freq - a.freq)
+  ksWordDetailCurrentPage.value = 1
+  ksWordDetailSearchQuery.value = ''
+  showKsWordDetailModal.value = true
+}
+
+function closeKsWordDetailModal() {
+  showKsWordDetailModal.value = false
+  ksWordDetailItems.value = []
+  ksWordDetailCurrentPage.value = 1
+  ksWordDetailSearchQuery.value = ''
+}
+
+watch(ksWordDetailCurrentPage, () => {
+  const modalBody = document.querySelector('.ks-word-modal-body')
+  if (modalBody) modalBody.scrollTop = 0
+})
 
 // 监听配置变化
 watch([rootsVersion, configVersion, charsetVersion], () => {
@@ -1076,7 +1231,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
           <table class="eval-table">
             <thead>
               <tr class="scheme-title-row">
-                <th colspan="20" class="scheme-title-cell">
+                <th colspan="21" class="scheme-title-cell">
                   <div class="scheme-title-content">
                     <template v-if="editingSchemeName">
                       <input
@@ -1108,6 +1263,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                 <th class="col-select">全码重</th>
                 <th>理论二简</th>
                 <th>加权键长</th>
+                <th>键魂键均当量</th>
                 <th>字均当量</th>
                 <th>键均当量</th>
                 <th>用指平衡</th>
@@ -1135,6 +1291,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                   <td class="col-select clickable" @click="handleCellClick(line, 'fullCollision', `${line.start + 1}~${line.end}`)">{{ getColumnValue(line, 'fullCollision').count }}</td>
                   <td class="clickable" @click="handleCellClick(line, 'brief2', `${line.start + 1}~${line.end}`)">{{ getColumnValue(line, 'brief2').count }}</td>
                   <td>{{ fmt(getWeightedValue(line, 'cl')) }}</td>
+                  <td class="clickable" @click="handleKsKeyEqClick(line, `${line.start + 1}~${line.end}`)">{{ fmt(getWeightedValue(line, 'ksKeyEq')) }}</td>
                   <td>{{ fmt(getWeightedValue(line, 'ziEq')) }}</td>
                   <td>{{ fmt(getWeightedValue(line, 'keyEq')) }}</td>
                   <td>{{ fmt(calcFingerBalance(line.usage), 4) }}</td>
@@ -1160,6 +1317,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                   <td class="col-select clickable" @click="handleCellClick(getSubtotal(evaluationResult.lines.slice(0, 3)), 'fullCollision', '小计')">{{ getColumnValue(getSubtotal(evaluationResult.lines.slice(0, 3)), 'fullCollision').count }}</td>
                   <td class="clickable" @click="handleCellClick(getSubtotal(evaluationResult.lines.slice(0, 3)), 'brief2', '小计')">{{ getColumnValue(getSubtotal(evaluationResult.lines.slice(0, 3)), 'brief2').count }}</td>
                   <td>{{ fmt(getWeightedValue(getSubtotal(evaluationResult.lines.slice(0, 3)), 'cl')) }}</td>
+                  <td class="clickable" @click="handleKsKeyEqClick(getSubtotal(evaluationResult.lines.slice(0, 3)), '小计')">{{ fmt(getWeightedValue(getSubtotal(evaluationResult.lines.slice(0, 3)), 'ksKeyEq')) }}</td>
                   <td>{{ fmt(getWeightedValue(getSubtotal(evaluationResult.lines.slice(0, 3)), 'ziEq')) }}</td>
                   <td>{{ fmt(getWeightedValue(getSubtotal(evaluationResult.lines.slice(0, 3)), 'keyEq')) }}</td>
                   <td>{{ fmt(calcFingerBalance(getSubtotal(evaluationResult.lines.slice(0, 3)).usage), 4) }}</td>
@@ -1188,6 +1346,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                   <td>-</td>
                   <td>-</td>
                   <td>-</td>
+                  <td>-</td>
                   <td>{{ getComboWeightPercent(getSubtotal(evaluationResult.lines.slice(0, 3)), 'dh') }}%</td>
                   <td>{{ getComboWeightPercent(getSubtotal(evaluationResult.lines.slice(0, 3)), 'ms') }}%</td>
                   <td>{{ getComboWeightPercent(getSubtotal(evaluationResult.lines.slice(0, 3)), 'ss') }}%</td>
@@ -1211,6 +1370,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                 <td class="col-select clickable" @click="handleCellClick(getSubtotal(evaluationResult.lines), 'fullCollision', '总计')">{{ getColumnValue(getSubtotal(evaluationResult.lines), 'fullCollision').count }}</td>
                 <td class="clickable" @click="handleCellClick(getSubtotal(evaluationResult.lines), 'brief2', '总计')">{{ getColumnValue(getSubtotal(evaluationResult.lines), 'brief2').count }}</td>
                 <td>{{ fmt(getWeightedValue(getSubtotal(evaluationResult.lines), 'cl')) }}</td>
+                <td class="clickable" @click="handleKsKeyEqClick(getSubtotal(evaluationResult.lines), '总计')">{{ fmt(getWeightedValue(getSubtotal(evaluationResult.lines), 'ksKeyEq')) }}</td>
                 <td>{{ fmt(getWeightedValue(getSubtotal(evaluationResult.lines), 'ziEq')) }}</td>
                 <td>{{ fmt(getWeightedValue(getSubtotal(evaluationResult.lines), 'keyEq')) }}</td>
                 <td>{{ fmt(calcFingerBalance(getSubtotal(evaluationResult.lines).usage), 4) }}</td>
@@ -1235,6 +1395,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                 <td class="col-simple-collision clickable" @click="handleCellClick(getSubtotal(evaluationResult.lines), 'simpleCollision', '总计')">{{ getWeightPercent(getSubtotal(evaluationResult.lines), 'simpleCollision') }}%</td>
                 <td class="col-select">{{ getWeightPercent(getSubtotal(evaluationResult.lines), 'fullCollision') }}%</td>
                 <td>{{ getWeightPercent(getSubtotal(evaluationResult.lines), 'brief2') }}%</td>
+                <td>-</td>
                 <td>-</td>
                 <td>-</td>
                 <td>-</td>
@@ -1269,7 +1430,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
           <table class="eval-table word-eval-table">
             <thead>
               <tr class="scheme-title-row">
-                <th colspan="12" class="scheme-title-cell">
+                <th colspan="13" class="scheme-title-cell">
                   <div class="scheme-title-content">
                     <span class="scheme-name-text">{{ currentSchemeName }}</span>
                     <span class="scheme-subtitle">词组测评数据</span>
@@ -1279,6 +1440,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
               <tr>
                 <th class="sticky-col">统计范围</th>
                 <th class="col-select">选重</th>
+                <th>键魂词均当量</th>
                 <th>加权词均当量</th>
                 <th>左右互击</th>
                 <th>同指大跨</th>
@@ -1296,6 +1458,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                 <tr :class="{ 'row-highlight': idx < 3 }">
                   <td class="sticky-col">{{ line.start + 1 }}~{{ line.end }}</td>
                   <td class="col-select clickable" @click="handleWordCellClick(line, 'select', `${line.start + 1}~${line.end}`)">{{ getWordColumnValue(line, 'select').count }}</td>
+                  <td class="clickable" @click="handleKsWordEqClick(line, `${line.start + 1}~${line.end}`)">{{ fmt(getWordWeightedKsEq(line)) }}</td>
                   <td>{{ fmt(getWordWeightedEq(line)) }}</td>
                   <td class="clickable" @click="handleWordCellClick(line, 'dh', `${line.start + 1}~${line.end}`)">{{ getWordColumnValue(line, 'dh').count }}</td>
                   <td class="clickable" @click="handleWordCellClick(line, 'ms', `${line.start + 1}~${line.end}`)">{{ getWordColumnValue(line, 'ms').count }}</td>
@@ -1311,6 +1474,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                 <tr v-if="idx === 2" class="row-subtotal">
                   <td class="sticky-col">小计</td>
                   <td class="col-select">{{ getWordWeightPercent(getWordSubtotal(wordEvaluationResult.lines.slice(0, 3)), 'select') }}%</td>
+                  <td>{{ fmt(getWordWeightedKsEq(getWordSubtotal(wordEvaluationResult.lines.slice(0, 3)))) }}</td>
                   <td>{{ fmt(getWordWeightedEq(getWordSubtotal(wordEvaluationResult.lines.slice(0, 3)))) }}</td>
                   <td>{{ getWordComboWeightPercent(getWordSubtotal(wordEvaluationResult.lines.slice(0, 3)), 'dh') }}%</td>
                   <td>{{ getWordComboWeightPercent(getWordSubtotal(wordEvaluationResult.lines.slice(0, 3)), 'ms') }}%</td>
@@ -1327,6 +1491,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
               <tr class="row-total">
                 <td class="sticky-col">总计</td>
                 <td class="col-select clickable" @click="handleWordCellClick(getWordSubtotal(wordEvaluationResult.lines), 'select', '总计')">{{ getWordColumnValue(getWordSubtotal(wordEvaluationResult.lines), 'select').count }}</td>
+                <td class="clickable" @click="handleKsWordEqClick(getWordSubtotal(wordEvaluationResult.lines), '总计')">{{ fmt(getWordWeightedKsEq(getWordSubtotal(wordEvaluationResult.lines))) }}</td>
                 <td>{{ fmt(getWordWeightedEq(getWordSubtotal(wordEvaluationResult.lines))) }}</td>
                 <td class="clickable" @click="handleWordCellClick(getWordSubtotal(wordEvaluationResult.lines), 'dh', '总计')">{{ getWordColumnValue(getWordSubtotal(wordEvaluationResult.lines), 'dh').count }}</td>
                 <td class="clickable" @click="handleWordCellClick(getWordSubtotal(wordEvaluationResult.lines), 'ms', '总计')">{{ getWordColumnValue(getWordSubtotal(wordEvaluationResult.lines), 'ms').count }}</td>
@@ -1342,6 +1507,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
               <tr class="row-weight">
                 <td class="sticky-col">加权比重</td>
                 <td class="col-select">{{ getWordWeightPercent(getWordSubtotal(wordEvaluationResult.lines), 'select') }}%</td>
+                <td>-</td>
                 <td>-</td>
                 <td>{{ getWordComboWeightPercent(getWordSubtotal(wordEvaluationResult.lines), 'dh') }}%</td>
                 <td>{{ getWordComboWeightPercent(getWordSubtotal(wordEvaluationResult.lines), 'ms') }}%</td>
@@ -1443,7 +1609,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
           <table class="eval-table">
             <thead>
               <tr class="scheme-title-row">
-                <th colspan="20" class="scheme-title-cell">
+                <th colspan="21" class="scheme-title-cell">
                   <div class="scheme-title-content">
                     <template v-if="editingUploadedSchemeName">
                       <input 
@@ -1474,6 +1640,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                 <th class="col-select">全码重</th>
                 <th>理论二简</th>
                 <th>加权键长</th>
+                <th>键魂键均当量</th>
                 <th>字均当量</th>
                 <th>键均当量</th>
                 <th>用指平衡</th>
@@ -1500,6 +1667,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                   <td class="col-select clickable" @click="handleCellClick(line, 'fullCollision', `${line.start + 1}~${line.end}`)">{{ getColumnValue(line, 'fullCollision').count }}</td>
                   <td class="clickable" @click="handleCellClick(line, 'brief2', `${line.start + 1}~${line.end}`)">{{ getColumnValue(line, 'brief2').count }}</td>
                   <td>{{ fmt(getWeightedValue(line, 'cl')) }}</td>
+                  <td class="clickable" @click="handleKsKeyEqClick(line, `${line.start + 1}~${line.end}`)">{{ fmt(getWeightedValue(line, 'ksKeyEq')) }}</td>
                   <td>{{ fmt(getWeightedValue(line, 'ziEq')) }}</td>
                   <td>{{ fmt(getWeightedValue(line, 'keyEq')) }}</td>
                   <td>{{ fmt(calcFingerBalance(line.usage), 4) }}</td>
@@ -1525,6 +1693,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                   <td class="col-select clickable" @click="handleCellClick(getSubtotal(uploadedResult.lines.slice(0, 3)), 'fullCollision', '小计')">{{ getColumnValue(getSubtotal(uploadedResult.lines.slice(0, 3)), 'fullCollision').count }}</td>
                   <td class="clickable" @click="handleCellClick(getSubtotal(uploadedResult.lines.slice(0, 3)), 'brief2', '小计')">{{ getColumnValue(getSubtotal(uploadedResult.lines.slice(0, 3)), 'brief2').count }}</td>
                   <td>{{ fmt(getWeightedValue(getSubtotal(uploadedResult.lines.slice(0, 3)), 'cl')) }}</td>
+                  <td class="clickable" @click="handleKsKeyEqClick(getSubtotal(uploadedResult.lines.slice(0, 3)), '小计')">{{ fmt(getWeightedValue(getSubtotal(uploadedResult.lines.slice(0, 3)), 'ksKeyEq')) }}</td>
                   <td>{{ fmt(getWeightedValue(getSubtotal(uploadedResult.lines.slice(0, 3)), 'ziEq')) }}</td>
                   <td>{{ fmt(getWeightedValue(getSubtotal(uploadedResult.lines.slice(0, 3)), 'keyEq')) }}</td>
                   <td>{{ fmt(calcFingerBalance(getSubtotal(uploadedResult.lines.slice(0, 3)).usage), 4) }}</td>
@@ -1553,6 +1722,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                   <td>-</td>
                   <td>-</td>
                   <td>-</td>
+                  <td>-</td>
                   <td>{{ getComboWeightPercent(getSubtotal(uploadedResult.lines.slice(0, 3)), 'dh') }}%</td>
                   <td>{{ getComboWeightPercent(getSubtotal(uploadedResult.lines.slice(0, 3)), 'ms') }}%</td>
                   <td>{{ getComboWeightPercent(getSubtotal(uploadedResult.lines.slice(0, 3)), 'ss') }}%</td>
@@ -1576,6 +1746,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                 <td class="col-select clickable" @click="handleCellClick(getSubtotal(uploadedResult.lines), 'fullCollision', '总计')">{{ getColumnValue(getSubtotal(uploadedResult.lines), 'fullCollision').count }}</td>
                 <td class="clickable" @click="handleCellClick(getSubtotal(uploadedResult.lines), 'brief2', '总计')">{{ getColumnValue(getSubtotal(uploadedResult.lines), 'brief2').count }}</td>
                 <td>{{ fmt(getWeightedValue(getSubtotal(uploadedResult.lines), 'cl')) }}</td>
+                <td class="clickable" @click="handleKsKeyEqClick(getSubtotal(uploadedResult.lines), '总计')">{{ fmt(getWeightedValue(getSubtotal(uploadedResult.lines), 'ksKeyEq')) }}</td>
                 <td>{{ fmt(getWeightedValue(getSubtotal(uploadedResult.lines), 'ziEq')) }}</td>
                 <td>{{ fmt(getWeightedValue(getSubtotal(uploadedResult.lines), 'keyEq')) }}</td>
                 <td>{{ fmt(calcFingerBalance(getSubtotal(uploadedResult.lines).usage), 4) }}</td>
@@ -1600,6 +1771,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                 <td class="col-simple-collision clickable" @click="handleCellClick(getSubtotal(uploadedResult.lines), 'simpleCollision', '总计')">{{ getWeightPercent(getSubtotal(uploadedResult.lines), 'simpleCollision') }}%</td>
                 <td class="col-select">{{ getWeightPercent(getSubtotal(uploadedResult.lines), 'fullCollision') }}%</td>
                 <td>{{ getWeightPercent(getSubtotal(uploadedResult.lines), 'brief2') }}%</td>
+                <td>-</td>
                 <td>-</td>
                 <td>-</td>
                 <td>-</td>
@@ -1634,7 +1806,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
           <table class="eval-table word-eval-table">
             <thead>
               <tr class="scheme-title-row">
-                <th colspan="12" class="scheme-title-cell">
+                <th colspan="13" class="scheme-title-cell">
                   <div class="scheme-title-content">
                     <span class="scheme-name-text">{{ uploadedSchemeName }}</span>
                     <span class="scheme-subtitle">词组测评数据</span>
@@ -1644,6 +1816,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
               <tr>
                 <th class="sticky-col">统计范围</th>
                 <th class="col-select">选重</th>
+                <th>键魂词均当量</th>
                 <th>加权词均当量</th>
                 <th>左右互击</th>
                 <th>同指大跨</th>
@@ -1660,6 +1833,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                 <tr :class="{ 'row-highlight': idx < 3 }">
                   <td class="sticky-col">{{ line.start + 1 }}~{{ line.end }}</td>
                   <td class="col-select clickable" @click="handleWordCellClick(line, 'select', `${line.start + 1}~${line.end}`)">{{ getWordColumnValue(line, 'select').count }}</td>
+                  <td class="clickable" @click="handleKsWordEqClick(line, `${line.start + 1}~${line.end}`)">{{ fmt(getWordWeightedKsEq(line)) }}</td>
                   <td>{{ fmt(getWordWeightedEq(line)) }}</td>
                   <td class="clickable" @click="handleWordCellClick(line, 'dh', `${line.start + 1}~${line.end}`)">{{ getWordColumnValue(line, 'dh').count }}</td>
                   <td class="clickable" @click="handleWordCellClick(line, 'ms', `${line.start + 1}~${line.end}`)">{{ getWordColumnValue(line, 'ms').count }}</td>
@@ -1674,6 +1848,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                 <tr v-if="idx === 2" class="row-subtotal">
                   <td class="sticky-col">小计</td>
                   <td class="col-select">{{ getWordWeightPercent(getWordSubtotal(uploadedWordResult.lines.slice(0, 3)), 'select') }}%</td>
+                  <td>{{ fmt(getWordWeightedKsEq(getWordSubtotal(uploadedWordResult.lines.slice(0, 3)))) }}</td>
                   <td>{{ fmt(getWordWeightedEq(getWordSubtotal(uploadedWordResult.lines.slice(0, 3)))) }}</td>
                   <td>{{ getWordComboWeightPercent(getWordSubtotal(uploadedWordResult.lines.slice(0, 3)), 'dh') }}%</td>
                   <td>{{ getWordComboWeightPercent(getWordSubtotal(uploadedWordResult.lines.slice(0, 3)), 'ms') }}%</td>
@@ -1689,6 +1864,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
               <tr class="row-total">
                 <td class="sticky-col">总计</td>
                 <td class="col-select clickable" @click="handleWordCellClick(getWordSubtotal(uploadedWordResult.lines), 'select', '总计')">{{ getWordColumnValue(getWordSubtotal(uploadedWordResult.lines), 'select').count }}</td>
+                <td class="clickable" @click="handleKsWordEqClick(getWordSubtotal(uploadedWordResult.lines), '总计')">{{ fmt(getWordWeightedKsEq(getWordSubtotal(uploadedWordResult.lines))) }}</td>
                 <td>{{ fmt(getWordWeightedEq(getWordSubtotal(uploadedWordResult.lines))) }}</td>
                 <td class="clickable" @click="handleWordCellClick(getWordSubtotal(uploadedWordResult.lines), 'dh', '总计')">{{ getWordColumnValue(getWordSubtotal(uploadedWordResult.lines), 'dh').count }}</td>
                 <td class="clickable" @click="handleWordCellClick(getWordSubtotal(uploadedWordResult.lines), 'ms', '总计')">{{ getWordColumnValue(getWordSubtotal(uploadedWordResult.lines), 'ms').count }}</td>
@@ -1703,6 +1879,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
               <tr class="row-weight">
                 <td class="sticky-col">加权比重</td>
                 <td class="col-select">{{ getWordWeightPercent(getWordSubtotal(uploadedWordResult.lines), 'select') }}%</td>
+                <td>-</td>
                 <td>-</td>
                 <td>{{ getWordComboWeightPercent(getWordSubtotal(uploadedWordResult.lines), 'dh') }}%</td>
                 <td>{{ getWordComboWeightPercent(getWordSubtotal(uploadedWordResult.lines), 'ms') }}%</td>
@@ -1741,6 +1918,15 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
         <div class="modal-body" @scroll="handleModalScroll">
           <!-- 单字详情表格 -->
           <template v-if="!isWordDetail">
+            <div class="modal-search">
+              <input
+                v-model="detailSearchQuery"
+                type="search"
+                class="search-input"
+                placeholder="检索汉字..."
+                @input="detailCurrentPage = 1"
+              />
+            </div>
             <table class="detail-table">
               <thead>
                 <tr>
@@ -1785,6 +1971,15 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
           </template>
           <!-- 词组详情表格 -->
           <template v-else>
+            <div class="modal-search">
+              <input
+                v-model="detailWordSearchQuery"
+                type="search"
+                class="search-input"
+                placeholder="检索词组..."
+                @input="detailWordCurrentPage = 1"
+              />
+            </div>
             <table class="detail-table">
               <thead>
                 <tr>
@@ -1821,6 +2016,120 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
               </div>
             </div>
           </template>
+        </div>
+      </div>
+    </div>
+
+    <!-- 键魂当量详情弹窗 -->
+    <div v-if="showKsDetailModal" class="modal-overlay" @click.self="closeKsDetailModal">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3>{{ ksDetailTitle }}</h3>
+          <button class="modal-close" @click="closeKsDetailModal">&times;</button>
+        </div>
+        <div class="modal-body ks-modal-body">
+          <div class="modal-search">
+            <input
+              v-model="ksDetailSearchQuery"
+              type="search"
+              class="search-input"
+              placeholder="检索汉字..."
+              @input="ksDetailCurrentPage = 1"
+            />
+          </div>
+          <table class="detail-table">
+            <thead>
+              <tr>
+                <th>序号</th>
+                <th>汉字</th>
+                <th>编码</th>
+                <th>键魂字均当量</th>
+                <th>键魂键均当量</th>
+                <th>字均当量</th>
+                <th>键均当量</th>
+                <th>字频</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="(item, idx) in paginatedKsDetailItems" :key="item.char">
+                <td>{{ (ksDetailCurrentPage - 1) * ksDetailPageSize + idx + 1 }}</td>
+                <td class="char-col">{{ item.char }}</td>
+                <td class="code-col">{{ item.code || '-' }}</td>
+                <td>{{ fmt(item.ksZiEqCombo) }}</td>
+                <td>{{ fmt(item.ksKeyEqCombo) }}</td>
+                <td>{{ fmt(item.ziEqCombo) }}</td>
+                <td>{{ fmt(item.keyEqCombo) }}</td>
+                <td>{{ item.freq }}</td>
+              </tr>
+            </tbody>
+          </table>
+          <!-- 分页控制 -->
+          <div class="pagination" v-if="ksDetailTotalPages > 1">
+            <button class="page-btn" :disabled="ksDetailCurrentPage === 1" @click="goToKsDetailFirstPage">首页</button>
+            <button class="page-btn" :disabled="ksDetailCurrentPage === 1" @click="goToKsDetailPrevPage">上一页</button>
+            <span class="page-info">第 {{ ksDetailCurrentPage }} / {{ ksDetailTotalPages }} 页</span>
+            <button class="page-btn" :disabled="ksDetailCurrentPage === ksDetailTotalPages" @click="goToKsDetailNextPage">下一页</button>
+            <button class="page-btn" :disabled="ksDetailCurrentPage === ksDetailTotalPages" @click="goToKsDetailLastPage">尾页</button>
+            <div class="page-jump">
+              <input v-model="ksDetailJumpPage" type="number" min="1" :max="ksDetailTotalPages" class="page-input" placeholder="页码" @keyup.enter="handleKsDetailJump" />
+              <button class="page-btn" @click="handleKsDetailJump">跳转</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 键魂词均当量详情弹窗 -->
+    <div v-if="showKsWordDetailModal" class="modal-overlay" @click.self="closeKsWordDetailModal">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3>{{ ksWordDetailTitle }}</h3>
+          <button class="modal-close" @click="closeKsWordDetailModal">&times;</button>
+        </div>
+        <div class="modal-body ks-word-modal-body">
+          <div class="modal-search">
+            <input
+              v-model="ksWordDetailSearchQuery"
+              type="search"
+              class="search-input"
+              placeholder="检索词组..."
+              @input="ksWordDetailCurrentPage = 1"
+            />
+          </div>
+          <table class="detail-table">
+            <thead>
+              <tr>
+                <th>序号</th>
+                <th>词组</th>
+                <th>编码</th>
+                <th>键魂词均当量</th>
+                <th>词均当量</th>
+                <th>词频</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="(item, idx) in paginatedKsWordDetailItems" :key="item.word">
+                <td>{{ (ksWordDetailCurrentPage - 1) * ksWordDetailPageSize + idx + 1 }}</td>
+                <td class="char-col">{{ item.word }}</td>
+                <td class="code-col">{{ item.code || '-' }}</td>
+                <td>{{ fmt(calcKeySoulEquivalence(item.code)) }}</td>
+                <td>{{ fmt(calcEquivalenceForDisplay(item.code)) }}</td>
+                <td>{{ item.freq }}</td>
+              </tr>
+            </tbody>
+          </table>
+          <!-- 分页控制 -->
+          <div class="pagination" v-if="ksWordDetailTotalPages > 1">
+            <button class="page-btn" :disabled="ksWordDetailCurrentPage === 1" @click="goToKsWordDetailFirstPage">首页</button>
+            <button class="page-btn" :disabled="ksWordDetailCurrentPage === 1" @click="goToKsWordDetailPrevPage">上一页</button>
+            <span class="page-info">第 {{ ksWordDetailCurrentPage }} / {{ ksWordDetailTotalPages }} 页</span>
+            <button class="page-btn" :disabled="ksWordDetailCurrentPage === ksWordDetailTotalPages" @click="goToKsWordDetailNextPage">下一页</button>
+            <button class="page-btn" :disabled="ksWordDetailCurrentPage === ksWordDetailTotalPages" @click="goToKsWordDetailLastPage">尾页</button>
+            <div class="page-jump">
+              <input v-model="ksWordDetailJumpPage" type="number" min="1" :max="ksWordDetailTotalPages" class="page-input" placeholder="页码" @keyup.enter="handleKsWordDetailJump" />
+              <button class="page-btn" @click="handleKsWordDetailJump">跳转</button>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -2471,6 +2780,31 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
   padding: 16px 20px;
   overflow-y: auto;
   background: var(--bg2);
+}
+
+.modal-search {
+  margin-bottom: 12px;
+}
+
+.modal-search .search-input {
+  width: 100%;
+  max-width: 260px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg1);
+  color: var(--text1);
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.modal-search .search-input:focus {
+  border-color: var(--accent);
+}
+
+.modal-search .search-input::placeholder {
+  color: var(--text3);
 }
 
 /* 详情表格 - 清晰风格 */

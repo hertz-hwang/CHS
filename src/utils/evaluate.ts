@@ -4,6 +4,8 @@
  * 参考科学形码测评系统
  */
 
+import { calcKeySoulEquivalence } from './keySoulEquiv'
+
 // 46键集合（主键盘区所有能打出字符的按键，包括空格，排除 ` \ 两键）
 export const KEYS_46 = [...`qwertyuiopasdfghjklzxcvbnm1234567890-= [];',./ `]
 export const KEYS_46_SET = new Set(KEYS_46)
@@ -12,27 +14,27 @@ export const KEYS_46_SET = new Set(KEYS_46)
 const LEFT_KEYS = [...`12345qwertasdfgzxcvb`]
 const LEFT_SET = new Set(LEFT_KEYS)
 
-// 当量数据（从文件加载）
+// 当量数据（从文件加载的原始当量表，键对 → 当量值）
 const DEFAULT_EQ = 2.0
 let EQ_DATA: Record<string, number> = {}
 let eqDataLoaded = false
 
-// 加载当量数据
+// 加载原始当量表数据
 export async function loadEquivalenceData(): Promise<void> {
   if (eqDataLoaded) return
-  
+
   try {
     const base = import.meta.env.BASE_URL
     const res = await fetch(`${base}data/pair_equivalence.txt`)
     if (!res.ok) throw new Error('加载当量数据失败')
-    
+
     const text = await res.text()
     const lines = text.split('\n')
-    
+
     for (const line of lines) {
       const trimmed = line.trim()
       if (!trimmed) continue
-      
+
       const parts = trimmed.split('\t')
       if (parts.length >= 2) {
         const combo = parts[0].toLowerCase()
@@ -42,14 +44,14 @@ export async function loadEquivalenceData(): Promise<void> {
         }
       }
     }
-    
+
     eqDataLoaded = true
   } catch (e) {
     // 加载失败时使用默认值
   }
 }
 
-// 计算两键组合的当量
+// 计算两键组合的原始当量（基于当量表）
 function getComboEquivalence(key1: string, key2: string): number {
   // 将空格转换为 _（数据文件中用 _ 表示空格）
   const k1 = key1 === ' ' ? '_' : key1.toLowerCase()
@@ -253,10 +255,14 @@ export interface EvaluateHanziItem {
   
   // 加权值
   cl: number         // 加权键长
-  ziEq: number       // 加权字均当量
-  keyEq: number      // 加权键均当量
-  ziEqCombo: number  // 字当量（键值对当量值之和）
-  keyEqCombo: number // 键当量（键均当量，字当量/键值对数量）
+  ziEq: number       // 加权字均当量（原始当量表）
+  keyEq: number      // 加权键均当量（原始当量表）
+  ziEqCombo: number  // 字当量（原始当量表，键值对当量值之和）
+  keyEqCombo: number // 键当量（原始当量表，字当量/键值对数量）
+  ksZiEq: number     // 加权键魂字均当量
+  ksKeyEq: number    // 加权键魂键均当量
+  ksZiEqCombo: number  // 键魂字当量（键魂模型计算的完整序列当量）
+  ksKeyEqCombo: number // 键魂键当量（键魂字当量/键值对数量）
   
   // 手感指标（次数）
   dh: number         // 左右互击
@@ -370,32 +376,32 @@ function parseYamlCodeTable(content: string, codeMap: Map<string, string[]>): vo
 
 /**
  * 计算选重键的当量（用于智能选择最低当量选重键）
- * @param prevKey 前一个键
+ * @param codePrefix 当前编码前缀
  * @param selectKey 选重键
  */
-function getSelectKeyEquivalence(prevKey: string, selectKey: string): number {
-  // 空格没有当量成本（大拇指单独按键）
+function getSelectKeyEquivalence(codePrefix: string, selectKey: string): number {
   if (selectKey === ' ') return 0
-  // 使用当量数据计算
+  // 使用原始当量表计算
+  const prevKey = codePrefix[codePrefix.length - 1]
   return getComboEquivalence(prevKey, selectKey)
 }
 
 /**
  * 从多个候选选重键中选择当量最低的
- * @param prevKey 前一个键
+ * @param codePrefix 当前编码前缀
  * @param candidateKeys 候选选重键数组
  */
-function selectBestKey(prevKey: string, candidateKeys: string[]): string {
+function selectBestKey(codePrefix: string, candidateKeys: string[]): string {
   if (candidateKeys.length === 0) return ' '
   if (candidateKeys.length === 1) return candidateKeys[0]
   
   // 选择当量最低的键
   let bestKey = candidateKeys[0]
-  let minEq = getSelectKeyEquivalence(prevKey, bestKey)
+  let minEq = getSelectKeyEquivalence(codePrefix, bestKey)
   
   for (let i = 1; i < candidateKeys.length; i++) {
     const key = candidateKeys[i]
-    const eq = getSelectKeyEquivalence(prevKey, key)
+    const eq = getSelectKeyEquivalence(codePrefix, key)
     if (eq < minEq) {
       minEq = eq
       bestKey = key
@@ -533,6 +539,10 @@ export function evaluateScheme(
           keyEq: 0,
           ziEqCombo: 0,
           keyEqCombo: 0,
+          ksZiEq: 0,
+          ksKeyEq: 0,
+          ksZiEqCombo: 0,
+          ksKeyEqCombo: 0,
           dh: 0,
           ms: 0,
           ss: 0,
@@ -593,8 +603,7 @@ export function evaluateScheme(
         // 支持多选重键配置：每个位置可以是单个键或多个候选键
         const keys = candidateKeys.length > 1 ? candidateKeys.split('') : [candidateKeys]
         // 选择当量最低的键
-        const lastCodeKey = code[code.length - 1] || ' '
-        selectKey = selectBestKey(lastCodeKey, keys)
+        selectKey = selectBestKey(code, keys)
       } else if (codeLen < maxCodeLength) {
         // 码长不足，使用空格确认首选项
         selectKey = ' '
@@ -643,6 +652,10 @@ export function evaluateScheme(
         keyEq: 0,
         ziEqCombo: 0,
         keyEqCombo: 0,
+        ksZiEq: 0,
+        ksKeyEq: 0,
+        ksZiEqCombo: 0,
+        ksKeyEqCombo: 0,
         dh: 0,
         ms: 0,
         ss: 0,
@@ -668,15 +681,24 @@ export function evaluateScheme(
         item.keyEq = 0
         item.ziEqCombo = 0
         item.keyEqCombo = 0
+        item.ksZiEq = 0
+        item.ksKeyEq = 0
+        item.ksZiEqCombo = 0
+        item.ksKeyEqCombo = 0
       } else {
-        let eq = 0
-        for (let j = 1; j < fullCode.length; j++) {
-          eq += getComboEquivalence(fullCode[j - 1], fullCode[j])
-        }
+        // 原始当量表：逐对累加
+        const eq = calcEquivalence(fullCode)
         item.ziEq = eq * freq
         item.keyEq = (eq / (keysLen - 1)) * freq
         item.ziEqCombo = eq  // 字当量为键值对当量值之和
         item.keyEqCombo = eq / (keysLen - 1)  // 键当量 = 字当量 / 键值对数量
+
+        // 键魂当量模型：完整序列时间
+        const ksEq = calcKeySoulEquivalence(fullCode)
+        item.ksZiEq = ksEq * freq
+        item.ksKeyEq = (ksEq / (keysLen - 1)) * freq
+        item.ksZiEqCombo = ksEq
+        item.ksKeyEqCombo = ksEq / (keysLen - 1)
       }
       
       // 计算手感指标（使用完整的编码，包括选重键）
@@ -859,7 +881,7 @@ export function getColumnValue(
 /**
  * 获取加权值
  */
-export function getWeightedValue(line: EvaluateLine, field: 'cl' | 'ziEq' | 'keyEq'): number {
+export function getWeightedValue(line: EvaluateLine, field: 'cl' | 'ziEq' | 'keyEq' | 'ksZiEq' | 'ksKeyEq'): number {
   let total = 0
   for (const item of line.items) {
     if (!item.isLack && item.overKey === 0) {
@@ -930,7 +952,8 @@ export interface EvaluateWordItem {
   collision: number  // 选重数
 
   // 当量
-  eq: number         // 加权词均当量
+  eq: number         // 加权词均当量（原始当量表）
+  ksEq: number       // 加权键魂词均当量（键魂模型）
 
   // 手感指标（次数）
   dh: number         // 左右互击
@@ -962,15 +985,15 @@ export interface EvaluationWordResult {
 }
 
 /**
- * 计算编码的当量
+ * 计算编码的当量（原始当量表，逐对累加）
  */
-function calcEquivalence(code: string): number {
-  if (code.length < 2) return 1
-  let eq = 0
+export function calcEquivalence(code: string): number {
+  if (code.length < 2) return 0
+  let total = 0
   for (let i = 1; i < code.length; i++) {
-    eq += getComboEquivalence(code[i - 1], code[i])
+    total += getComboEquivalence(code[i - 1], code[i])
   }
-  return eq
+  return total
 }
 
 /**
@@ -1041,6 +1064,7 @@ export function evaluateWords(
           codeLen: 0,
           collision: 0,
           eq: 0,
+          ksEq: 0,
           dh: 0,
           ms: 0,
           ss: 0,
@@ -1088,6 +1112,7 @@ export function evaluateWords(
         codeLen,
         collision,
         eq: 0,
+        ksEq: 0,
         dh: 0,
         ms: 0,
         ss: 0,
@@ -1107,6 +1132,10 @@ export function evaluateWords(
 
       // 计算当量
       item.eq = calcEquivalence(code) * freq
+
+      // 计算键魂当量
+      const ksEqVal = calcKeySoulEquivalence(code)
+      item.ksEq = ksEqVal * freq
 
       // 计算手感指标
       for (let j = 1; j < code.length; j++) {
@@ -1226,6 +1255,19 @@ export function getWordWeightedEq(line: EvaluateWordLine): number {
   for (const item of line.items) {
     if (!item.isLack && item.overKey === 0) {
       total += item.eq
+    }
+  }
+  return line.totalFreq > 0 ? total / line.totalFreq : 0
+}
+
+/**
+ * 获取多字词键魂加权当量值
+ */
+export function getWordWeightedKsEq(line: EvaluateWordLine): number {
+  let total = 0
+  for (const item of line.items) {
+    if (!item.isLack && item.overKey === 0) {
+      total += item.ksEq
     }
   }
   return line.totalFreq > 0 ? total / line.totalFreq : 0
