@@ -787,6 +787,11 @@ export class CharsHijack {
           const part = node.pinyinPart || 'first_letter'
           code += this._extractPinyinPart(char, part)
         } else {
+          // 根据 rootSource 选择字根来源
+          const pickRoots = (node.rootSource === 'binary')
+            ? this.binarySplit(char, node.binaryParts || 3)
+            : roots
+
           const rootIdx = node.rootIndex || 1
           const codeIdx = node.codeIndex || 1
 
@@ -795,16 +800,16 @@ export class CharsHijack {
           let adjustedCodeIdx: number = codeIdx
 
           if (rootIdx === -1) {
-            actualRootIdx = roots.length - 1
-          } else if (rootIdx > roots.length) {
-            actualRootIdx = roots.length - 1
-            adjustedCodeIdx = codeIdx + (rootIdx - roots.length)
+            actualRootIdx = pickRoots.length - 1
+          } else if (rootIdx > pickRoots.length) {
+            actualRootIdx = pickRoots.length - 1
+            adjustedCodeIdx = codeIdx + (rootIdx - pickRoots.length)
           } else {
             actualRootIdx = rootIdx - 1
           }
 
-          if (actualRootIdx >= 0 && actualRootIdx < roots.length) {
-            const root = roots[actualRootIdx]
+          if (actualRootIdx >= 0 && actualRootIdx < pickRoots.length) {
+            const root = pickRoots[actualRootIdx]
             const fullCode = this.getRootFullCode(root)
 
             if (fullCode) {
@@ -824,20 +829,25 @@ export class CharsHijack {
         }
       } else if (node.type === 'condition') {
         let conditionMet = false
-        
+
+        // 根据 rootSource 选择字根来源
+        const condRoots = (node.rootSource === 'binary')
+          ? this.binarySplit(char, node.binaryParts || 3)
+          : roots
+
         if (node.conditionType === 'root_exists') {
           const idx = (node.conditionValue || 1) - 1
-          conditionMet = idx >= 0 && idx < roots.length
+          conditionMet = idx >= 0 && idx < condRoots.length
         } else if (node.conditionType === 'root_has_code') {
           const rootIdx = (node.conditionValue || 1) - 1
           const codeIdx = (node.conditionCodeIndex || 1) - 1
-          if (rootIdx >= 0 && rootIdx < roots.length) {
-            const root = roots[rootIdx]
+          if (rootIdx >= 0 && rootIdx < condRoots.length) {
+            const root = condRoots[rootIdx]
             const fullCode = this.getRootFullCode(root)
             conditionMet = codeIdx >= 0 && codeIdx < fullCode.length
           }
         } else if (node.conditionType === 'root_count') {
-          conditionMet = roots.length >= (node.conditionValue || 1)
+          conditionMet = condRoots.length >= (node.conditionValue || 1)
         }
         
         if (conditionMet && node.trueBranch) {
@@ -1235,6 +1245,77 @@ export class CharsHijack {
     }
     const kids = node.children.map((c) => this._expand(c, visited))
     return new IDSNode(null, node.op, kids)
+  }
+
+  /**
+   * 二分法取根：BFS 展开 IDS 树到 P 个端点，非原子端点取分首
+   */
+  binarySplit(char: string, parts: number): string[] {
+    // 获取原始 IDS 并解析为树
+    let ids = this.decomp.get(char)
+    if (!ids) return [char]
+    if (this.transformer) {
+      ids = this.transformer.transform(ids)
+    }
+    const tree = parseIDS(ids)
+    if (!tree || tree.isLeaf()) return [char]
+
+    // 初始端点 = 根节点的子节点
+    const endpoints: IDSNode[] = [...tree.children]
+
+    // BFS 展开：每次找到第一个可再分端点，展开为其子节点
+    while (endpoints.length < parts) {
+      let expanded = false
+      for (let i = 0; i < endpoints.length; i++) {
+        const ep = endpoints[i]
+
+        if (!ep.isLeaf()) {
+          // 操作符节点：直接展开为其子节点
+          endpoints.splice(i, 1, ...ep.children)
+          expanded = true
+          break
+        }
+
+        // 叶子节点：查 decomp 表看能否再分
+        const epChar = ep.char!
+        let epIds = this.decomp.get(epChar)
+        if (!epIds) continue
+        if (this.transformer) {
+          epIds = this.transformer.transform(epIds)
+        }
+        const subTree = parseIDS(epIds)
+        if (!subTree || subTree.isLeaf()) continue
+
+        // 展开：替换此端点为子节点
+        endpoints.splice(i, 1, ...subTree.children)
+        expanded = true
+        break // 每次只展开一个，重新检查
+      }
+      if (!expanded) break
+    }
+
+    // 对每个端点取"分首"（递归取第一个子节点直到原子字根）
+    return endpoints.map(ep => this._getHeadRoot(ep))
+  }
+
+  private _getHeadRoot(node: IDSNode): string {
+    // 叶子节点
+    if (node.isLeaf()) {
+      const char = node.char!
+      // 已是定义的字根，直接返回
+      if (this.roots.has(char)) return char
+      // 非原子，尝试继续拆分取首
+      let ids = this.decomp.get(char)
+      if (!ids) return char
+      if (this.transformer) {
+        ids = this.transformer.transform(ids)
+      }
+      const subTree = parseIDS(ids)
+      if (!subTree || subTree.isLeaf()) return char
+      return this._getHeadRoot(subTree.children[0])
+    }
+    // 操作符节点，取第一个子节点
+    return this._getHeadRoot(node.children[0])
   }
 
   buildTree(char: string): IDSNode {

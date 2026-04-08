@@ -579,7 +579,13 @@ function getCharLabel(charIndex: number | undefined): string {
 
 function onRuleChange() {
   if (!selectedRule.value) return
-  
+
+  // 二分法标记后缀
+  const binarySuffix = (rule: CodeRuleNode) => {
+    if (rule.rootSource === 'binary') return `[P=${rule.binaryParts || 3}]`
+    return ''
+  }
+
   // 更新标签
   if (selectedRule.value.type === 'pick') {
     if (activeTab.value === 'word') {
@@ -589,7 +595,7 @@ function onRuleChange() {
       } else {
         const rootLabel = getRootLabel(selectedRule.value.rootIndex)
         const codeLabel = getCodeLabel(selectedRule.value.codeIndex)
-        selectedRule.value.label = `取${charLabel}${rootLabel}${codeLabel}`
+        selectedRule.value.label = `取${charLabel}${rootLabel}${codeLabel}${binarySuffix(selectedRule.value)}`
       }
     } else {
       if (selectedRule.value.pickType === 'pinyin') {
@@ -597,7 +603,7 @@ function onRuleChange() {
       } else {
         const rootLabel = getRootLabel(selectedRule.value.rootIndex)
         const codeLabel = getCodeLabel(selectedRule.value.codeIndex)
-        selectedRule.value.label = `取${rootLabel}${codeLabel}`
+        selectedRule.value.label = `取${rootLabel}${codeLabel}${binarySuffix(selectedRule.value)}`
       }
     }
   } else if (selectedRule.value.type === 'condition') {
@@ -606,12 +612,13 @@ function onRuleChange() {
         selectedRule.value.label = `存在第${selectedRule.value.conditionValue}字？`
       }
     } else {
+      const suffix = binarySuffix(selectedRule.value)
       if (selectedRule.value.conditionType === 'root_exists') {
-        selectedRule.value.label = `存在第${selectedRule.value.conditionValue}根？`
+        selectedRule.value.label = `存在第${selectedRule.value.conditionValue}根？${suffix}`
       } else if (selectedRule.value.conditionType === 'root_has_code') {
-        selectedRule.value.label = `第${selectedRule.value.conditionValue}根有第${selectedRule.value.conditionCodeIndex}码？`
+        selectedRule.value.label = `第${selectedRule.value.conditionValue}根有第${selectedRule.value.conditionCodeIndex}码？${suffix}`
       } else if (selectedRule.value.conditionType === 'root_count') {
-        selectedRule.value.label = `字根数≥${selectedRule.value.conditionValue}？`
+        selectedRule.value.label = `字根数≥${selectedRule.value.conditionValue}？${suffix}`
       }
     }
   }
@@ -630,6 +637,16 @@ function onPickTypeChange() {
     selectedRule.value.pinyinPart = selectedRule.value.pinyinPart || 'first_letter'
   } else {
     selectedRule.value.pickType = 'root'
+  }
+  onRuleChange()
+}
+
+function onRootSourceChange() {
+  if (!selectedRule.value) return
+  if (selectedRule.value.rootSource === 'binary') {
+    selectedRule.value.binaryParts = selectedRule.value.binaryParts || 3
+  } else {
+    selectedRule.value.rootSource = 'full'
   }
   onRuleChange()
 }
@@ -862,6 +879,17 @@ onUnmounted(() => {
                 </select>
               </div>
               <div v-if="selectedRule.pickType !== 'pinyin'" class="form-row">
+                <label>字根来源</label>
+                <select v-model="selectedRule.rootSource" @change="onRootSourceChange">
+                  <option value="full">完全拆分</option>
+                  <option value="binary">二分法</option>
+                </select>
+              </div>
+              <div v-if="selectedRule.pickType !== 'pinyin' && selectedRule.rootSource === 'binary'" class="form-row">
+                <label>分部数 P</label>
+                <input type="number" v-model.number="selectedRule.binaryParts" min="2" max="10" @change="onRuleChange" />
+              </div>
+              <div v-if="selectedRule.pickType !== 'pinyin'" class="form-row">
                 <label>字根位置</label>
                 <select v-model="selectedRule.rootIndex" @change="onRuleChange">
                   <option :value="1">第1根</option>
@@ -916,6 +944,17 @@ onUnmounted(() => {
                     <option value="root_has_code">第N个根存在第M码</option>
                     <option value="root_count">字根数量≥N</option>
                   </select>
+                </div>
+                <div class="form-row">
+                  <label>字根来源</label>
+                  <select v-model="selectedRule.rootSource" @change="onRootSourceChange">
+                    <option value="full">完全拆分</option>
+                    <option value="binary">二分法</option>
+                  </select>
+                </div>
+                <div v-if="selectedRule.rootSource === 'binary'" class="form-row">
+                  <label>分部数 P</label>
+                  <input type="number" v-model.number="selectedRule.binaryParts" min="2" max="10" @change="onRuleChange" />
                 </div>
                 <div class="form-row">
                   <label>N值（字根位置）</label>

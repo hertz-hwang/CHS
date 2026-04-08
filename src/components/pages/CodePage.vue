@@ -127,6 +127,11 @@ function calculateCharCodeWithRoots(char: string): { code: string; usedRoots: { 
         const part = node.pinyinPart || 'first_letter'
         code += extractPinyinPart(char, part)
       } else {
+        // 根据 rootSource 选择字根来源
+        const pickRoots = (node.rootSource === 'binary')
+          ? engine.binarySplit(char, node.binaryParts || 3)
+          : roots
+
         const rootIdx = node.rootIndex || 1
         const codeIdx = node.codeIndex || 1
 
@@ -136,16 +141,16 @@ function calculateCharCodeWithRoots(char: string): { code: string; usedRoots: { 
         let adjustedCodeIdx: number = codeIdx
 
         if (rootIdx === -1) {
-          actualRootIdx = roots.length - 1
-        } else if (rootIdx > roots.length) {
-          actualRootIdx = roots.length - 1
-          adjustedCodeIdx = codeIdx + (rootIdx - roots.length)
+          actualRootIdx = pickRoots.length - 1
+        } else if (rootIdx > pickRoots.length) {
+          actualRootIdx = pickRoots.length - 1
+          adjustedCodeIdx = codeIdx + (rootIdx - pickRoots.length)
         } else {
           actualRootIdx = rootIdx - 1
         }
 
-        if (actualRootIdx >= 0 && actualRootIdx < roots.length) {
-          const root = roots[actualRootIdx]
+        if (actualRootIdx >= 0 && actualRootIdx < pickRoots.length) {
+          const root = pickRoots[actualRootIdx]
           const fullCode = getRootFullCode(root)
           const actualCodeIdx = adjustedCodeIdx === -1 ? (fullCode ? fullCode.length - 1 : 0) : adjustedCodeIdx - 1
 
@@ -174,20 +179,25 @@ function calculateCharCodeWithRoots(char: string): { code: string; usedRoots: { 
     } else if (node.type === 'condition') {
       let conditionMet = false
 
+      // 根据 rootSource 选择字根来源
+      const condRoots = (node.rootSource === 'binary')
+        ? engine.binarySplit(char, node.binaryParts || 3)
+        : roots
+
       if (node.conditionType === 'root_exists') {
         const idx = (node.conditionValue || 1) - 1
-        conditionMet = idx >= 0 && idx < roots.length
+        conditionMet = idx >= 0 && idx < condRoots.length
       } else if (node.conditionType === 'root_has_code') {
         const rootIdx = (node.conditionValue || 1) - 1
         const codeIdx = (node.conditionCodeIndex || 1) - 1
 
-        if (rootIdx >= 0 && rootIdx < roots.length) {
-          const root = roots[rootIdx]
+        if (rootIdx >= 0 && rootIdx < condRoots.length) {
+          const root = condRoots[rootIdx]
           const fullCode = getRootFullCode(root)
           conditionMet = codeIdx >= 0 && codeIdx < fullCode.length
         }
       } else if (node.conditionType === 'root_count') {
-        conditionMet = roots.length >= (node.conditionValue || 1)
+        conditionMet = condRoots.length >= (node.conditionValue || 1)
       }
 
       if (conditionMet && node.trueBranch) {
@@ -388,7 +398,11 @@ function calculateWordCodeWithRoots(word: string): { code: string; usedRoots: { 
       } else {
         const rootIdx = node.rootIndex || 1
         const codeIdx = node.codeIndex || 1
-        const charRoots = charsRoots[actualCharIdx] || []
+
+        // 根据 rootSource 选择字根来源
+        const charRoots = (node.rootSource === 'binary' && chars[actualCharIdx])
+          ? engine.binarySplit(chars[actualCharIdx], node.binaryParts || 3)
+          : (charsRoots[actualCharIdx] || [])
 
         // 计算实际字根索引和码位索引
         // -1 表示末根，如果请求的字根索引超出范围，回退到末根并调整码位索引
@@ -440,28 +454,34 @@ function calculateWordCodeWithRoots(word: string): { code: string; usedRoots: { 
       }
     } else if (node.type === 'condition') {
       let conditionMet = false
-      
+
       if (node.conditionType === 'char_exists') {
         const idx = (node.conditionValue || 1) - 1
         conditionMet = idx >= 0 && idx < charsRoots.length
       } else if (node.conditionType === 'root_exists') {
         const idx = (node.conditionValue || 1) - 1
-        const roots = charsRoots[0] || []
-        conditionMet = idx >= 0 && idx < roots.length
+        const condRoots = (node.rootSource === 'binary' && chars[0])
+          ? engine.binarySplit(chars[0], node.binaryParts || 3)
+          : (charsRoots[0] || [])
+        conditionMet = idx >= 0 && idx < condRoots.length
       } else if (node.conditionType === 'root_has_code') {
         const rootIdx = (node.conditionValue || 1) - 1
         const codeIdx = (node.conditionCodeIndex || 1) - 1
-        const roots = charsRoots[0] || []
-        if (rootIdx >= 0 && rootIdx < roots.length) {
-          const root = roots[rootIdx]
+        const condRoots = (node.rootSource === 'binary' && chars[0])
+          ? engine.binarySplit(chars[0], node.binaryParts || 3)
+          : (charsRoots[0] || [])
+        if (rootIdx >= 0 && rootIdx < condRoots.length) {
+          const root = condRoots[rootIdx]
           const fullCode = getRootFullCode(root)
           conditionMet = codeIdx >= 0 && codeIdx < fullCode.length
         }
       } else if (node.conditionType === 'root_count') {
-        const roots = charsRoots[0] || []
-        conditionMet = roots.length >= (node.conditionValue || 1)
+        const condRoots = (node.rootSource === 'binary' && chars[0])
+          ? engine.binarySplit(chars[0], node.binaryParts || 3)
+          : (charsRoots[0] || [])
+        conditionMet = condRoots.length >= (node.conditionValue || 1)
       }
-      
+
       if (conditionMet && node.trueBranch) {
         currentNodeId = node.trueBranch
       } else if (!conditionMet && node.falseBranch) {
@@ -480,7 +500,7 @@ function calculateWordCodeWithRoots(word: string): { code: string; usedRoots: { 
       break
     }
   }
-  
+
   return { code, usedRoots: usedRootsList }
 }
 
@@ -590,15 +610,23 @@ function getCharInfo(char: string) {
   const { code } = calculateCharCodeWithRoots(char)
   const pyList = engine.getPinyinList(char)
   const freq = engine.freq.get(char) || 0
-  
+
   const allPinyin = pyList.map(p => p.py).join(' ')
-  
-  const roots = decomp.leaves
+
+  // 检查取码规则中是否有二分法节点，有则用 binarySplit 显示拆分
+  const rules = engine.getCodeRules()
+  const binaryNode = rules.find(r => r.rootSource === 'binary')
+  let roots: string[]
+  if (binaryNode) {
+    roots = engine.binarySplit(char, binaryNode.binaryParts || 3)
+  } else {
+    roots = decomp.leaves
+  }
   const rootInfos = roots.map(root => ({
     root,
     hasCode: !!getRootFullCode(root)
   }))
-  
+
   return {
     char,
     unicode: unicodeHex(char),
@@ -789,6 +817,11 @@ function calculateElementSequence(char: string): string[] {
         const symbol = part === 'last_letter' ? '末字母' : part === 'initial' ? '声母' : part === 'final' ? '韵母' : '首字母'
         elements.push(`字音.${symbol}`)
       } else {
+        // 根据 rootSource 选择字根来源
+        const pickRoots = (node.rootSource === 'binary')
+          ? engine.binarySplit(char, node.binaryParts || 3)
+          : roots
+
         const rootIdx = node.rootIndex || 1
         const codeIdx = node.codeIndex || 1
 
@@ -798,18 +831,18 @@ function calculateElementSequence(char: string): string[] {
         let adjustedCodeIdx: number = codeIdx // 调整后的码位索引（1-indexed）
 
         if (rootIdx === -1) {
-          actualRootIdx = roots.length - 1
-        } else if (rootIdx > roots.length) {
+          actualRootIdx = pickRoots.length - 1
+        } else if (rootIdx > pickRoots.length) {
           // 如果请求的字根不存在，回退到末根
-          actualRootIdx = roots.length - 1
+          actualRootIdx = pickRoots.length - 1
           // 调整码位索引
-          adjustedCodeIdx = codeIdx + (rootIdx - roots.length)
+          adjustedCodeIdx = codeIdx + (rootIdx - pickRoots.length)
         } else {
           actualRootIdx = rootIdx - 1
         }
 
-        if (actualRootIdx >= 0 && actualRootIdx < roots.length) {
-          const root = roots[actualRootIdx]
+        if (actualRootIdx >= 0 && actualRootIdx < pickRoots.length) {
+          const root = pickRoots[actualRootIdx]
           const fullCode = getRootFullCode(root)
 
           // 计算实际码位索引（使用调整后的码位索引）
@@ -821,7 +854,7 @@ function calculateElementSequence(char: string): string[] {
           }
         }
       }
-      
+
       if (node.nextNode) {
         currentNodeId = node.nextNode
       } else {
@@ -829,21 +862,26 @@ function calculateElementSequence(char: string): string[] {
       }
     } else if (node.type === 'condition') {
       let conditionMet = false
-      
+
+      // 根据 rootSource 选择字根来源
+      const condRoots = (node.rootSource === 'binary')
+        ? engine.binarySplit(char, node.binaryParts || 3)
+        : roots
+
       if (node.conditionType === 'root_exists') {
         const idx = (node.conditionValue || 1) - 1
-        conditionMet = idx >= 0 && idx < roots.length
+        conditionMet = idx >= 0 && idx < condRoots.length
       } else if (node.conditionType === 'root_has_code') {
         const rootIdx = (node.conditionValue || 1) - 1
         const codeIdx = (node.conditionCodeIndex || 1) - 1
-        
-        if (rootIdx >= 0 && rootIdx < roots.length) {
-          const root = roots[rootIdx]
+
+        if (rootIdx >= 0 && rootIdx < condRoots.length) {
+          const root = condRoots[rootIdx]
           const fullCode = getRootFullCode(root)
           conditionMet = codeIdx >= 0 && codeIdx < fullCode.length
         }
       } else if (node.conditionType === 'root_count') {
-        conditionMet = roots.length >= (node.conditionValue || 1)
+        conditionMet = condRoots.length >= (node.conditionValue || 1)
       }
       
       if (conditionMet && node.trueBranch) {
@@ -924,7 +962,11 @@ function calculateWordElementSequence(word: string): string[] {
       } else {
         const rootIdx = node.rootIndex || 1
         const codeIdx = node.codeIndex || 1
-        const charRoots = charsRoots[actualCharIdx] || []
+
+        // 根据 rootSource 选择字根来源
+        const charRoots = (node.rootSource === 'binary' && chars[actualCharIdx])
+          ? engine.binarySplit(chars[actualCharIdx], node.binaryParts || 3)
+          : (charsRoots[actualCharIdx] || [])
 
         // 计算实际字根索引和码位索引
         let actualRootIdx: number
@@ -958,26 +1000,32 @@ function calculateWordElementSequence(word: string): string[] {
       }
     } else if (node.type === 'condition') {
       let conditionMet = false
-      
+
       if (node.conditionType === 'char_exists') {
         const idx = (node.conditionValue || 1) - 1
         conditionMet = idx >= 0 && idx < charsRoots.length
       } else if (node.conditionType === 'root_exists') {
         const idx = (node.conditionValue || 1) - 1
-        const roots = charsRoots[0] || []
-        conditionMet = idx >= 0 && idx < roots.length
+        const condRoots = (node.rootSource === 'binary' && chars[0])
+          ? engine.binarySplit(chars[0], node.binaryParts || 3)
+          : (charsRoots[0] || [])
+        conditionMet = idx >= 0 && idx < condRoots.length
       } else if (node.conditionType === 'root_has_code') {
         const rootIdx = (node.conditionValue || 1) - 1
         const codeIdx = (node.conditionCodeIndex || 1) - 1
-        const roots = charsRoots[0] || []
-        if (rootIdx >= 0 && rootIdx < roots.length) {
-          const root = roots[rootIdx]
+        const condRoots = (node.rootSource === 'binary' && chars[0])
+          ? engine.binarySplit(chars[0], node.binaryParts || 3)
+          : (charsRoots[0] || [])
+        if (rootIdx >= 0 && rootIdx < condRoots.length) {
+          const root = condRoots[rootIdx]
           const fullCode = getRootFullCode(root)
           conditionMet = codeIdx >= 0 && codeIdx < fullCode.length
         }
       } else if (node.conditionType === 'root_count') {
-        const roots = charsRoots[0] || []
-        conditionMet = roots.length >= (node.conditionValue || 1)
+        const condRoots = (node.rootSource === 'binary' && chars[0])
+          ? engine.binarySplit(chars[0], node.binaryParts || 3)
+          : (charsRoots[0] || [])
+        conditionMet = condRoots.length >= (node.conditionValue || 1)
       }
       
       if (conditionMet && node.trueBranch) {

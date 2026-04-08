@@ -312,7 +312,11 @@ function calculateWordCode(word: string): string {
       } else {
         const rootIdx = node.rootIndex || 1
         const codeIdx = node.codeIndex || 1
-        const charRoots = charsRoots[actualCharIdx] || []
+
+        // 根据 rootSource 选择字根来源
+        const charRoots = (node.rootSource === 'binary' && chars[actualCharIdx])
+          ? engine.binarySplit(chars[actualCharIdx], node.binaryParts || 3)
+          : (charsRoots[actualCharIdx] || [])
 
         // 计算实际字根索引
         let actualRootIdx: number
@@ -350,11 +354,15 @@ function calculateWordCode(word: string): string {
         conditionMet = idx >= 0 && idx < charsRoots.length
       } else if (node.conditionType === 'root_exists') {
         const idx = (node.conditionValue || 1) - 1
-        const roots = charsRoots[0] || []
-        conditionMet = idx >= 0 && idx < roots.length
+        const condRoots = (node.rootSource === 'binary' && chars[0])
+          ? engine.binarySplit(chars[0], node.binaryParts || 3)
+          : (charsRoots[0] || [])
+        conditionMet = idx >= 0 && idx < condRoots.length
       } else if (node.conditionType === 'root_count') {
-        const roots = charsRoots[0] || []
-        conditionMet = roots.length >= (node.conditionValue || 1)
+        const condRoots = (node.rootSource === 'binary' && chars[0])
+          ? engine.binarySplit(chars[0], node.binaryParts || 3)
+          : (charsRoots[0] || [])
+        conditionMet = condRoots.length >= (node.conditionValue || 1)
       }
 
       if (conditionMet && node.trueBranch) currentNodeId = node.trueBranch

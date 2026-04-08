@@ -38,6 +38,8 @@ export interface CodeRuleNode {
   label: string
   pickType?: 'root' | 'pinyin' // 取码类型：字根 / 字音
   pinyinPart?: 'first_letter' | 'last_letter' | 'initial' | 'final' // 字音取码音素
+  rootSource?: 'full' | 'binary' // 字根来源：完全拆分（默认） / 二分法
+  binaryParts?: number           // 二分法分部数 P（默认 3）
   rootIndex?: number
   codeIndex?: number
   charIndex?: number      // 多字词取码：第几个字（1-indexed）
