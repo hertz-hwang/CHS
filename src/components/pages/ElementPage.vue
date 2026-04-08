@@ -4,6 +4,7 @@ import { useEngine } from '../../composables/useEngine'
 import { codeToString } from '../../engine/config'
 import ElementPicker from '../element/ElementPicker.vue'
 import ExportRootsImage from '../element/ExportRootsImage.vue'
+import ExportRootMapping from '../element/ExportRootMapping.vue'
 import EquivalentRootsModal from '../element/EquivalentRootsModal.vue'
 
 const {
@@ -275,6 +276,7 @@ function openEquivModal() {
         </span>
       </div>
       <div class="toolbar-right">
+        <ExportRootMapping />
         <ExportRootsImage />
         <button class="btn btn-sm btn-info" @click="openEquivModal">等效字根设置</button>
       </div>
