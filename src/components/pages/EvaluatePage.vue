@@ -967,7 +967,7 @@ function handleCellClick(line: EvaluateLine, column: string, rangeLabel: string)
   const items = filterItemsByColumn(line, column)
   if (items.length === 0) return
   
-  detailTitle.value = `${rangeLabel} - ${COLUMN_NAMES[column] || column}（共 ${items.length} 字）`
+  detailTitle.value = `${rangeLabel} - ${COLUMN_NAMES[column] || column}（共 ${items.length} 字）「点击条目可展开键魂计算详情」`
   detailColumn.value = column
   detailItems.value = items
   isWordDetail.value = false
@@ -1027,7 +1027,7 @@ function handleWordCellClick(line: EvaluateWordLine, column: string, rangeLabel:
   const items = filterWordItemsByColumn(line, column)
   if (items.length === 0) return
   
-  detailTitle.value = `${rangeLabel} - ${WORD_COLUMN_NAMES[column] || column}（共 ${items.length} 词）`
+  detailTitle.value = `${rangeLabel} - ${WORD_COLUMN_NAMES[column] || column}（共 ${items.length} 词）「点击条目可展开键魂计算详情」`
   detailWordItems.value = items
   isWordDetail.value = true
   showDetailModal.value = true
@@ -1041,6 +1041,10 @@ function closeDetailModal() {
   detailSearchQuery.value = ''
   detailWordSearchQuery.value = ''
   resetDetailPagination()
+  ksExpandedChar.value = null
+  ksExpandedDebug.value = null
+  ksWordExpandedWord.value = null
+  ksWordExpandedDebug.value = null
 }
 
 // 键魂键均当量详情弹窗相关
@@ -1122,17 +1126,17 @@ function toggleKsExpand(item: EvaluateHanziItem) {
   ksExpandedDebug.value = debugKeySoulEquivalence(fullCode)
 }
 
-// 词组弹窗展开行
-const ksWordExpandedCode = ref<string | null>(null)
+// 词组弹窗展开行（用 word 作为唯一标识，避免同编码多条目冲突）
+const ksWordExpandedWord = ref<string | null>(null)
 const ksWordExpandedDebug = ref<SequenceDebugResult | null>(null)
 
 function toggleKsWordExpand(item: EvaluateWordItem) {
-  if (ksWordExpandedCode.value === item.code) {
-    ksWordExpandedCode.value = null
+  if (ksWordExpandedWord.value === item.word) {
+    ksWordExpandedWord.value = null
     ksWordExpandedDebug.value = null
     return
   }
-  ksWordExpandedCode.value = item.code
+  ksWordExpandedWord.value = item.word
   ksWordExpandedDebug.value = debugKeySoulEquivalence(item.code)
 }
 
@@ -1199,7 +1203,7 @@ function closeKsWordDetailModal() {
   ksWordDetailItems.value = []
   ksWordDetailCurrentPage.value = 1
   ksWordDetailSearchQuery.value = ''
-  ksWordExpandedCode.value = null
+  ksWordExpandedWord.value = null
   ksWordExpandedDebug.value = null
 }
 
@@ -2301,7 +2305,8 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="(item, idx) in paginatedDetailItems" :key="item.char" :class="{ 'is-lack': item.isLack }">
+                <template v-for="(item, idx) in paginatedDetailItems" :key="item.char">
+                <tr class="clickable" :class="{ 'is-lack': item.isLack, 'expanded-row': ksExpandedChar === item.char }" @click="toggleKsExpand(item)">
                   <td>{{ (detailCurrentPage - 1) * detailPageSize + idx + 1 }}</td>
                   <td class="char-col">
                     {{ item.char }}
@@ -2314,6 +2319,60 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                   <td>{{ item.isLack || item.overKey > 0 ? '-' : fmt(item.keyEqCombo) }}</td>
                   <td>{{ item.freq }}</td>
                 </tr>
+                <tr v-if="ksExpandedChar === item.char && ksExpandedDebug" class="debug-expand-row">
+                  <td :colspan="8">
+                    <div class="debug-detail">
+                      <div class="debug-summary">
+                        序列: <b>{{ ksExpandedDebug.sequence }}</b>
+                        &nbsp; 总时间: <b>{{ ksExpandedDebug.totalTime }}</b> ms
+                        <span v-if="ksExpandedDebug.firstKeyCost > 0"> &nbsp; 首键定位: {{ ksExpandedDebug.firstKeyCost }} ms</span>
+                      </div>
+                      <table class="debug-table">
+                        <thead>
+                          <tr>
+                            <th>键对</th>
+                            <th>分类</th>
+                            <th>手指路径</th>
+                            <th>神经</th>
+                            <th>移动</th>
+                            <th>耦合</th>
+                            <th>跨行</th>
+                            <th>同指跨</th>
+                            <th>小指</th>
+                            <th>伸展</th>
+                            <th>滚动</th>
+                            <th>连击</th>
+                            <th>合计</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr v-for="(pair, pi) in ksExpandedDebug.pairs" :key="pi">
+                            <td class="mono">{{ pair.label }}</td>
+                            <td>{{ pair.category }}</td>
+                            <td>{{ pair.fingerPath }}</td>
+                            <td>{{ pair.neural.toFixed(1) }}</td>
+                            <td :title="pair.moveDiscountDesc ?? ''">{{ pair.move.toFixed(1) }}<span v-if="pair.rawMove !== pair.move" class="debug-raw"> ({{ pair.rawMove.toFixed(1) }})</span></td>
+                            <td>{{ pair.coupling.toFixed(1) }}</td>
+                            <td>{{ pair.rowJump.toFixed(1) }}</td>
+                            <td>{{ pair.sfJump.toFixed(1) }}</td>
+                            <td>{{ pair.pinky.toFixed(1) }}</td>
+                            <td>{{ pair.stretch.toFixed(1) }}</td>
+                            <td>{{ pair.roll.toFixed(1) }}</td>
+                            <td>{{ pair.repeat.toFixed(1) }}<span v-if="pair.repeatCount >= 2" class="debug-raw"> ×{{ pair.repeatCount }}</span></td>
+                            <td class="debug-total">{{ pair.interval.toFixed(1) }}</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                      <div class="debug-footer">
+                        逐步累加: {{ ksExpandedDebug.stepwiseTotal }} ms
+                        &nbsp;|&nbsp; 左手下界: {{ ksExpandedDebug.leftHandTime }} ms
+                        &nbsp;|&nbsp; 右手下界: {{ ksExpandedDebug.rightHandTime }} ms
+                        &nbsp;|&nbsp; <b>最终: {{ ksExpandedDebug.totalTime }} ms</b>
+                      </div>
+                    </div>
+                  </td>
+                </tr>
+                </template>
               </tbody>
             </table>
             <!-- 单字分页控制 -->
@@ -2351,7 +2410,8 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="(item, idx) in paginatedDetailWordItems" :key="item.word" :class="{ 'is-lack': item.isLack }">
+                <template v-for="(item, idx) in paginatedDetailWordItems" :key="item.word">
+                <tr class="clickable" :class="{ 'is-lack': item.isLack, 'expanded-row': ksWordExpandedWord === item.word }" @click="toggleKsWordExpand(item)">
                   <td>{{ (detailWordCurrentPage - 1) * detailPageSize + idx + 1 }}</td>
                   <td class="char-col">
                     {{ item.word }}
@@ -2361,6 +2421,60 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                   <td>{{ item.collision > 1 ? item.collision : '-' }}</td>
                   <td>{{ item.freq }}</td>
                 </tr>
+                <tr v-if="ksWordExpandedWord === item.word && ksWordExpandedDebug" class="debug-expand-row">
+                  <td :colspan="5">
+                    <div class="debug-detail">
+                      <div class="debug-summary">
+                        序列: <b>{{ ksWordExpandedDebug.sequence }}</b>
+                        &nbsp; 总时间: <b>{{ ksWordExpandedDebug.totalTime }}</b> ms
+                        <span v-if="ksWordExpandedDebug.firstKeyCost > 0"> &nbsp; 首键定位: {{ ksWordExpandedDebug.firstKeyCost }} ms</span>
+                      </div>
+                      <table class="debug-table">
+                        <thead>
+                          <tr>
+                            <th>键对</th>
+                            <th>分类</th>
+                            <th>手指路径</th>
+                            <th>神经</th>
+                            <th>移动</th>
+                            <th>耦合</th>
+                            <th>跨行</th>
+                            <th>同指跨</th>
+                            <th>小指</th>
+                            <th>伸展</th>
+                            <th>滚动</th>
+                            <th>连击</th>
+                            <th>合计</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr v-for="(pair, pi) in ksWordExpandedDebug.pairs" :key="pi">
+                            <td class="mono">{{ pair.label }}</td>
+                            <td>{{ pair.category }}</td>
+                            <td>{{ pair.fingerPath }}</td>
+                            <td>{{ pair.neural.toFixed(1) }}</td>
+                            <td :title="pair.moveDiscountDesc ?? ''">{{ pair.move.toFixed(1) }}<span v-if="pair.rawMove !== pair.move" class="debug-raw"> ({{ pair.rawMove.toFixed(1) }})</span></td>
+                            <td>{{ pair.coupling.toFixed(1) }}</td>
+                            <td>{{ pair.rowJump.toFixed(1) }}</td>
+                            <td>{{ pair.sfJump.toFixed(1) }}</td>
+                            <td>{{ pair.pinky.toFixed(1) }}</td>
+                            <td>{{ pair.stretch.toFixed(1) }}</td>
+                            <td>{{ pair.roll.toFixed(1) }}</td>
+                            <td>{{ pair.repeat.toFixed(1) }}<span v-if="pair.repeatCount >= 2" class="debug-raw"> ×{{ pair.repeatCount }}</span></td>
+                            <td class="debug-total">{{ pair.interval.toFixed(1) }}</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                      <div class="debug-footer">
+                        逐步累加: {{ ksWordExpandedDebug.stepwiseTotal }} ms
+                        &nbsp;|&nbsp; 左手下界: {{ ksWordExpandedDebug.leftHandTime }} ms
+                        &nbsp;|&nbsp; 右手下界: {{ ksWordExpandedDebug.rightHandTime }} ms
+                        &nbsp;|&nbsp; <b>最终: {{ ksWordExpandedDebug.totalTime }} ms</b>
+                      </div>
+                    </div>
+                  </td>
+                </tr>
+                </template>
               </tbody>
             </table>
             <!-- 词组分页控制 -->
@@ -2524,7 +2638,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
             </thead>
             <tbody>
               <template v-for="(item, idx) in paginatedKsWordDetailItems" :key="item.word">
-                <tr class="clickable" @click="toggleKsWordExpand(item)" :class="{ 'expanded-row': ksWordExpandedCode === item.code }">
+                <tr class="clickable" @click="toggleKsWordExpand(item)" :class="{ 'expanded-row': ksWordExpandedWord === item.word }">
                   <td>{{ (ksWordDetailCurrentPage - 1) * ksWordDetailPageSize + idx + 1 }}</td>
                   <td class="char-col">{{ item.word }}</td>
                   <td class="code-col">{{ item.code || '-' }}</td>
@@ -2532,7 +2646,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                   <td>{{ fmt(calcEquivalenceForDisplay(item.code)) }}</td>
                   <td>{{ item.freq }}</td>
                 </tr>
-                <tr v-if="ksWordExpandedCode === item.code && ksWordExpandedDebug" class="debug-expand-row">
+                <tr v-if="ksWordExpandedWord === item.word && ksWordExpandedDebug" class="debug-expand-row">
                   <td :colspan="6">
                     <div class="debug-detail">
                       <div class="debug-summary">
