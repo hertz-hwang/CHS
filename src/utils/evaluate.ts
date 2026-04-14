@@ -965,6 +965,9 @@ export interface EvaluateWordItem {
   overKey: number    // 超标键位
   isLack: boolean    // 是否缺字
   
+  // 字词冲突（同编码下同时存在单字和词组）
+  charWordConflict?: number
+
   // 首选词（同编码下的首位候选词）
   primaryWord?: string
 }
@@ -1164,6 +1167,194 @@ export function evaluateWords(
 }
 
 /**
+ * 字词混合测评
+ * 将单字和词组混合在一起，按频率统一排序后进行测评
+ * @param wordCodeMap 字/词编码映射（包含单字和词组）
+ * @param wordFreqMap 字/词频映射（包含单字和词组）
+ * @param charsWithShortCode 拥有简码的单字集合，其全码不计为字词冲突
+ */
+export function evaluateMixed(
+  wordCodeMap: Map<string, string>,
+  wordFreqMap: Map<string, number>,
+  charsWithShortCode?: Set<string>
+): EvaluationWordResult {
+  // 按频率排序（不过滤，包含单字和词组）
+  const sortedWords = [...wordFreqMap.entries()]
+    .sort((a, b) => b[1] - a[1])
+
+  // 6个分区（字词混合专用）
+  const sections = [
+    [0, 3500],
+    [3500, 8500],
+    [8500, 12000],
+    [12000, 30000],
+    [30000, 48000],
+    [48000, 66000],
+  ]
+
+  // 编码冲突计数器
+  const codeCollision = new Map<string, number>()
+
+  const lines: EvaluateWordLine[] = []
+  const totalUsage: Record<string, number> = {}
+
+  // 构建编码到词的映射（用于找出首选词）
+  const codeToWords = new Map<string, string[]>()
+  // 预计算字词冲突：同一编码下同时存在单字和词组
+  const codeHasChar = new Set<string>()
+  const codeHasWord = new Set<string>()
+  for (let i = 0; i < sortedWords.length; i++) {
+    const [word] = sortedWords[i]
+    const code = wordCodeMap.get(word)
+    if (!code) continue
+
+    if (!codeToWords.has(code)) {
+      codeToWords.set(code, [])
+    }
+    codeToWords.get(code)!.push(word)
+
+    if ([...word].length === 1) {
+      // 拥有简码的单字，其全码不加入 codeHasChar，不参与字词冲突
+      if (!charsWithShortCode || !charsWithShortCode.has(word)) {
+        codeHasChar.add(code)
+      }
+    } else {
+      codeHasWord.add(code)
+    }
+  }
+
+  for (const [start, end] of sections) {
+    const line: EvaluateWordLine = {
+      items: [],
+      start,
+      end,
+      totalFreq: 0,
+      usage: {},
+    }
+
+    for (let i = start; i < Math.min(end, sortedWords.length); i++) {
+      const [word, freq] = sortedWords[i]
+      line.totalFreq += freq
+
+      // 检查码表中是否存在该字/词
+      const code = wordCodeMap.get(word)
+
+      // 缺字判断
+      if (!code) {
+        line.items.push({
+          word,
+          freq,
+          code: '',
+          codeLen: 0,
+          collision: 0,
+          eq: 0,
+          ksEq: 0,
+          dh: 0,
+          ms: 0,
+          ss: 0,
+          pd: 0,
+          lfd: 0,
+          trible: 0,
+          overKey: 0,
+          isLack: true,
+        })
+        continue
+      }
+
+      const codeLen = code.length
+      const collision = (codeCollision.get(code) || 0) + 1
+      codeCollision.set(code, collision)
+
+      // 获取首选词（同编码下的首位候选词）
+      let primaryWord: string | undefined
+      if (collision > 1) {
+        const wordsWithSameCode = codeToWords.get(code)
+        if (wordsWithSameCode && wordsWithSameCode.length > 0) {
+          primaryWord = wordsWithSameCode[0]
+        }
+      }
+
+      // 统计按键使用
+      for (const k of code) {
+        if (KEYS_46_SET.has(k)) {
+          line.usage[k] = (line.usage[k] || 0) + freq
+          totalUsage[k] = (totalUsage[k] || 0) + freq
+        }
+      }
+
+      // 检查超标键位
+      let overKey = 0
+      for (const k of code) {
+        if (!KEYS_46_SET.has(k)) overKey++
+      }
+
+      // 字词冲突：同一编码下同时存在单字和词组
+      const wordLen = [...word].length
+      const hasConflict = wordLen === 1
+        ? (!charsWithShortCode || !charsWithShortCode.has(word)) && codeHasWord.has(code)
+        : codeHasChar.has(code)
+
+      // 初始化测评项
+      const item: EvaluateWordItem = {
+        word,
+        freq,
+        code,
+        codeLen,
+        collision,
+        eq: 0,
+        ksEq: 0,
+        dh: 0,
+        ms: 0,
+        ss: 0,
+        pd: 0,
+        lfd: 0,
+        trible: 0,
+        overKey,
+        isLack: false,
+        charWordConflict: hasConflict ? 1 : 0,
+        primaryWord,
+      }
+
+      // 超标键位，跳过手感计算
+      if (overKey > 0) {
+        line.items.push(item)
+        continue
+      }
+
+      // 计算当量
+      item.eq = calcEquivalence(code) * freq
+
+      // 计算键魂当量
+      const ksEqVal = calcKeySoulEquivalence(code)
+      item.ksEq = ksEqVal * freq
+
+      // 计算手感指标
+      for (let j = 1; j < code.length; j++) {
+        const feel = getComboFeel(code[j - 1], code[j])
+        item.dh += feel.dh
+        item.ms += feel.ms
+        item.ss += feel.ss
+        item.pd += feel.pd
+        item.lfd += feel.lfd
+      }
+
+      // 三连击
+      for (let j = 2; j < code.length; j++) {
+        if (code[j - 2] === code[j - 1] && code[j - 1] === code[j]) {
+          item.trible++
+        }
+      }
+
+      line.items.push(item)
+    }
+
+    lines.push(line)
+  }
+
+  return { lines, usage: totalUsage }
+}
+
+/**
  * 汇总多个多字词分区
  */
 export function zipWordLines(lines: EvaluateWordLine[]): EvaluateWordLine {
@@ -1241,6 +1432,9 @@ export function getWordColumnValue(
       case 'trible':
         if (item.trible > 0) { count++; weight += item.freq }
         break
+      case 'charWordConflict':
+        if ((item.charWordConflict ?? 0) > 0) { count++; weight += item.freq }
+        break
     }
   }
 
@@ -1268,6 +1462,32 @@ export function getWordWeightedKsEq(line: EvaluateWordLine): number {
   for (const item of line.items) {
     if (!item.isLack && item.overKey === 0) {
       total += item.ksEq
+    }
+  }
+  return line.totalFreq > 0 ? total / line.totalFreq : 0
+}
+
+/**
+ * 获取键魂键均当量（每键对的键魂当量加权平均）
+ */
+export function getWordWeightedKsKeyEq(line: EvaluateWordLine): number {
+  let total = 0
+  for (const item of line.items) {
+    if (!item.isLack && item.overKey === 0 && item.codeLen >= 2) {
+      total += item.ksEq / (item.codeLen - 1)
+    }
+  }
+  return line.totalFreq > 0 ? total / line.totalFreq : 0
+}
+
+/**
+ * 获取键均当量（基于原始当量表的每键对当量加权平均）
+ */
+export function getWordWeightedKeyEq(line: EvaluateWordLine): number {
+  let total = 0
+  for (const item of line.items) {
+    if (!item.isLack && item.overKey === 0 && item.codeLen >= 2) {
+      total += item.eq / (item.codeLen - 1)
     }
   }
   return line.totalFreq > 0 ? total / line.totalFreq : 0

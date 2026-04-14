@@ -7,6 +7,7 @@ import { calcKeySoulEquivalence, debugKeySoulEquivalence, type SequenceDebugResu
 import {
   evaluateScheme,
   evaluateWords,
+  evaluateMixed,
   parseCodeTable,
   loadEquivalenceData,
   zipLines,
@@ -16,6 +17,8 @@ import {
   getWeightedValue,
   getWordWeightedEq,
   getWordWeightedKsEq,
+  getWordWeightedKsKeyEq,
+  getWordWeightedKeyEq,
   getWordComboWeightPercent,
   getWordLackWeightPercent,
   calcFingerBalance,
@@ -35,12 +38,13 @@ const {
 // 主标签页
 const activeTab = ref<'single' | 'upload'>('single')
 
-// 子标签页（用于切换单字/词组测评结果）
-const subTab = ref<'char' | 'word'>('char')
+// 子标签页（用于切换单字/词组/字词混合测评结果）
+const subTab = ref<'char' | 'word' | 'mixed'>('char')
 
 // 测评结果 - 使用 shallowRef 避免深层响应式带来的性能开销
 const evaluationResult = shallowRef<EvaluationResult | null>(null)
 const wordEvaluationResult = shallowRef<EvaluationWordResult | null>(null)
+const mixedEvaluationResult = shallowRef<EvaluationWordResult | null>(null)
 const isEvaluating = ref(false)
 
 // 上传码表相关
@@ -49,6 +53,7 @@ const uploadedCodeMap = ref<Map<string, string[]> | null>(null)
 const uploadedFileName = ref('')
 const uploadedResult = shallowRef<EvaluationResult | null>(null)
 const uploadedWordResult = shallowRef<EvaluationWordResult | null>(null)
+const uploadedMixedResult = shallowRef<EvaluationWordResult | null>(null)
 
 // 上传码表组词规则
 // 规则格式：大写字母表示字序(A=第1字,B=第2字...Z=末字)，小写字母表示码位(a=第1码,b=第2码...)
@@ -246,6 +251,35 @@ async function runEvaluation() {
       wordEvaluationResult.value = wordResult
     }
 
+    // 字词混合测评
+    {
+      const mixedCodeMap = new Map<string, string>()
+      const mixedFreqMap = new Map<string, number>()
+
+      // 合并单字编码和频率
+      for (const [char, freq] of freqMap) {
+        mixedFreqMap.set(char, freq)
+        if (!missingSet.has(char)) {
+          const code = calculateCharCode(char)
+          if (code) mixedCodeMap.set(char, code)
+        }
+      }
+
+      // 合并词组编码和频率
+      for (const [text, freq] of engine.freq) {
+        if ([...text].length >= 2 && freq > 0) {
+          mixedFreqMap.set(text, freq)
+          const code = calculateWordCode(text)
+          if (code) mixedCodeMap.set(text, code)
+        }
+      }
+
+      if (mixedFreqMap.size) {
+        const mixedResult = evaluateMixed(mixedCodeMap, mixedFreqMap)
+        mixedEvaluationResult.value = mixedResult
+      }
+    }
+
     // 统计词数
     let wordCount = 0
     if (wordFreqMap.size) {
@@ -404,7 +438,8 @@ function handleFileUpload(event: Event) {
   // 上传新码表时，清除之前的测评结果
   uploadedResult.value = null
   uploadedWordResult.value = null
-  
+  uploadedMixedResult.value = null
+
   uploadedFileName.value = file.name
   uploadedSchemeName.value = extractSchemeName(file.name)
   
@@ -564,6 +599,50 @@ async function runUploadedEvaluation() {
       const wordResult = evaluateWords(wordCodeMap, wordFreqMap)
       uploadedWordResult.value = wordResult
     }
+
+    // 字词混合测评
+    {
+      const mixedCodeMap = new Map<string, string>()
+      const mixedFreqMap = new Map<string, number>()
+      const charsWithShortCode = new Set<string>()
+
+      // 合并单字编码和频率（从上传码表取最短编码）
+      for (const [char, freq] of freqMap) {
+        mixedFreqMap.set(char, freq)
+        const codes = uploadedCodeMap.value!.get(char)
+        if (codes && codes.length > 0) {
+          const shortest = codes.reduce((a, b) => a.length <= b.length ? a : b, codes[0])
+          mixedCodeMap.set(char, shortest)
+          // 判断该字是否拥有简码（存在比最长编码更短的编码）
+          const longest = codes.reduce((a, b) => a.length >= b.length ? a : b, codes[0])
+          if (shortest.length < longest.length) {
+            charsWithShortCode.add(char)
+          }
+        }
+      }
+
+      // 合并词组编码和频率
+      for (const [text, freq] of engine.freq) {
+        if ([...text].length >= 2 && freq > 0) {
+          mixedFreqMap.set(text, freq)
+          let rule: string
+          if (text.length === 2) {
+            rule = uploadedWord2Rule.value
+          } else if (text.length === 3) {
+            rule = uploadedWord3Rule.value
+          } else {
+            rule = uploadedWord4Rule.value
+          }
+          const code = calculateUploadedWordCode(text, rule)
+          if (code) mixedCodeMap.set(text, code)
+        }
+      }
+
+      if (mixedFreqMap.size) {
+        const mixedResult = evaluateMixed(mixedCodeMap, mixedFreqMap, charsWithShortCode)
+        uploadedMixedResult.value = mixedResult
+      }
+    }
     
     // 统计词数
     let wordCount = 0
@@ -586,6 +665,7 @@ function clearUploaded() {
   uploadedCodeMap.value = null
   uploadedFileName.value = ''
   uploadedResult.value = null
+  uploadedMixedResult.value = null
 }
 
 // 格式化数字
@@ -667,16 +747,18 @@ const detailWordCurrentPage = ref(1)
 // 过滤后的数据（单字）
 const filteredDetailItems = computed(() => {
   if (!detailSearchQuery.value) return detailItems.value
+  const q = detailSearchQuery.value
   return detailItems.value.filter(item =>
-    item.char.includes(detailSearchQuery.value)
+    item.char.includes(q) || (item.code && item.code.includes(q))
   )
 })
 
 // 过滤后的数据（词组）
 const filteredDetailWordItems = computed(() => {
   if (!detailWordSearchQuery.value) return detailWordItems.value
+  const q = detailWordSearchQuery.value
   return detailWordItems.value.filter(item =>
-    item.word.includes(detailWordSearchQuery.value)
+    item.word.includes(q) || (item.code && item.code.includes(q))
   )
 })
 
@@ -901,6 +983,7 @@ function filterWordItemsByColumn(line: EvaluateWordLine, column: string): Evalua
     
     switch (column) {
       case 'select': match = item.collision > 1 && !item.isLack; break
+      case 'charWordConflict': match = (item.charWordConflict ?? 0) > 0 && !item.isLack; break
       case 'lack': match = item.isLack; break
       case 'dh': match = item.dh > 0 && !item.isLack && item.overKey === 0; break
       case 'ms': match = item.ms > 0 && !item.isLack && item.overKey === 0; break
@@ -920,6 +1003,7 @@ function filterWordItemsByColumn(line: EvaluateWordLine, column: string): Evalua
 // 词组表格列名映射
 const WORD_COLUMN_NAMES: Record<string, string> = {
   select: '选重',
+  charWordConflict: '字词冲突',
   lack: '缺词标记',
   dh: '左右互击',
   ms: '同指大跨',
@@ -931,7 +1015,7 @@ const WORD_COLUMN_NAMES: Record<string, string> = {
 }
 
 // 词组可点击的列
-const WORD_CLICKABLE_COLUMNS = ['select', 'lack', 'dh', 'ms', 'ss', 'pd', 'lfd', 'trible', 'overKey']
+const WORD_CLICKABLE_COLUMNS = ['select', 'charWordConflict', 'lack', 'dh', 'ms', 'ss', 'pd', 'lfd', 'trible', 'overKey']
 
 // 点击词组单元格查看详情
 function handleWordCellClick(line: EvaluateWordLine, column: string, rangeLabel: string) {
@@ -1128,6 +1212,7 @@ watch(ksWordDetailCurrentPage, () => {
 watch([rootsVersion, configVersion, charsetVersion], () => {
   evaluationResult.value = null
   wordEvaluationResult.value = null
+  mixedEvaluationResult.value = null
 })
 </script>
 
@@ -1258,7 +1343,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
       </div>
 
       <!-- 测评结果：子标签切换 -->
-      <div v-if="evaluationResult || wordEvaluationResult" class="result-panel">
+      <div v-if="evaluationResult || wordEvaluationResult || mixedEvaluationResult" class="result-panel">
         <!-- 子标签 -->
         <div class="sub-tabs">
           <button class="sub-tab-btn" :class="{ active: subTab === 'char' }" @click="subTab = 'char'">
@@ -1266,6 +1351,9 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
           </button>
           <button class="sub-tab-btn" :class="{ active: subTab === 'word' }" @click="subTab = 'word'">
             词组测评
+          </button>
+          <button class="sub-tab-btn" :class="{ active: subTab === 'mixed' }" @click="subTab = 'mixed'">
+            字词混合测评
           </button>
         </div>
 
@@ -1576,6 +1664,119 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
           </div>
           <KeyboardHeatmap :usage="wordEvaluationResult.usage" :include-space="includeSpaceInStats" />
         </div>
+
+        <!-- 字词混合测评表格 -->
+        <div v-if="subTab === 'mixed' && mixedEvaluationResult" class="table-container">
+          <table class="eval-table word-eval-table">
+            <thead>
+              <tr class="scheme-title-row">
+                <th colspan="10" class="scheme-title-cell">
+                  <div class="scheme-title-content">
+                    <span class="scheme-name-text">{{ currentSchemeName }}</span>
+                    <span class="scheme-subtitle">字词混合测评数据</span>
+                  </div>
+                </th>
+              </tr>
+              <tr>
+                <th class="sticky-col">统计范围</th>
+                <th class="col-select">选重</th>
+                <th>字词冲突</th>
+                <th class="col-ks-eq">键魂键均当量</th>
+                <th>键均当量</th>
+                <th>同指大跨</th>
+                <th>同指小跨</th>
+                <th>小指干扰</th>
+                <th>错手</th>
+                <th>三连击</th>
+              </tr>
+            </thead>
+            <tbody>
+              <!-- 数据行 -->
+              <template v-for="(line, idx) in mixedEvaluationResult.lines" :key="idx">
+                <tr :class="{ 'row-highlight': idx < 3 }">
+                  <td class="sticky-col">{{ line.start + 1 }}~{{ line.end }}</td>
+                  <td class="col-select clickable" @click="handleWordCellClick(line, 'select', `${line.start + 1}~${line.end}`)">{{ getWordColumnValue(line, 'select').count }}</td>
+                  <td class="clickable" @click="handleWordCellClick(line, 'charWordConflict', `${line.start + 1}~${line.end}`)">{{ getWordColumnValue(line, 'charWordConflict').count }}</td>
+                  <td class="col-ks-eq clickable" @click="handleKsWordEqClick(line, `${line.start + 1}~${line.end}`)">{{ fmt(getWordWeightedKsKeyEq(line)) }}</td>
+                  <td>{{ fmt(getWordWeightedKeyEq(line)) }}</td>
+                  <td class="clickable" @click="handleWordCellClick(line, 'ms', `${line.start + 1}~${line.end}`)">{{ getWordColumnValue(line, 'ms').count }}</td>
+                  <td class="clickable" @click="handleWordCellClick(line, 'ss', `${line.start + 1}~${line.end}`)">{{ getWordColumnValue(line, 'ss').count }}</td>
+                  <td class="clickable" @click="handleWordCellClick(line, 'pd', `${line.start + 1}~${line.end}`)">{{ getWordColumnValue(line, 'pd').count }}</td>
+                  <td class="clickable" @click="handleWordCellClick(line, 'lfd', `${line.start + 1}~${line.end}`)">{{ getWordColumnValue(line, 'lfd').count }}</td>
+                  <td class="clickable" @click="handleWordCellClick(line, 'trible', `${line.start + 1}~${line.end}`)">{{ getWordColumnValue(line, 'trible').count }}</td>
+                </tr>
+
+                <!-- 小计行（在第3行后） -->
+                <tr v-if="idx === 2" class="row-subtotal">
+                  <td class="sticky-col">小计</td>
+                  <td class="col-select">{{ getWordWeightPercent(getWordSubtotal(mixedEvaluationResult.lines.slice(0, 3)), 'select') }}%</td>
+                  <td>{{ getWordWeightPercent(getWordSubtotal(mixedEvaluationResult.lines.slice(0, 3)), 'charWordConflict') }}%</td>
+                  <td class="col-ks-eq">{{ fmt(getWordWeightedKsKeyEq(getWordSubtotal(mixedEvaluationResult.lines.slice(0, 3)))) }}</td>
+                  <td>{{ fmt(getWordWeightedKeyEq(getWordSubtotal(mixedEvaluationResult.lines.slice(0, 3)))) }}</td>
+                  <td>{{ getWordComboWeightPercent(getWordSubtotal(mixedEvaluationResult.lines.slice(0, 3)), 'ms') }}%</td>
+                  <td>{{ getWordComboWeightPercent(getWordSubtotal(mixedEvaluationResult.lines.slice(0, 3)), 'ss') }}%</td>
+                  <td>{{ getWordComboWeightPercent(getWordSubtotal(mixedEvaluationResult.lines.slice(0, 3)), 'pd') }}%</td>
+                  <td>{{ getWordComboWeightPercent(getWordSubtotal(mixedEvaluationResult.lines.slice(0, 3)), 'lfd') }}%</td>
+                  <td>{{ getWordWeightPercent(getWordSubtotal(mixedEvaluationResult.lines.slice(0, 3)), 'trible') }}%</td>
+                </tr>
+
+                <!-- 加权比重行（在小计行后） -->
+                <tr v-if="idx === 2" class="row-weight">
+                  <td class="sticky-col">加权比重</td>
+                  <td class="col-select">{{ getWordWeightPercent(getWordSubtotal(mixedEvaluationResult.lines.slice(0, 3)), 'select') }}%</td>
+                  <td>{{ getWordWeightPercent(getWordSubtotal(mixedEvaluationResult.lines.slice(0, 3)), 'charWordConflict') }}%</td>
+                  <td>-</td>
+                  <td>-</td>
+                  <td>{{ getWordComboWeightPercent(getWordSubtotal(mixedEvaluationResult.lines.slice(0, 3)), 'ms') }}%</td>
+                  <td>{{ getWordComboWeightPercent(getWordSubtotal(mixedEvaluationResult.lines.slice(0, 3)), 'ss') }}%</td>
+                  <td>{{ getWordComboWeightPercent(getWordSubtotal(mixedEvaluationResult.lines.slice(0, 3)), 'pd') }}%</td>
+                  <td>{{ getWordComboWeightPercent(getWordSubtotal(mixedEvaluationResult.lines.slice(0, 3)), 'lfd') }}%</td>
+                  <td>{{ getWordWeightPercent(getWordSubtotal(mixedEvaluationResult.lines.slice(0, 3)), 'trible') }}%</td>
+                </tr>
+              </template>
+
+              <!-- 总计行 -->
+              <tr class="row-total">
+                <td class="sticky-col">总计</td>
+                <td class="col-select clickable" @click="handleWordCellClick(getWordSubtotal(mixedEvaluationResult.lines), 'select', '总计')">{{ getWordColumnValue(getWordSubtotal(mixedEvaluationResult.lines), 'select').count }}</td>
+                <td class="clickable" @click="handleWordCellClick(getWordSubtotal(mixedEvaluationResult.lines), 'charWordConflict', '总计')">{{ getWordColumnValue(getWordSubtotal(mixedEvaluationResult.lines), 'charWordConflict').count }}</td>
+                <td class="col-ks-eq clickable" @click="handleKsWordEqClick(getWordSubtotal(mixedEvaluationResult.lines), '总计')">{{ fmt(getWordWeightedKsKeyEq(getWordSubtotal(mixedEvaluationResult.lines))) }}</td>
+                <td>{{ fmt(getWordWeightedKeyEq(getWordSubtotal(mixedEvaluationResult.lines))) }}</td>
+                <td class="clickable" @click="handleWordCellClick(getWordSubtotal(mixedEvaluationResult.lines), 'ms', '总计')">{{ getWordColumnValue(getWordSubtotal(mixedEvaluationResult.lines), 'ms').count }}</td>
+                <td class="clickable" @click="handleWordCellClick(getWordSubtotal(mixedEvaluationResult.lines), 'ss', '总计')">{{ getWordColumnValue(getWordSubtotal(mixedEvaluationResult.lines), 'ss').count }}</td>
+                <td class="clickable" @click="handleWordCellClick(getWordSubtotal(mixedEvaluationResult.lines), 'pd', '总计')">{{ getWordColumnValue(getWordSubtotal(mixedEvaluationResult.lines), 'pd').count }}</td>
+                <td class="clickable" @click="handleWordCellClick(getWordSubtotal(mixedEvaluationResult.lines), 'lfd', '总计')">{{ getWordColumnValue(getWordSubtotal(mixedEvaluationResult.lines), 'lfd').count }}</td>
+                <td class="clickable" @click="handleWordCellClick(getWordSubtotal(mixedEvaluationResult.lines), 'trible', '总计')">{{ getWordColumnValue(getWordSubtotal(mixedEvaluationResult.lines), 'trible').count }}</td>
+              </tr>
+
+              <!-- 总加权比重行 -->
+              <tr class="row-weight">
+                <td class="sticky-col">加权比重</td>
+                <td class="col-select">{{ getWordWeightPercent(getWordSubtotal(mixedEvaluationResult.lines), 'select') }}%</td>
+                <td>{{ getWordWeightPercent(getWordSubtotal(mixedEvaluationResult.lines), 'charWordConflict') }}%</td>
+                <td>-</td>
+                <td>-</td>
+                <td>{{ getWordComboWeightPercent(getWordSubtotal(mixedEvaluationResult.lines), 'ms') }}%</td>
+                <td>{{ getWordComboWeightPercent(getWordSubtotal(mixedEvaluationResult.lines), 'ss') }}%</td>
+                <td>{{ getWordComboWeightPercent(getWordSubtotal(mixedEvaluationResult.lines), 'pd') }}%</td>
+                <td>{{ getWordComboWeightPercent(getWordSubtotal(mixedEvaluationResult.lines), 'lfd') }}%</td>
+                <td>{{ getWordWeightPercent(getWordSubtotal(mixedEvaluationResult.lines), 'trible') }}%</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- 字词混合键位热力图 -->
+        <div v-if="subTab === 'mixed' && mixedEvaluationResult" class="heatmap-container">
+          <div class="heatmap-header">
+            <h3 class="section-title">键位热力图（单位：%）</h3>
+            <label class="checkbox-label">
+              <input v-model="includeSpaceInStats" type="checkbox" />
+              <span>统计空格</span>
+            </label>
+          </div>
+          <KeyboardHeatmap :usage="mixedEvaluationResult.usage" :include-space="includeSpaceInStats" />
+        </div>
       </div>
 
       <!-- 空状态 -->
@@ -1637,7 +1838,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
       </div>
 
       <!-- 上传码表测评结果 -->
-      <div v-if="uploadedResult || uploadedWordResult" class="result-panel">
+      <div v-if="uploadedResult || uploadedWordResult || uploadedMixedResult" class="result-panel">
         <!-- 子标签 -->
         <div class="sub-tabs">
           <button class="sub-tab-btn" :class="{ active: subTab === 'char' }" @click="subTab = 'char'">
@@ -1645,6 +1846,9 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
           </button>
           <button class="sub-tab-btn" :class="{ active: subTab === 'word' }" @click="subTab = 'word'">
             词组测评
+          </button>
+          <button class="sub-tab-btn" :class="{ active: subTab === 'mixed' }" @click="subTab = 'mixed'">
+            字词混合测评
           </button>
         </div>
         <!-- 单字测评表格 -->
@@ -1948,6 +2152,119 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
           </div>
           <KeyboardHeatmap :usage="uploadedWordResult.usage" :include-space="includeSpaceInStats" />
         </div>
+
+        <!-- 字词混合测评表格 -->
+        <div v-if="subTab === 'mixed' && uploadedMixedResult" class="table-container">
+          <table class="eval-table word-eval-table">
+            <thead>
+              <tr class="scheme-title-row">
+                <th colspan="10" class="scheme-title-cell">
+                  <div class="scheme-title-content">
+                    <span class="scheme-name-text">{{ uploadedSchemeName }}</span>
+                    <span class="scheme-subtitle">字词混合测评数据</span>
+                  </div>
+                </th>
+              </tr>
+              <tr>
+                <th class="sticky-col">统计范围</th>
+                <th class="col-select">选重</th>
+                <th>字词冲突</th>
+                <th class="col-ks-eq">键魂键均当量</th>
+                <th>键均当量</th>
+                <th>同指大跨</th>
+                <th>同指小跨</th>
+                <th>小指干扰</th>
+                <th>错手</th>
+                <th>三连击</th>
+              </tr>
+            </thead>
+            <tbody>
+              <!-- 数据行 -->
+              <template v-for="(line, idx) in uploadedMixedResult.lines" :key="idx">
+                <tr :class="{ 'row-highlight': idx < 3 }">
+                  <td class="sticky-col">{{ line.start + 1 }}~{{ line.end }}</td>
+                  <td class="col-select clickable" @click="handleWordCellClick(line, 'select', `${line.start + 1}~${line.end}`)">{{ getWordColumnValue(line, 'select').count }}</td>
+                  <td class="clickable" @click="handleWordCellClick(line, 'charWordConflict', `${line.start + 1}~${line.end}`)">{{ getWordColumnValue(line, 'charWordConflict').count }}</td>
+                  <td class="col-ks-eq clickable" @click="handleKsWordEqClick(line, `${line.start + 1}~${line.end}`)">{{ fmt(getWordWeightedKsKeyEq(line)) }}</td>
+                  <td>{{ fmt(getWordWeightedKeyEq(line)) }}</td>
+                  <td class="clickable" @click="handleWordCellClick(line, 'ms', `${line.start + 1}~${line.end}`)">{{ getWordColumnValue(line, 'ms').count }}</td>
+                  <td class="clickable" @click="handleWordCellClick(line, 'ss', `${line.start + 1}~${line.end}`)">{{ getWordColumnValue(line, 'ss').count }}</td>
+                  <td class="clickable" @click="handleWordCellClick(line, 'pd', `${line.start + 1}~${line.end}`)">{{ getWordColumnValue(line, 'pd').count }}</td>
+                  <td class="clickable" @click="handleWordCellClick(line, 'lfd', `${line.start + 1}~${line.end}`)">{{ getWordColumnValue(line, 'lfd').count }}</td>
+                  <td class="clickable" @click="handleWordCellClick(line, 'trible', `${line.start + 1}~${line.end}`)">{{ getWordColumnValue(line, 'trible').count }}</td>
+                </tr>
+
+                <!-- 小计行（在第3行后） -->
+                <tr v-if="idx === 2" class="row-subtotal">
+                  <td class="sticky-col">小计</td>
+                  <td class="col-select">{{ getWordWeightPercent(getWordSubtotal(uploadedMixedResult.lines.slice(0, 3)), 'select') }}%</td>
+                  <td>{{ getWordWeightPercent(getWordSubtotal(uploadedMixedResult.lines.slice(0, 3)), 'charWordConflict') }}%</td>
+                  <td class="col-ks-eq">{{ fmt(getWordWeightedKsKeyEq(getWordSubtotal(uploadedMixedResult.lines.slice(0, 3)))) }}</td>
+                  <td>{{ fmt(getWordWeightedKeyEq(getWordSubtotal(uploadedMixedResult.lines.slice(0, 3)))) }}</td>
+                  <td>{{ getWordComboWeightPercent(getWordSubtotal(uploadedMixedResult.lines.slice(0, 3)), 'ms') }}%</td>
+                  <td>{{ getWordComboWeightPercent(getWordSubtotal(uploadedMixedResult.lines.slice(0, 3)), 'ss') }}%</td>
+                  <td>{{ getWordComboWeightPercent(getWordSubtotal(uploadedMixedResult.lines.slice(0, 3)), 'pd') }}%</td>
+                  <td>{{ getWordComboWeightPercent(getWordSubtotal(uploadedMixedResult.lines.slice(0, 3)), 'lfd') }}%</td>
+                  <td>{{ getWordWeightPercent(getWordSubtotal(uploadedMixedResult.lines.slice(0, 3)), 'trible') }}%</td>
+                </tr>
+
+                <!-- 加权比重行（在小计行后） -->
+                <tr v-if="idx === 2" class="row-weight">
+                  <td class="sticky-col">加权比重</td>
+                  <td class="col-select">{{ getWordWeightPercent(getWordSubtotal(uploadedMixedResult.lines.slice(0, 3)), 'select') }}%</td>
+                  <td>{{ getWordWeightPercent(getWordSubtotal(uploadedMixedResult.lines.slice(0, 3)), 'charWordConflict') }}%</td>
+                  <td>-</td>
+                  <td>-</td>
+                  <td>{{ getWordComboWeightPercent(getWordSubtotal(uploadedMixedResult.lines.slice(0, 3)), 'ms') }}%</td>
+                  <td>{{ getWordComboWeightPercent(getWordSubtotal(uploadedMixedResult.lines.slice(0, 3)), 'ss') }}%</td>
+                  <td>{{ getWordComboWeightPercent(getWordSubtotal(uploadedMixedResult.lines.slice(0, 3)), 'pd') }}%</td>
+                  <td>{{ getWordComboWeightPercent(getWordSubtotal(uploadedMixedResult.lines.slice(0, 3)), 'lfd') }}%</td>
+                  <td>{{ getWordWeightPercent(getWordSubtotal(uploadedMixedResult.lines.slice(0, 3)), 'trible') }}%</td>
+                </tr>
+              </template>
+
+              <!-- 总计行 -->
+              <tr class="row-total">
+                <td class="sticky-col">总计</td>
+                <td class="col-select clickable" @click="handleWordCellClick(getWordSubtotal(uploadedMixedResult.lines), 'select', '总计')">{{ getWordColumnValue(getWordSubtotal(uploadedMixedResult.lines), 'select').count }}</td>
+                <td class="clickable" @click="handleWordCellClick(getWordSubtotal(uploadedMixedResult.lines), 'charWordConflict', '总计')">{{ getWordColumnValue(getWordSubtotal(uploadedMixedResult.lines), 'charWordConflict').count }}</td>
+                <td class="col-ks-eq clickable" @click="handleKsWordEqClick(getWordSubtotal(uploadedMixedResult.lines), '总计')">{{ fmt(getWordWeightedKsKeyEq(getWordSubtotal(uploadedMixedResult.lines))) }}</td>
+                <td>{{ fmt(getWordWeightedKeyEq(getWordSubtotal(uploadedMixedResult.lines))) }}</td>
+                <td class="clickable" @click="handleWordCellClick(getWordSubtotal(uploadedMixedResult.lines), 'ms', '总计')">{{ getWordColumnValue(getWordSubtotal(uploadedMixedResult.lines), 'ms').count }}</td>
+                <td class="clickable" @click="handleWordCellClick(getWordSubtotal(uploadedMixedResult.lines), 'ss', '总计')">{{ getWordColumnValue(getWordSubtotal(uploadedMixedResult.lines), 'ss').count }}</td>
+                <td class="clickable" @click="handleWordCellClick(getWordSubtotal(uploadedMixedResult.lines), 'pd', '总计')">{{ getWordColumnValue(getWordSubtotal(uploadedMixedResult.lines), 'pd').count }}</td>
+                <td class="clickable" @click="handleWordCellClick(getWordSubtotal(uploadedMixedResult.lines), 'lfd', '总计')">{{ getWordColumnValue(getWordSubtotal(uploadedMixedResult.lines), 'lfd').count }}</td>
+                <td class="clickable" @click="handleWordCellClick(getWordSubtotal(uploadedMixedResult.lines), 'trible', '总计')">{{ getWordColumnValue(getWordSubtotal(uploadedMixedResult.lines), 'trible').count }}</td>
+              </tr>
+
+              <!-- 总加权比重行 -->
+              <tr class="row-weight">
+                <td class="sticky-col">加权比重</td>
+                <td class="col-select">{{ getWordWeightPercent(getWordSubtotal(uploadedMixedResult.lines), 'select') }}%</td>
+                <td>{{ getWordWeightPercent(getWordSubtotal(uploadedMixedResult.lines), 'charWordConflict') }}%</td>
+                <td>-</td>
+                <td>-</td>
+                <td>{{ getWordComboWeightPercent(getWordSubtotal(uploadedMixedResult.lines), 'ms') }}%</td>
+                <td>{{ getWordComboWeightPercent(getWordSubtotal(uploadedMixedResult.lines), 'ss') }}%</td>
+                <td>{{ getWordComboWeightPercent(getWordSubtotal(uploadedMixedResult.lines), 'pd') }}%</td>
+                <td>{{ getWordComboWeightPercent(getWordSubtotal(uploadedMixedResult.lines), 'lfd') }}%</td>
+                <td>{{ getWordWeightPercent(getWordSubtotal(uploadedMixedResult.lines), 'trible') }}%</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- 字词混合键位热力图 -->
+        <div v-if="subTab === 'mixed' && uploadedMixedResult" class="heatmap-container">
+          <div class="heatmap-header">
+            <h3 class="section-title">键位热力图（单位：%）</h3>
+            <label class="checkbox-label">
+              <input v-model="includeSpaceInStats" type="checkbox" />
+              <span>统计空格</span>
+            </label>
+          </div>
+          <KeyboardHeatmap :usage="uploadedMixedResult.usage" :include-space="includeSpaceInStats" />
+        </div>
       </div>
     </div>
 
@@ -1966,7 +2283,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                 v-model="detailSearchQuery"
                 type="search"
                 class="search-input"
-                placeholder="检索汉字..."
+                placeholder="检索汉字/编码..."
                 @input="detailCurrentPage = 1"
               />
             </div>
@@ -2019,7 +2336,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                 v-model="detailWordSearchQuery"
                 type="search"
                 class="search-input"
-                placeholder="检索词组..."
+                placeholder="检索词组/编码..."
                 @input="detailWordCurrentPage = 1"
               />
             </div>
@@ -2076,7 +2393,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
               v-model="ksDetailSearchQuery"
               type="search"
               class="search-input"
-              placeholder="检索汉字..."
+              placeholder="检索汉字/编码..."
               @input="ksDetailCurrentPage = 1"
             />
           </div>
@@ -2190,7 +2507,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
               v-model="ksWordDetailSearchQuery"
               type="search"
               class="search-input"
-              placeholder="检索词组..."
+              placeholder="检索词组/编码..."
               @input="ksWordDetailCurrentPage = 1"
             />
           </div>
