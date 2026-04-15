@@ -25,13 +25,20 @@ const triggerRef = ref<HTMLElement | null>(null)
 // 下拉面板定位样式
 const dropdownStyle = ref<Record<string, string>>({})
 
-// 31 键键盘布局
+// 键盘布局（主键区含数字行和右侧符号键）
 const KEYBOARD_LAYOUT = [
-  ['q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p'],
-  ['a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l', ';'],
-  ['z', 'x', 'c', 'v', 'b', 'n', 'm', ',', '.', '/'],
+  ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '='],
+  ['q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p', '[', ']'],
+  ['a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l', ';', "'"],
+  ['z', 'x', 'c', 'v', 'b', 'n', 'm', ',', '.', '/', '\\'],
   ['_'], // 空格键
 ]
+
+// 键位显示名映射
+const KEY_DISPLAY: Record<string, string> = {
+  '_': '空格', '-': '−', '=': '=', '[': '[', ']': ']',
+  '\\': '\\', "'": "'", ';': ';', ',': ',', '.': '.', '/': '/',
+}
 
 // 获取已编码字根列表（用于元素引用）
 const encodedRoots = computed(() => {
@@ -113,9 +120,9 @@ const filteredCodeOptions = computed(() => {
 const displayLabel = computed(() => {
   if (!props.modelValue) return props.placeholder || '选择键位'
 
-  // 字母键位
+  // 键位（单字符或空格）
   if (props.modelValue.length === 1 || props.modelValue === '_') {
-    return props.modelValue === '_' ? '空格' : props.modelValue.toUpperCase()
+    return KEY_DISPLAY[props.modelValue] ?? props.modelValue.toUpperCase()
   }
 
   // 元素引用格式：字根。索引
@@ -166,8 +173,8 @@ function updateDropdownPosition() {
   const rect = triggerRef.value.getBoundingClientRect()
   const viewportHeight = window.innerHeight
   const viewportWidth = window.innerWidth
-  const dropdownHeight = 420  // 下拉框预估高度
-  const dropdownWidth = 360    // 下拉框宽度
+  const dropdownHeight = 460  // 下拉框预估高度
+  const dropdownWidth = 420    // 下拉框宽度
   
   // 判断是否有足够空间在下方显示
   const showBelow = rect.bottom + dropdownHeight <= viewportHeight - 20
@@ -261,7 +268,7 @@ watch(isOpen, (val) => {
           <div class="keyboard-section">
             <div class="section-label">键位</div>
             <div class="keyboard">
-              <div v-for="(row, ri) in KEYBOARD_LAYOUT.slice(0, 3)" :key="ri" class="keyboard-row">
+              <div v-for="(row, ri) in KEYBOARD_LAYOUT.slice(0, 4)" :key="ri" class="keyboard-row">
                 <div
                   v-for="key in row"
                   :key="key"
@@ -269,7 +276,7 @@ watch(isOpen, (val) => {
                   :class="{ 'key-selected': modelValue === key }"
                   @click="selectKey(key)"
                 >
-                  <span class="key-label">{{ key === '_' ? '空格' : key.toUpperCase() }}</span>
+                  <span class="key-label">{{ KEY_DISPLAY[key] ?? key.toUpperCase() }}</span>
                 </div>
               </div>
               <!-- 空格键 -->
@@ -390,7 +397,7 @@ watch(isOpen, (val) => {
   border: 1px solid var(--border);
   border-radius: 8px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
-  max-height: 420px;
+  max-height: 460px;
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -453,7 +460,8 @@ watch(isOpen, (val) => {
 
 .key {
   flex: 1;
-  height: 40px;
+  min-width: 28px;
+  height: 34px;
   background: var(--bg3);
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -477,7 +485,7 @@ watch(isOpen, (val) => {
 }
 
 .key-label {
-  font-size: 14px;
+  font-size: 12px;
   font-weight: 600;
 }
 
@@ -487,7 +495,7 @@ watch(isOpen, (val) => {
 }
 
 .key-space {
-  height: 36px;
+  height: 30px;
 }
 
 /* 字根码位区域 */
