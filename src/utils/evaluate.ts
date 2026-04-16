@@ -315,20 +315,21 @@ export function parseCodeTable(content: string, filename?: string): Map<string, 
 
 function parseTxtCodeTable(content: string, codeMap: Map<string, string[]>): void {
   const lines = content.split('\n')
-  
+
   for (const line of lines) {
     const trimmed = line.trim()
     if (!trimmed || trimmed.startsWith('#')) continue
-    
+
     const parts = trimmed.split(/[\t\s]+/)
     if (parts.length >= 2) {
-      const char = parts[0]
+      const text = parts[0]
       const code = parts[1].toLowerCase()
-      if ([...char].length === 1) {
-        if (!codeMap.has(char)) {
-          codeMap.set(char, [])
+      const len = [...text].length
+      if (len >= 1) {
+        if (!codeMap.has(text)) {
+          codeMap.set(text, [])
         }
-        const codes = codeMap.get(char)!
+        const codes = codeMap.get(text)!
         if (!codes.includes(code)) {
           codes.push(code)
         }
@@ -354,13 +355,14 @@ function parseYamlCodeTable(content: string, codeMap: Map<string, string[]>): vo
     if (passedHeader && !trimmed.includes(':')) {
       const parts = trimmed.split(/[\t\s]+/)
       if (parts.length >= 2) {
-        const char = parts[0]
+        const text = parts[0]
         const code = parts[1].toLowerCase()
-        if ([...char].length === 1) {
-          if (!codeMap.has(char)) {
-            codeMap.set(char, [])
+        const len = [...text].length
+        if (len >= 1) {
+          if (!codeMap.has(text)) {
+            codeMap.set(text, [])
           }
-          const codes = codeMap.get(char)!
+          const codes = codeMap.get(text)!
           if (!codes.includes(code)) {
             codes.push(code)
           }

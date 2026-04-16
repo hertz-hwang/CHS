@@ -572,30 +572,36 @@ async function runUploadedEvaluation() {
     const result = evaluateScheme(uploadedCodeMap.value, freqMap, selectKeysConfig.value, maxCodeLength.value)
     uploadedResult.value = result
     
+    // 根据词获取编码：优先用码表中的词编码，缺失则按规则补全
+    function getUploadedWordCodeWithFallback(text: string): string {
+      const codes = uploadedCodeMap.value!.get(text)
+      if (codes && codes.length > 0) {
+        return codes.reduce((a, b) => a.length <= b.length ? a : b, codes[0])
+      }
+      // 码表中无此词，按规则生成
+      let rule: string
+      if (text.length === 2) {
+        rule = uploadedWord2Rule.value
+      } else if (text.length === 3) {
+        rule = uploadedWord3Rule.value
+      } else {
+        rule = uploadedWord4Rule.value
+      }
+      return calculateUploadedWordCode(text, rule)
+    }
+
     // 词组测评
     const wordFreqMap = loadWordFreq()
     if (wordFreqMap.size) {
       const wordCodeMap = new Map<string, string>()
-      
-      for (const [word, freq] of wordFreqMap) {
+
+      for (const [word] of wordFreqMap) {
         if (word.length >= 2) {
-          // 根据词长选择规则
-          let rule: string
-          if (word.length === 2) {
-            rule = uploadedWord2Rule.value
-          } else if (word.length === 3) {
-            rule = uploadedWord3Rule.value
-          } else {
-            rule = uploadedWord4Rule.value
-          }
-          
-          const code = calculateUploadedWordCode(word, rule)
-          if (code) {
-            wordCodeMap.set(word, code)
-          }
+          const code = getUploadedWordCodeWithFallback(word)
+          if (code) wordCodeMap.set(word, code)
         }
       }
-      
+
       const wordResult = evaluateWords(wordCodeMap, wordFreqMap)
       uploadedWordResult.value = wordResult
     }
@@ -613,7 +619,6 @@ async function runUploadedEvaluation() {
         if (codes && codes.length > 0) {
           const shortest = codes.reduce((a, b) => a.length <= b.length ? a : b, codes[0])
           mixedCodeMap.set(char, shortest)
-          // 判断该字是否拥有简码（存在比最长编码更短的编码）
           const longest = codes.reduce((a, b) => a.length >= b.length ? a : b, codes[0])
           if (shortest.length < longest.length) {
             charsWithShortCode.add(char)
@@ -625,15 +630,7 @@ async function runUploadedEvaluation() {
       for (const [text, freq] of engine.freq) {
         if ([...text].length >= 2 && freq > 0) {
           mixedFreqMap.set(text, freq)
-          let rule: string
-          if (text.length === 2) {
-            rule = uploadedWord2Rule.value
-          } else if (text.length === 3) {
-            rule = uploadedWord3Rule.value
-          } else {
-            rule = uploadedWord4Rule.value
-          }
-          const code = calculateUploadedWordCode(text, rule)
+          const code = getUploadedWordCodeWithFallback(text)
           if (code) mixedCodeMap.set(text, code)
         }
       }
@@ -667,6 +664,12 @@ function clearUploaded() {
   uploadedResult.value = null
   uploadedMixedResult.value = null
 }
+
+// 码表是否已包含词组编码
+const uploadedHasWordCodes = computed(() => {
+  if (!uploadedCodeMap.value) return false
+  return [...uploadedCodeMap.value.keys()].some(k => [...k].length >= 2)
+})
 
 // 格式化数字
 function fmt(n: number, decimals: number = 3): string {
@@ -734,6 +737,9 @@ const detailColumn = ref('')
 const detailItems = ref<EvaluateHanziItem[]>([])
 const detailWordItems = ref<EvaluateWordItem[]>([])
 const isWordDetail = ref(false)
+const isCharWordConflictDetail = ref(false)
+// 字词冲突弹窗：存储该行所有 items，用于按编码分组
+const conflictAllLineItems = ref<EvaluateWordItem[]>([])
 
 // 弹窗检索
 const detailSearchQuery = ref('')
@@ -760,6 +766,54 @@ const filteredDetailWordItems = computed(() => {
   return detailWordItems.value.filter(item =>
     item.word.includes(q) || (item.code && item.code.includes(q))
   )
+})
+
+// 字词冲突分组（按编码汇总，每组包含所有共享该编码的条目）
+interface ConflictGroup {
+  code: string
+  entries: EvaluateWordItem[]
+  totalFreq: number
+}
+const conflictSearchQuery = ref('')
+const conflictCurrentPage = ref(1)
+const conflictGroups = computed((): ConflictGroup[] => {
+  if (!isCharWordConflictDetail.value) return []
+  // 找出所有有冲突的编码
+  const conflictCodes = new Set(
+    conflictAllLineItems.value
+      .filter(item => (item.charWordConflict ?? 0) > 0 && !item.isLack)
+      .map(item => item.code)
+  )
+  // 按编码分组所有条目
+  const groupMap = new Map<string, EvaluateWordItem[]>()
+  for (const item of conflictAllLineItems.value) {
+    if (!item.isLack && conflictCodes.has(item.code)) {
+      if (!groupMap.has(item.code)) groupMap.set(item.code, [])
+      groupMap.get(item.code)!.push(item)
+    }
+  }
+  // 转为数组，按总频率降序排列
+  const groups: ConflictGroup[] = []
+  for (const [code, entries] of groupMap) {
+    const totalFreq = entries.reduce((s, e) => s + e.freq, 0)
+    groups.push({ code, entries, totalFreq })
+  }
+  groups.sort((a, b) => b.totalFreq - a.totalFreq)
+  return groups
+})
+const filteredConflictGroups = computed(() => {
+  const q = conflictSearchQuery.value
+  if (!q) return conflictGroups.value
+  return conflictGroups.value.filter(g =>
+    g.code.includes(q) || g.entries.some(e => e.word.includes(q))
+  )
+})
+const conflictTotalPages = computed(() =>
+  Math.ceil(filteredConflictGroups.value.length / detailPageSize)
+)
+const paginatedConflictGroups = computed(() => {
+  const start = (conflictCurrentPage.value - 1) * detailPageSize
+  return filteredConflictGroups.value.slice(start, start + detailPageSize)
 })
 
 // 总页数（单字）
@@ -1020,16 +1074,27 @@ const WORD_CLICKABLE_COLUMNS = ['select', 'charWordConflict', 'lack', 'dh', 'ms'
 // 点击词组单元格查看详情
 function handleWordCellClick(line: EvaluateWordLine, column: string, rangeLabel: string) {
   if (!WORD_CLICKABLE_COLUMNS.includes(column)) return
-  
+
   const { count } = getWordColumnValue(line, column)
   if (count === 0) return
-  
+
   const items = filterWordItemsByColumn(line, column)
   if (items.length === 0) return
-  
-  detailTitle.value = `${rangeLabel} - ${WORD_COLUMN_NAMES[column] || column}（共 ${items.length} 词）「点击条目可展开键魂计算详情」`
-  detailWordItems.value = items
-  isWordDetail.value = true
+
+  if (column === 'charWordConflict') {
+    // 字词冲突：按编码分组展示
+    conflictAllLineItems.value = line.items
+    conflictSearchQuery.value = ''
+    conflictCurrentPage.value = 1
+    isCharWordConflictDetail.value = true
+    isWordDetail.value = true
+    detailTitle.value = `${rangeLabel} - 字词冲突（共 ${items.length} 条）`
+  } else {
+    isCharWordConflictDetail.value = false
+    detailWordItems.value = items
+    isWordDetail.value = true
+    detailTitle.value = `${rangeLabel} - ${WORD_COLUMN_NAMES[column] || column}（共 ${items.length} 词）「点击条目可展开键魂计算详情」`
+  }
   showDetailModal.value = true
 }
 
@@ -1040,6 +1105,10 @@ function closeDetailModal() {
   detailWordItems.value = []
   detailSearchQuery.value = ''
   detailWordSearchQuery.value = ''
+  isCharWordConflictDetail.value = false
+  conflictAllLineItems.value = []
+  conflictSearchQuery.value = ''
+  conflictCurrentPage.value = 1
   resetDetailPagination()
   ksExpandedChar.value = null
   ksExpandedDebug.value = null
@@ -1811,7 +1880,9 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
         <!-- 组词规则配置 -->
         <div v-if="uploadedCodeMap" class="rule-config">
           <h4 class="rule-title">组词规则</h4>
-          <p class="rule-hint">格式：大写字母表示字序(A=第1字,B=第2字...Z=末字)，小写字母表示码位(a=第1码,b=第2码...z=末码)</p>
+          <p class="rule-hint">
+            {{ uploadedHasWordCodes ? '码表已包含词组编码，将优先使用；码表中缺失的词按以下规则补全。' : '格式：大写字母表示字序(A=第1字,B=第2字...Z=末字)，小写字母表示码位(a=第1码,b=第2码...z=末码)' }}
+          </p>
           <div class="rule-inputs">
             <div class="rule-item">
               <label>2字词:</label>
@@ -2386,6 +2457,41 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                 <input v-model="detailJumpPage" type="number" min="1" :max="detailTotalPages" class="page-input" placeholder="页码" @keyup.enter="handleDetailJump" />
                 <button class="page-btn" @click="handleDetailJump">跳转</button>
               </div>
+            </div>
+          </template>
+          <!-- 字词冲突分组详情 -->
+          <template v-else-if="isCharWordConflictDetail">
+            <div class="modal-search">
+              <input
+                v-model="conflictSearchQuery"
+                type="search"
+                class="search-input"
+                placeholder="检索编码/词组..."
+                @input="conflictCurrentPage = 1"
+              />
+            </div>
+            <table class="detail-table">
+              <thead>
+                <tr>
+                  <th>序号</th>
+                  <th>编码</th>
+                  <th>冲突对详情</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="(group, idx) in paginatedConflictGroups" :key="group.code">
+                  <td>{{ (conflictCurrentPage - 1) * detailPageSize + idx + 1 }}</td>
+                  <td class="code-col mono">{{ group.code }}</td>
+                  <td class="conflict-entries">{{ group.entries.map(e => e.word).join('、') }}</td>
+                </tr>
+              </tbody>
+            </table>
+            <div class="pagination" v-if="conflictTotalPages > 1">
+              <button class="page-btn" :disabled="conflictCurrentPage === 1" @click="conflictCurrentPage = 1">首页</button>
+              <button class="page-btn" :disabled="conflictCurrentPage === 1" @click="conflictCurrentPage--">上一页</button>
+              <span class="page-info">第 {{ conflictCurrentPage }} / {{ conflictTotalPages }} 页</span>
+              <button class="page-btn" :disabled="conflictCurrentPage === conflictTotalPages" @click="conflictCurrentPage++">下一页</button>
+              <button class="page-btn" :disabled="conflictCurrentPage === conflictTotalPages" @click="conflictCurrentPage = conflictTotalPages">尾页</button>
             </div>
           </template>
           <!-- 词组详情表格 -->
@@ -3449,6 +3555,11 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
   font-family: 'SF Mono', 'JetBrains Mono', 'Consolas', monospace;
   color: var(--primary);
   font-weight: 500;
+}
+
+.detail-table .conflict-entries {
+  line-height: 1.7;
+  word-break: break-all;
 }
 
 /* 分页控制 */
