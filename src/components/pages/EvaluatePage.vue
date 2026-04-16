@@ -725,8 +725,8 @@ function getLackWeightPercent(line: EvaluateLine): string {
 }
 
 // 计算多字词加权比重
-function getWordWeightPercent(line: EvaluateWordLine, column: string): string {
-  const { weight } = getWordColumnValue(line, column)
+function getWordWeightPercent(line: EvaluateWordLine, column: string, useGlobalConflict?: boolean): string {
+  const { weight } = getWordColumnValue(line, column, useGlobalConflict)
   return line.totalFreq > 0 ? fmt(weight / line.totalFreq * 100, 4) : '0.0000'
 }
 
@@ -737,9 +737,6 @@ const detailColumn = ref('')
 const detailItems = ref<EvaluateHanziItem[]>([])
 const detailWordItems = ref<EvaluateWordItem[]>([])
 const isWordDetail = ref(false)
-const isCharWordConflictDetail = ref(false)
-// 字词冲突弹窗：存储该行所有 items，用于按编码分组
-const conflictAllLineItems = ref<EvaluateWordItem[]>([])
 
 // 弹窗检索
 const detailSearchQuery = ref('')
@@ -766,54 +763,6 @@ const filteredDetailWordItems = computed(() => {
   return detailWordItems.value.filter(item =>
     item.word.includes(q) || (item.code && item.code.includes(q))
   )
-})
-
-// 字词冲突分组（按编码汇总，每组包含所有共享该编码的条目）
-interface ConflictGroup {
-  code: string
-  entries: EvaluateWordItem[]
-  totalFreq: number
-}
-const conflictSearchQuery = ref('')
-const conflictCurrentPage = ref(1)
-const conflictGroups = computed((): ConflictGroup[] => {
-  if (!isCharWordConflictDetail.value) return []
-  // 找出所有有冲突的编码
-  const conflictCodes = new Set(
-    conflictAllLineItems.value
-      .filter(item => (item.charWordConflict ?? 0) > 0 && !item.isLack)
-      .map(item => item.code)
-  )
-  // 按编码分组所有条目
-  const groupMap = new Map<string, EvaluateWordItem[]>()
-  for (const item of conflictAllLineItems.value) {
-    if (!item.isLack && conflictCodes.has(item.code)) {
-      if (!groupMap.has(item.code)) groupMap.set(item.code, [])
-      groupMap.get(item.code)!.push(item)
-    }
-  }
-  // 转为数组，按总频率降序排列
-  const groups: ConflictGroup[] = []
-  for (const [code, entries] of groupMap) {
-    const totalFreq = entries.reduce((s, e) => s + e.freq, 0)
-    groups.push({ code, entries, totalFreq })
-  }
-  groups.sort((a, b) => b.totalFreq - a.totalFreq)
-  return groups
-})
-const filteredConflictGroups = computed(() => {
-  const q = conflictSearchQuery.value
-  if (!q) return conflictGroups.value
-  return conflictGroups.value.filter(g =>
-    g.code.includes(q) || g.entries.some(e => e.word.includes(q))
-  )
-})
-const conflictTotalPages = computed(() =>
-  Math.ceil(filteredConflictGroups.value.length / detailPageSize)
-)
-const paginatedConflictGroups = computed(() => {
-  const start = (conflictCurrentPage.value - 1) * detailPageSize
-  return filteredConflictGroups.value.slice(start, start + detailPageSize)
 })
 
 // 总页数（单字）
@@ -1029,15 +978,21 @@ function handleCellClick(line: EvaluateLine, column: string, rangeLabel: string)
 }
 
 // 过滤符合条件的词组
-function filterWordItemsByColumn(line: EvaluateWordLine, column: string): EvaluateWordItem[] {
+function filterWordItemsByColumn(line: EvaluateWordLine, column: string, useGlobalConflict?: boolean): EvaluateWordItem[] {
   const items: EvaluateWordItem[] = []
-  
+
   for (const item of line.items) {
     let match = false
-    
+
     switch (column) {
       case 'select': match = item.collision > 1 && !item.isLack; break
-      case 'charWordConflict': match = (item.charWordConflict ?? 0) > 0 && !item.isLack; break
+      case 'charWordConflict': {
+        const conflict = useGlobalConflict
+          ? (item.charWordConflictGlobal ?? item.charWordConflict ?? 0)
+          : (item.charWordConflict ?? 0)
+        match = conflict > 0 && !item.isLack
+        break
+      }
       case 'lack': match = item.isLack; break
       case 'dh': match = item.dh > 0 && !item.isLack && item.overKey === 0; break
       case 'ms': match = item.ms > 0 && !item.isLack && item.overKey === 0; break
@@ -1047,7 +1002,7 @@ function filterWordItemsByColumn(line: EvaluateWordLine, column: string): Evalua
       case 'trible': match = item.trible > 0 && !item.isLack && item.overKey === 0; break
       case 'overKey': match = item.overKey > 0 && !item.isLack; break
     }
-    
+
     if (match) items.push(item)
   }
   
@@ -1072,29 +1027,18 @@ const WORD_COLUMN_NAMES: Record<string, string> = {
 const WORD_CLICKABLE_COLUMNS = ['select', 'charWordConflict', 'lack', 'dh', 'ms', 'ss', 'pd', 'lfd', 'trible', 'overKey']
 
 // 点击词组单元格查看详情
-function handleWordCellClick(line: EvaluateWordLine, column: string, rangeLabel: string) {
+function handleWordCellClick(line: EvaluateWordLine, column: string, rangeLabel: string, useGlobalConflict?: boolean) {
   if (!WORD_CLICKABLE_COLUMNS.includes(column)) return
 
-  const { count } = getWordColumnValue(line, column)
+  const { count } = getWordColumnValue(line, column, useGlobalConflict)
   if (count === 0) return
 
-  const items = filterWordItemsByColumn(line, column)
+  const items = filterWordItemsByColumn(line, column, useGlobalConflict)
   if (items.length === 0) return
 
-  if (column === 'charWordConflict') {
-    // 字词冲突：按编码分组展示
-    conflictAllLineItems.value = line.items
-    conflictSearchQuery.value = ''
-    conflictCurrentPage.value = 1
-    isCharWordConflictDetail.value = true
-    isWordDetail.value = true
-    detailTitle.value = `${rangeLabel} - 字词冲突（共 ${items.length} 条）`
-  } else {
-    isCharWordConflictDetail.value = false
-    detailWordItems.value = items
-    isWordDetail.value = true
-    detailTitle.value = `${rangeLabel} - ${WORD_COLUMN_NAMES[column] || column}（共 ${items.length} 词）「点击条目可展开键魂计算详情」`
-  }
+  detailTitle.value = `${rangeLabel} - ${WORD_COLUMN_NAMES[column] || column}（共 ${items.length} 词）「点击条目可展开键魂计算详情」`
+  detailWordItems.value = items
+  isWordDetail.value = true
   showDetailModal.value = true
 }
 
@@ -1105,10 +1049,6 @@ function closeDetailModal() {
   detailWordItems.value = []
   detailSearchQuery.value = ''
   detailWordSearchQuery.value = ''
-  isCharWordConflictDetail.value = false
-  conflictAllLineItems.value = []
-  conflictSearchQuery.value = ''
-  conflictCurrentPage.value = 1
   resetDetailPagination()
   ksExpandedChar.value = null
   ksExpandedDebug.value = null
@@ -1783,7 +1723,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                 <tr v-if="idx === 2" class="row-subtotal">
                   <td class="sticky-col">小计</td>
                   <td class="col-select">{{ getWordWeightPercent(getWordSubtotal(mixedEvaluationResult.lines.slice(0, 3)), 'select') }}%</td>
-                  <td>{{ getWordWeightPercent(getWordSubtotal(mixedEvaluationResult.lines.slice(0, 3)), 'charWordConflict') }}%</td>
+                  <td>{{ getWordWeightPercent(getWordSubtotal(mixedEvaluationResult.lines.slice(0, 3)), 'charWordConflict', true) }}%</td>
                   <td class="col-ks-eq">{{ fmt(getWordWeightedKsKeyEq(getWordSubtotal(mixedEvaluationResult.lines.slice(0, 3)))) }}</td>
                   <td>{{ fmt(getWordWeightedKeyEq(getWordSubtotal(mixedEvaluationResult.lines.slice(0, 3)))) }}</td>
                   <td>{{ getWordComboWeightPercent(getWordSubtotal(mixedEvaluationResult.lines.slice(0, 3)), 'ms') }}%</td>
@@ -1797,7 +1737,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                 <tr v-if="idx === 2" class="row-weight">
                   <td class="sticky-col">加权比重</td>
                   <td class="col-select">{{ getWordWeightPercent(getWordSubtotal(mixedEvaluationResult.lines.slice(0, 3)), 'select') }}%</td>
-                  <td>{{ getWordWeightPercent(getWordSubtotal(mixedEvaluationResult.lines.slice(0, 3)), 'charWordConflict') }}%</td>
+                  <td>{{ getWordWeightPercent(getWordSubtotal(mixedEvaluationResult.lines.slice(0, 3)), 'charWordConflict', true) }}%</td>
                   <td>-</td>
                   <td>-</td>
                   <td>{{ getWordComboWeightPercent(getWordSubtotal(mixedEvaluationResult.lines.slice(0, 3)), 'ms') }}%</td>
@@ -1812,7 +1752,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
               <tr class="row-total">
                 <td class="sticky-col">总计</td>
                 <td class="col-select clickable" @click="handleWordCellClick(getWordSubtotal(mixedEvaluationResult.lines), 'select', '总计')">{{ getWordColumnValue(getWordSubtotal(mixedEvaluationResult.lines), 'select').count }}</td>
-                <td class="clickable" @click="handleWordCellClick(getWordSubtotal(mixedEvaluationResult.lines), 'charWordConflict', '总计')">{{ getWordColumnValue(getWordSubtotal(mixedEvaluationResult.lines), 'charWordConflict').count }}</td>
+                <td class="clickable" @click="handleWordCellClick(getWordSubtotal(mixedEvaluationResult.lines), 'charWordConflict', '总计', true)">{{ getWordColumnValue(getWordSubtotal(mixedEvaluationResult.lines), 'charWordConflict', true).count }}</td>
                 <td class="col-ks-eq clickable" @click="handleKsWordEqClick(getWordSubtotal(mixedEvaluationResult.lines), '总计')">{{ fmt(getWordWeightedKsKeyEq(getWordSubtotal(mixedEvaluationResult.lines))) }}</td>
                 <td>{{ fmt(getWordWeightedKeyEq(getWordSubtotal(mixedEvaluationResult.lines))) }}</td>
                 <td class="clickable" @click="handleWordCellClick(getWordSubtotal(mixedEvaluationResult.lines), 'ms', '总计')">{{ getWordColumnValue(getWordSubtotal(mixedEvaluationResult.lines), 'ms').count }}</td>
@@ -1826,7 +1766,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
               <tr class="row-weight">
                 <td class="sticky-col">加权比重</td>
                 <td class="col-select">{{ getWordWeightPercent(getWordSubtotal(mixedEvaluationResult.lines), 'select') }}%</td>
-                <td>{{ getWordWeightPercent(getWordSubtotal(mixedEvaluationResult.lines), 'charWordConflict') }}%</td>
+                <td>{{ getWordWeightPercent(getWordSubtotal(mixedEvaluationResult.lines), 'charWordConflict', true) }}%</td>
                 <td>-</td>
                 <td>-</td>
                 <td>{{ getWordComboWeightPercent(getWordSubtotal(mixedEvaluationResult.lines), 'ms') }}%</td>
@@ -2273,7 +2213,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                 <tr v-if="idx === 2" class="row-subtotal">
                   <td class="sticky-col">小计</td>
                   <td class="col-select">{{ getWordWeightPercent(getWordSubtotal(uploadedMixedResult.lines.slice(0, 3)), 'select') }}%</td>
-                  <td>{{ getWordWeightPercent(getWordSubtotal(uploadedMixedResult.lines.slice(0, 3)), 'charWordConflict') }}%</td>
+                  <td>{{ getWordWeightPercent(getWordSubtotal(uploadedMixedResult.lines.slice(0, 3)), 'charWordConflict', true) }}%</td>
                   <td class="col-ks-eq">{{ fmt(getWordWeightedKsKeyEq(getWordSubtotal(uploadedMixedResult.lines.slice(0, 3)))) }}</td>
                   <td>{{ fmt(getWordWeightedKeyEq(getWordSubtotal(uploadedMixedResult.lines.slice(0, 3)))) }}</td>
                   <td>{{ getWordComboWeightPercent(getWordSubtotal(uploadedMixedResult.lines.slice(0, 3)), 'ms') }}%</td>
@@ -2287,7 +2227,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                 <tr v-if="idx === 2" class="row-weight">
                   <td class="sticky-col">加权比重</td>
                   <td class="col-select">{{ getWordWeightPercent(getWordSubtotal(uploadedMixedResult.lines.slice(0, 3)), 'select') }}%</td>
-                  <td>{{ getWordWeightPercent(getWordSubtotal(uploadedMixedResult.lines.slice(0, 3)), 'charWordConflict') }}%</td>
+                  <td>{{ getWordWeightPercent(getWordSubtotal(uploadedMixedResult.lines.slice(0, 3)), 'charWordConflict', true) }}%</td>
                   <td>-</td>
                   <td>-</td>
                   <td>{{ getWordComboWeightPercent(getWordSubtotal(uploadedMixedResult.lines.slice(0, 3)), 'ms') }}%</td>
@@ -2302,7 +2242,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
               <tr class="row-total">
                 <td class="sticky-col">总计</td>
                 <td class="col-select clickable" @click="handleWordCellClick(getWordSubtotal(uploadedMixedResult.lines), 'select', '总计')">{{ getWordColumnValue(getWordSubtotal(uploadedMixedResult.lines), 'select').count }}</td>
-                <td class="clickable" @click="handleWordCellClick(getWordSubtotal(uploadedMixedResult.lines), 'charWordConflict', '总计')">{{ getWordColumnValue(getWordSubtotal(uploadedMixedResult.lines), 'charWordConflict').count }}</td>
+                <td class="clickable" @click="handleWordCellClick(getWordSubtotal(uploadedMixedResult.lines), 'charWordConflict', '总计', true)">{{ getWordColumnValue(getWordSubtotal(uploadedMixedResult.lines), 'charWordConflict', true).count }}</td>
                 <td class="col-ks-eq clickable" @click="handleKsWordEqClick(getWordSubtotal(uploadedMixedResult.lines), '总计')">{{ fmt(getWordWeightedKsKeyEq(getWordSubtotal(uploadedMixedResult.lines))) }}</td>
                 <td>{{ fmt(getWordWeightedKeyEq(getWordSubtotal(uploadedMixedResult.lines))) }}</td>
                 <td class="clickable" @click="handleWordCellClick(getWordSubtotal(uploadedMixedResult.lines), 'ms', '总计')">{{ getWordColumnValue(getWordSubtotal(uploadedMixedResult.lines), 'ms').count }}</td>
@@ -2316,7 +2256,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
               <tr class="row-weight">
                 <td class="sticky-col">加权比重</td>
                 <td class="col-select">{{ getWordWeightPercent(getWordSubtotal(uploadedMixedResult.lines), 'select') }}%</td>
-                <td>{{ getWordWeightPercent(getWordSubtotal(uploadedMixedResult.lines), 'charWordConflict') }}%</td>
+                <td>{{ getWordWeightPercent(getWordSubtotal(uploadedMixedResult.lines), 'charWordConflict', true) }}%</td>
                 <td>-</td>
                 <td>-</td>
                 <td>{{ getWordComboWeightPercent(getWordSubtotal(uploadedMixedResult.lines), 'ms') }}%</td>
@@ -2457,41 +2397,6 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                 <input v-model="detailJumpPage" type="number" min="1" :max="detailTotalPages" class="page-input" placeholder="页码" @keyup.enter="handleDetailJump" />
                 <button class="page-btn" @click="handleDetailJump">跳转</button>
               </div>
-            </div>
-          </template>
-          <!-- 字词冲突分组详情 -->
-          <template v-else-if="isCharWordConflictDetail">
-            <div class="modal-search">
-              <input
-                v-model="conflictSearchQuery"
-                type="search"
-                class="search-input"
-                placeholder="检索编码/词组..."
-                @input="conflictCurrentPage = 1"
-              />
-            </div>
-            <table class="detail-table">
-              <thead>
-                <tr>
-                  <th>序号</th>
-                  <th>编码</th>
-                  <th>冲突对详情</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="(group, idx) in paginatedConflictGroups" :key="group.code">
-                  <td>{{ (conflictCurrentPage - 1) * detailPageSize + idx + 1 }}</td>
-                  <td class="code-col mono">{{ group.code }}</td>
-                  <td class="conflict-entries">{{ group.entries.map(e => e.word).join('、') }}</td>
-                </tr>
-              </tbody>
-            </table>
-            <div class="pagination" v-if="conflictTotalPages > 1">
-              <button class="page-btn" :disabled="conflictCurrentPage === 1" @click="conflictCurrentPage = 1">首页</button>
-              <button class="page-btn" :disabled="conflictCurrentPage === 1" @click="conflictCurrentPage--">上一页</button>
-              <span class="page-info">第 {{ conflictCurrentPage }} / {{ conflictTotalPages }} 页</span>
-              <button class="page-btn" :disabled="conflictCurrentPage === conflictTotalPages" @click="conflictCurrentPage++">下一页</button>
-              <button class="page-btn" :disabled="conflictCurrentPage === conflictTotalPages" @click="conflictCurrentPage = conflictTotalPages">尾页</button>
             </div>
           </template>
           <!-- 词组详情表格 -->
@@ -3555,11 +3460,6 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
   font-family: 'SF Mono', 'JetBrains Mono', 'Consolas', monospace;
   color: var(--primary);
   font-weight: 500;
-}
-
-.detail-table .conflict-entries {
-  line-height: 1.7;
-  word-break: break-all;
 }
 
 /* 分页控制 */

@@ -969,6 +969,8 @@ export interface EvaluateWordItem {
   
   // 字词冲突（同编码下同时存在单字和词组）
   charWordConflict?: number
+  // 全局字词冲突（跨所有分区，用于总计/小计行）
+  charWordConflictGlobal?: number
 
   // 首选词（同编码下的首位候选词）
   primaryWord?: string
@@ -1200,29 +1202,14 @@ export function evaluateMixed(
   const lines: EvaluateWordLine[] = []
   const totalUsage: Record<string, number> = {}
 
-  // 构建编码到词的映射（用于找出首选词）
+  // 构建编码到词的映射（用于找出首选词，基于全局排序）
   const codeToWords = new Map<string, string[]>()
-  // 预计算字词冲突：同一编码下同时存在单字和词组
-  const codeHasChar = new Set<string>()
-  const codeHasWord = new Set<string>()
   for (let i = 0; i < sortedWords.length; i++) {
     const [word] = sortedWords[i]
     const code = wordCodeMap.get(word)
     if (!code) continue
-
-    if (!codeToWords.has(code)) {
-      codeToWords.set(code, [])
-    }
+    if (!codeToWords.has(code)) codeToWords.set(code, [])
     codeToWords.get(code)!.push(word)
-
-    if ([...word].length === 1) {
-      // 拥有简码的单字，其全码不加入 codeHasChar，不参与字词冲突
-      if (!charsWithShortCode || !charsWithShortCode.has(word)) {
-        codeHasChar.add(code)
-      }
-    } else {
-      codeHasWord.add(code)
-    }
   }
 
   for (const [start, end] of sections) {
@@ -1232,6 +1219,22 @@ export function evaluateMixed(
       end,
       totalFreq: 0,
       usage: {},
+    }
+
+    // 按分区预计算字词冲突集合（只看本分区内的词）
+    const sectionCodeHasChar = new Set<string>()
+    const sectionCodeHasWord = new Set<string>()
+    for (let i = start; i < Math.min(end, sortedWords.length); i++) {
+      const [word] = sortedWords[i]
+      const code = wordCodeMap.get(word)
+      if (!code) continue
+      if ([...word].length === 1) {
+        if (!charsWithShortCode || !charsWithShortCode.has(word)) {
+          sectionCodeHasChar.add(code)
+        }
+      } else {
+        sectionCodeHasWord.add(code)
+      }
     }
 
     for (let i = start; i < Math.min(end, sortedWords.length); i++) {
@@ -1290,11 +1293,11 @@ export function evaluateMixed(
         if (!KEYS_46_SET.has(k)) overKey++
       }
 
-      // 字词冲突：同一编码下同时存在单字和词组
+      // 字词冲突：同一编码下同时存在单字和词组（仅统计本分区内的冲突），首选位不算冲突
       const wordLen = [...word].length
-      const hasConflict = wordLen === 1
-        ? (!charsWithShortCode || !charsWithShortCode.has(word)) && codeHasWord.has(code)
-        : codeHasChar.has(code)
+      const hasConflict = collision > 1 && (wordLen === 1
+        ? (!charsWithShortCode || !charsWithShortCode.has(word)) && sectionCodeHasWord.has(code)
+        : sectionCodeHasChar.has(code))
 
       // 初始化测评项
       const item: EvaluateWordItem = {
@@ -1353,6 +1356,31 @@ export function evaluateMixed(
     lines.push(line)
   }
 
+  // 全局字词冲突：跨所有分区，用于总计/小计行
+  const globalCodeHasChar = new Set<string>()
+  const globalCodeHasWord = new Set<string>()
+  for (const [word] of sortedWords) {
+    const code = wordCodeMap.get(word)
+    if (!code) continue
+    if ([...word].length === 1) {
+      if (!charsWithShortCode || !charsWithShortCode.has(word)) {
+        globalCodeHasChar.add(code)
+      }
+    } else {
+      globalCodeHasWord.add(code)
+    }
+  }
+  for (const line of lines) {
+    for (const item of line.items) {
+      if (item.isLack || !item.code) continue
+      const wLen = [...item.word].length
+      const globalConflict = item.collision > 1 && (wLen === 1
+        ? (!charsWithShortCode || !charsWithShortCode.has(item.word)) && globalCodeHasWord.has(item.code)
+        : globalCodeHasChar.has(item.code))
+      item.charWordConflictGlobal = globalConflict ? 1 : 0
+    }
+  }
+
   return { lines, usage: totalUsage }
 }
 
@@ -1384,7 +1412,8 @@ export function zipWordLines(lines: EvaluateWordLine[]): EvaluateWordLine {
  */
 export function getWordColumnValue(
   line: EvaluateWordLine,
-  column: string
+  column: string,
+  useGlobalConflict?: boolean
 ): { count: number; weight: number } {
   let count = 0
   let weight = 0
@@ -1434,9 +1463,13 @@ export function getWordColumnValue(
       case 'trible':
         if (item.trible > 0) { count++; weight += item.freq }
         break
-      case 'charWordConflict':
-        if ((item.charWordConflict ?? 0) > 0) { count++; weight += item.freq }
+      case 'charWordConflict': {
+        const conflict = useGlobalConflict
+          ? (item.charWordConflictGlobal ?? item.charWordConflict ?? 0)
+          : (item.charWordConflict ?? 0)
+        if (conflict > 0) { count++; weight += item.freq }
         break
+      }
     }
   }
 
