@@ -410,7 +410,7 @@ class TypingModel {
   /** 小指干扰基础惩罚 (ms) */
   static readonly PINKY_BASE = 8.0
   /** 小指干扰每行追加惩罚 (ms)，小指偏离 home row 越远干扰越大 */
-  static readonly PINKY_PER_ROW = 15.0
+  static readonly PINKY_PER_ROW = 20.0
 
   /** 手部伸展每行惩罚 (ms) — 同手两指跨不同行时的姿态扭曲 */
   static readonly STRETCH_PER_ROW = 20.0
