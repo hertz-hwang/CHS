@@ -1617,9 +1617,25 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                 <!-- 小计行（在第3行后） -->
                 <tr v-if="idx === 2" class="row-subtotal">
                   <td class="sticky-col">小计</td>
-                  <td class="col-select">{{ getWordWeightPercent(getWordSubtotal(wordEvaluationResult.lines.slice(0, 3)), 'select') }}%</td>
-                  <td class="col-ks-eq">{{ fmt(getWordWeightedKsEq(getWordSubtotal(wordEvaluationResult.lines.slice(0, 3)))) }}</td>
+                  <td class="col-select clickable" @click="handleWordCellClick(getWordSubtotal(wordEvaluationResult.lines.slice(0, 3)), 'select', '小计')">{{ getWordColumnValue(getWordSubtotal(wordEvaluationResult.lines.slice(0, 3)), 'select').count }}</td>
+                  <td class="col-ks-eq clickable" @click="handleKsWordEqClick(getWordSubtotal(wordEvaluationResult.lines.slice(0, 3)), '小计')">{{ fmt(getWordWeightedKsEq(getWordSubtotal(wordEvaluationResult.lines.slice(0, 3)))) }}</td>
                   <td>{{ fmt(getWordWeightedEq(getWordSubtotal(wordEvaluationResult.lines.slice(0, 3)))) }}</td>
+                  <td class="clickable" @click="handleWordCellClick(getWordSubtotal(wordEvaluationResult.lines.slice(0, 3)), 'dh', '小计')">{{ getWordColumnValue(getWordSubtotal(wordEvaluationResult.lines.slice(0, 3)), 'dh').count }}</td>
+                  <td class="clickable" @click="handleWordCellClick(getWordSubtotal(wordEvaluationResult.lines.slice(0, 3)), 'ms', '小计')">{{ getWordColumnValue(getWordSubtotal(wordEvaluationResult.lines.slice(0, 3)), 'ms').count }}</td>
+                  <td class="clickable" @click="handleWordCellClick(getWordSubtotal(wordEvaluationResult.lines.slice(0, 3)), 'ss', '小计')">{{ getWordColumnValue(getWordSubtotal(wordEvaluationResult.lines.slice(0, 3)), 'ss').count }}</td>
+                  <td class="clickable" @click="handleWordCellClick(getWordSubtotal(wordEvaluationResult.lines.slice(0, 3)), 'pd', '小计')">{{ getWordColumnValue(getWordSubtotal(wordEvaluationResult.lines.slice(0, 3)), 'pd').count }}</td>
+                  <td class="clickable" @click="handleWordCellClick(getWordSubtotal(wordEvaluationResult.lines.slice(0, 3)), 'lfd', '小计')">{{ getWordColumnValue(getWordSubtotal(wordEvaluationResult.lines.slice(0, 3)), 'lfd').count }}</td>
+                  <td class="clickable" @click="handleWordCellClick(getWordSubtotal(wordEvaluationResult.lines.slice(0, 3)), 'trible', '小计')">{{ getWordColumnValue(getWordSubtotal(wordEvaluationResult.lines.slice(0, 3)), 'trible').count }}</td>
+                  <td>-</td>
+                  <td class="clickable" @click="handleWordCellClick(getWordSubtotal(wordEvaluationResult.lines.slice(0, 3)), 'lack', '小计')">{{ getWordColumnValue(getWordSubtotal(wordEvaluationResult.lines.slice(0, 3)), 'lack').count }}</td>
+                </tr>
+
+                <!-- 加权比重行（在小计行后） -->
+                <tr v-if="idx === 2" class="row-weight">
+                  <td class="sticky-col">加权比重</td>
+                  <td class="col-select">{{ getWordWeightPercent(getWordSubtotal(wordEvaluationResult.lines.slice(0, 3)), 'select') }}%</td>
+                  <td>-</td>
+                  <td>-</td>
                   <td>{{ getWordComboWeightPercent(getWordSubtotal(wordEvaluationResult.lines.slice(0, 3)), 'dh') }}%</td>
                   <td>{{ getWordComboWeightPercent(getWordSubtotal(wordEvaluationResult.lines.slice(0, 3)), 'ms') }}%</td>
                   <td>{{ getWordComboWeightPercent(getWordSubtotal(wordEvaluationResult.lines.slice(0, 3)), 'ss') }}%</td>
@@ -1722,15 +1738,15 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                 <!-- 小计行（在第3行后） -->
                 <tr v-if="idx === 2" class="row-subtotal">
                   <td class="sticky-col">小计</td>
-                  <td class="col-select">{{ getWordWeightPercent(getWordSubtotal(mixedEvaluationResult.lines.slice(0, 3)), 'select') }}%</td>
-                  <td>{{ getWordWeightPercent(getWordSubtotal(mixedEvaluationResult.lines.slice(0, 3)), 'charWordConflict', true) }}%</td>
-                  <td class="col-ks-eq">{{ fmt(getWordWeightedKsKeyEq(getWordSubtotal(mixedEvaluationResult.lines.slice(0, 3)))) }}</td>
+                  <td class="col-select clickable" @click="handleWordCellClick(getWordSubtotal(mixedEvaluationResult.lines.slice(0, 3)), 'select', '小计')">{{ getWordColumnValue(getWordSubtotal(mixedEvaluationResult.lines.slice(0, 3)), 'select').count }}</td>
+                  <td class="clickable" @click="handleWordCellClick(getWordSubtotal(mixedEvaluationResult.lines.slice(0, 3)), 'charWordConflict', '小计', true)">{{ getWordColumnValue(getWordSubtotal(mixedEvaluationResult.lines.slice(0, 3)), 'charWordConflict', true).count }}</td>
+                  <td class="col-ks-eq clickable" @click="handleKsWordEqClick(getWordSubtotal(mixedEvaluationResult.lines.slice(0, 3)), '小计')">{{ fmt(getWordWeightedKsKeyEq(getWordSubtotal(mixedEvaluationResult.lines.slice(0, 3)))) }}</td>
                   <td>{{ fmt(getWordWeightedKeyEq(getWordSubtotal(mixedEvaluationResult.lines.slice(0, 3)))) }}</td>
-                  <td>{{ getWordComboWeightPercent(getWordSubtotal(mixedEvaluationResult.lines.slice(0, 3)), 'ms') }}%</td>
-                  <td>{{ getWordComboWeightPercent(getWordSubtotal(mixedEvaluationResult.lines.slice(0, 3)), 'ss') }}%</td>
-                  <td>{{ getWordComboWeightPercent(getWordSubtotal(mixedEvaluationResult.lines.slice(0, 3)), 'pd') }}%</td>
-                  <td>{{ getWordComboWeightPercent(getWordSubtotal(mixedEvaluationResult.lines.slice(0, 3)), 'lfd') }}%</td>
-                  <td>{{ getWordWeightPercent(getWordSubtotal(mixedEvaluationResult.lines.slice(0, 3)), 'trible') }}%</td>
+                  <td class="clickable" @click="handleWordCellClick(getWordSubtotal(mixedEvaluationResult.lines.slice(0, 3)), 'ms', '小计')">{{ getWordColumnValue(getWordSubtotal(mixedEvaluationResult.lines.slice(0, 3)), 'ms').count }}</td>
+                  <td class="clickable" @click="handleWordCellClick(getWordSubtotal(mixedEvaluationResult.lines.slice(0, 3)), 'ss', '小计')">{{ getWordColumnValue(getWordSubtotal(mixedEvaluationResult.lines.slice(0, 3)), 'ss').count }}</td>
+                  <td class="clickable" @click="handleWordCellClick(getWordSubtotal(mixedEvaluationResult.lines.slice(0, 3)), 'pd', '小计')">{{ getWordColumnValue(getWordSubtotal(mixedEvaluationResult.lines.slice(0, 3)), 'pd').count }}</td>
+                  <td class="clickable" @click="handleWordCellClick(getWordSubtotal(mixedEvaluationResult.lines.slice(0, 3)), 'lfd', '小计')">{{ getWordColumnValue(getWordSubtotal(mixedEvaluationResult.lines.slice(0, 3)), 'lfd').count }}</td>
+                  <td class="clickable" @click="handleWordCellClick(getWordSubtotal(mixedEvaluationResult.lines.slice(0, 3)), 'trible', '小计')">{{ getWordColumnValue(getWordSubtotal(mixedEvaluationResult.lines.slice(0, 3)), 'trible').count }}</td>
                 </tr>
 
                 <!-- 加权比重行（在小计行后） -->
@@ -2109,9 +2125,25 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
 
                 <tr v-if="idx === 2" class="row-subtotal">
                   <td class="sticky-col">小计</td>
-                  <td class="col-select">{{ getWordWeightPercent(getWordSubtotal(uploadedWordResult.lines.slice(0, 3)), 'select') }}%</td>
-                  <td class="col-ks-eq">{{ fmt(getWordWeightedKsEq(getWordSubtotal(uploadedWordResult.lines.slice(0, 3)))) }}</td>
+                  <td class="col-select clickable" @click="handleWordCellClick(getWordSubtotal(uploadedWordResult.lines.slice(0, 3)), 'select', '小计')">{{ getWordColumnValue(getWordSubtotal(uploadedWordResult.lines.slice(0, 3)), 'select').count }}</td>
+                  <td class="col-ks-eq clickable" @click="handleKsWordEqClick(getWordSubtotal(uploadedWordResult.lines.slice(0, 3)), '小计')">{{ fmt(getWordWeightedKsEq(getWordSubtotal(uploadedWordResult.lines.slice(0, 3)))) }}</td>
                   <td>{{ fmt(getWordWeightedEq(getWordSubtotal(uploadedWordResult.lines.slice(0, 3)))) }}</td>
+                  <td class="clickable" @click="handleWordCellClick(getWordSubtotal(uploadedWordResult.lines.slice(0, 3)), 'dh', '小计')">{{ getWordColumnValue(getWordSubtotal(uploadedWordResult.lines.slice(0, 3)), 'dh').count }}</td>
+                  <td class="clickable" @click="handleWordCellClick(getWordSubtotal(uploadedWordResult.lines.slice(0, 3)), 'ms', '小计')">{{ getWordColumnValue(getWordSubtotal(uploadedWordResult.lines.slice(0, 3)), 'ms').count }}</td>
+                  <td class="clickable" @click="handleWordCellClick(getWordSubtotal(uploadedWordResult.lines.slice(0, 3)), 'ss', '小计')">{{ getWordColumnValue(getWordSubtotal(uploadedWordResult.lines.slice(0, 3)), 'ss').count }}</td>
+                  <td class="clickable" @click="handleWordCellClick(getWordSubtotal(uploadedWordResult.lines.slice(0, 3)), 'pd', '小计')">{{ getWordColumnValue(getWordSubtotal(uploadedWordResult.lines.slice(0, 3)), 'pd').count }}</td>
+                  <td class="clickable" @click="handleWordCellClick(getWordSubtotal(uploadedWordResult.lines.slice(0, 3)), 'lfd', '小计')">{{ getWordColumnValue(getWordSubtotal(uploadedWordResult.lines.slice(0, 3)), 'lfd').count }}</td>
+                  <td class="clickable" @click="handleWordCellClick(getWordSubtotal(uploadedWordResult.lines.slice(0, 3)), 'trible', '小计')">{{ getWordColumnValue(getWordSubtotal(uploadedWordResult.lines.slice(0, 3)), 'trible').count }}</td>
+                  <td>-</td>
+                  <td class="clickable" @click="handleWordCellClick(getWordSubtotal(uploadedWordResult.lines.slice(0, 3)), 'lack', '小计')">{{ getWordColumnValue(getWordSubtotal(uploadedWordResult.lines.slice(0, 3)), 'lack').count }}</td>
+                </tr>
+
+                <!-- 加权比重行（在小计行后） -->
+                <tr v-if="idx === 2" class="row-weight">
+                  <td class="sticky-col">加权比重</td>
+                  <td class="col-select">{{ getWordWeightPercent(getWordSubtotal(uploadedWordResult.lines.slice(0, 3)), 'select') }}%</td>
+                  <td>-</td>
+                  <td>-</td>
                   <td>{{ getWordComboWeightPercent(getWordSubtotal(uploadedWordResult.lines.slice(0, 3)), 'dh') }}%</td>
                   <td>{{ getWordComboWeightPercent(getWordSubtotal(uploadedWordResult.lines.slice(0, 3)), 'ms') }}%</td>
                   <td>{{ getWordComboWeightPercent(getWordSubtotal(uploadedWordResult.lines.slice(0, 3)), 'ss') }}%</td>
@@ -2212,15 +2244,15 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                 <!-- 小计行（在第3行后） -->
                 <tr v-if="idx === 2" class="row-subtotal">
                   <td class="sticky-col">小计</td>
-                  <td class="col-select">{{ getWordWeightPercent(getWordSubtotal(uploadedMixedResult.lines.slice(0, 3)), 'select') }}%</td>
-                  <td>{{ getWordWeightPercent(getWordSubtotal(uploadedMixedResult.lines.slice(0, 3)), 'charWordConflict', true) }}%</td>
-                  <td class="col-ks-eq">{{ fmt(getWordWeightedKsKeyEq(getWordSubtotal(uploadedMixedResult.lines.slice(0, 3)))) }}</td>
+                  <td class="col-select clickable" @click="handleWordCellClick(getWordSubtotal(uploadedMixedResult.lines.slice(0, 3)), 'select', '小计')">{{ getWordColumnValue(getWordSubtotal(uploadedMixedResult.lines.slice(0, 3)), 'select').count }}</td>
+                  <td class="clickable" @click="handleWordCellClick(getWordSubtotal(uploadedMixedResult.lines.slice(0, 3)), 'charWordConflict', '小计', true)">{{ getWordColumnValue(getWordSubtotal(uploadedMixedResult.lines.slice(0, 3)), 'charWordConflict', true).count }}</td>
+                  <td class="col-ks-eq clickable" @click="handleKsWordEqClick(getWordSubtotal(uploadedMixedResult.lines.slice(0, 3)), '小计')">{{ fmt(getWordWeightedKsKeyEq(getWordSubtotal(uploadedMixedResult.lines.slice(0, 3)))) }}</td>
                   <td>{{ fmt(getWordWeightedKeyEq(getWordSubtotal(uploadedMixedResult.lines.slice(0, 3)))) }}</td>
-                  <td>{{ getWordComboWeightPercent(getWordSubtotal(uploadedMixedResult.lines.slice(0, 3)), 'ms') }}%</td>
-                  <td>{{ getWordComboWeightPercent(getWordSubtotal(uploadedMixedResult.lines.slice(0, 3)), 'ss') }}%</td>
-                  <td>{{ getWordComboWeightPercent(getWordSubtotal(uploadedMixedResult.lines.slice(0, 3)), 'pd') }}%</td>
-                  <td>{{ getWordComboWeightPercent(getWordSubtotal(uploadedMixedResult.lines.slice(0, 3)), 'lfd') }}%</td>
-                  <td>{{ getWordWeightPercent(getWordSubtotal(uploadedMixedResult.lines.slice(0, 3)), 'trible') }}%</td>
+                  <td class="clickable" @click="handleWordCellClick(getWordSubtotal(uploadedMixedResult.lines.slice(0, 3)), 'ms', '小计')">{{ getWordColumnValue(getWordSubtotal(uploadedMixedResult.lines.slice(0, 3)), 'ms').count }}</td>
+                  <td class="clickable" @click="handleWordCellClick(getWordSubtotal(uploadedMixedResult.lines.slice(0, 3)), 'ss', '小计')">{{ getWordColumnValue(getWordSubtotal(uploadedMixedResult.lines.slice(0, 3)), 'ss').count }}</td>
+                  <td class="clickable" @click="handleWordCellClick(getWordSubtotal(uploadedMixedResult.lines.slice(0, 3)), 'pd', '小计')">{{ getWordColumnValue(getWordSubtotal(uploadedMixedResult.lines.slice(0, 3)), 'pd').count }}</td>
+                  <td class="clickable" @click="handleWordCellClick(getWordSubtotal(uploadedMixedResult.lines.slice(0, 3)), 'lfd', '小计')">{{ getWordColumnValue(getWordSubtotal(uploadedMixedResult.lines.slice(0, 3)), 'lfd').count }}</td>
+                  <td class="clickable" @click="handleWordCellClick(getWordSubtotal(uploadedMixedResult.lines.slice(0, 3)), 'trible', '小计')">{{ getWordColumnValue(getWordSubtotal(uploadedMixedResult.lines.slice(0, 3)), 'trible').count }}</td>
                 </tr>
 
                 <!-- 加权比重行（在小计行后） -->
