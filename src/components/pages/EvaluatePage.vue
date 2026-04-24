@@ -247,36 +247,31 @@ async function runEvaluation() {
         }
       }
 
-      const wordResult = evaluateWords(wordCodeMap, wordFreqMap)
-      wordEvaluationResult.value = wordResult
-    }
+      const wordResult = evaluateWords(wordCodeMap, wordFreqMap, selectKeysConfig.value)
 
-    // 字词混合测评
-    {
-      const mixedCodeMap = new Map<string, string>()
-      const mixedFreqMap = new Map<string, number>()
+      // 字词混合测评
+      {
+        const mixedCodeMap = new Map<string, string>()
+        const mixedFreqMap = new Map<string, number>()
 
-      // 合并单字编码和频率
-      for (const [char, freq] of freqMap) {
-        mixedFreqMap.set(char, freq)
-        if (!missingSet.has(char)) {
+        for (const [char, freq] of freqMap) {
+          mixedFreqMap.set(char, freq)
           const code = calculateCharCode(char)
           if (code) mixedCodeMap.set(char, code)
         }
-      }
 
-      // 合并词组编码和频率
-      for (const [text, freq] of engine.freq) {
-        if ([...text].length >= 2 && freq > 0) {
-          mixedFreqMap.set(text, freq)
-          const code = calculateWordCode(text)
-          if (code) mixedCodeMap.set(text, code)
+        for (const [text, freq] of engine.freq) {
+          if ([...text].length >= 2 && freq > 0) {
+            mixedFreqMap.set(text, freq)
+            const code = calculateWordCode(text)
+            if (code) mixedCodeMap.set(text, code)
+          }
         }
-      }
 
-      if (mixedFreqMap.size) {
-        const mixedResult = evaluateMixed(mixedCodeMap, mixedFreqMap)
-        mixedEvaluationResult.value = mixedResult
+        if (mixedFreqMap.size) {
+          const mixedResult = evaluateMixed(mixedCodeMap, mixedFreqMap, undefined, selectKeysConfig.value)
+          mixedEvaluationResult.value = mixedResult
+        }
       }
     }
 
@@ -455,6 +450,7 @@ function handleFileUpload(event: Event) {
     }
   }
   reader.readAsText(file)
+  input.value = ''  // 触发 change 事件，即使是同一个文件。
 }
 
 // 解析组词规则
@@ -602,7 +598,7 @@ async function runUploadedEvaluation() {
         }
       }
 
-      const wordResult = evaluateWords(wordCodeMap, wordFreqMap)
+      const wordResult = evaluateWords(wordCodeMap, wordFreqMap, selectKeysConfig.value)
       uploadedWordResult.value = wordResult
     }
 
@@ -636,7 +632,7 @@ async function runUploadedEvaluation() {
       }
 
       if (mixedFreqMap.size) {
-        const mixedResult = evaluateMixed(mixedCodeMap, mixedFreqMap, charsWithShortCode)
+        const mixedResult = evaluateMixed(mixedCodeMap, mixedFreqMap, charsWithShortCode, selectKeysConfig.value)
         uploadedMixedResult.value = mixedResult
       }
     }

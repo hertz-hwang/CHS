@@ -323,7 +323,7 @@ function parseTxtCodeTable(content: string, codeMap: Map<string, string[]>): voi
     const parts = trimmed.split(/[\t\s]+/)
     if (parts.length >= 2) {
       const text = parts[0]
-      const code = parts[1].toLowerCase()
+      const code = parts[1].toLowerCase().replace(/_/g, ' ')
       const len = [...text].length
       if (len >= 1) {
         if (!codeMap.has(text)) {
@@ -356,7 +356,7 @@ function parseYamlCodeTable(content: string, codeMap: Map<string, string[]>): vo
       const parts = trimmed.split(/[\t\s]+/)
       if (parts.length >= 2) {
         const text = parts[0]
-        const code = parts[1].toLowerCase()
+        const code = parts[1].toLowerCase().replace(/_/g, ' ')
         const len = [...text].length
         if (len >= 1) {
           if (!codeMap.has(text)) {
@@ -370,7 +370,7 @@ function parseYamlCodeTable(content: string, codeMap: Map<string, string[]>): vo
       }
     }
   }
-  
+
   if (codeMap.size === 0) {
     parseTxtCodeTable(content, codeMap)
   }
@@ -429,9 +429,11 @@ export function evaluateScheme(
   missingSet?: Set<string>
 ): EvaluationResult {
   // 统一处理为数组
-  const selectKeyArray: string[] = Array.isArray(selectKeys) 
-    ? selectKeys 
+  const selectKeyArray: string[] = Array.isArray(selectKeys)
+    ? selectKeys
     : selectKeys.split('')
+  // 允许的键位：标准46键 + 选重键（选重键出现在编码中不算超标）
+  const allowedKeysSet = new Set([...KEYS_46_SET, ...selectKeyArray.flatMap(k => [...k])])
   // 按字频排序
   const sortedChars = [...freqMap.entries()]
     .filter(([char]) => char.length === 1)
@@ -624,9 +626,9 @@ export function evaluateScheme(
       // 检查超标键位
       let overKey = 0
       for (const k of code) {
-        if (!KEYS_46_SET.has(k)) overKey++
+        if (!allowedKeysSet.has(k)) overKey++
       }
-      
+
       // 计算理论二简
       let brief2 = false
       if (code.length >= 2) {
@@ -1010,8 +1012,11 @@ export function calcEquivalence(code: string): number {
  */
 export function evaluateWords(
   wordCodeMap: Map<string, string>,
-  wordFreqMap: Map<string, number>
+  wordFreqMap: Map<string, number>,
+  selectKeys: string | string[] = ";'456789"
 ): EvaluationWordResult {
+  const selectKeyArray: string[] = Array.isArray(selectKeys) ? selectKeys : selectKeys.split('')
+  const allowedKeysSet = new Set([...KEYS_46_SET, ...selectKeyArray.flatMap(k => [...k])])
   // 按词频排序（只取2字及以上的词）
   const sortedWords = [...wordFreqMap.entries()]
     .filter(([word]) => word.length >= 2)
@@ -1108,7 +1113,7 @@ export function evaluateWords(
       // 检查超标键位
       let overKey = 0
       for (const k of code) {
-        if (!KEYS_46_SET.has(k)) overKey++
+        if (!allowedKeysSet.has(k)) overKey++
       }
 
       // 初始化测评项
@@ -1180,8 +1185,11 @@ export function evaluateWords(
 export function evaluateMixed(
   wordCodeMap: Map<string, string>,
   wordFreqMap: Map<string, number>,
-  charsWithShortCode?: Set<string>
+  charsWithShortCode?: Set<string>,
+  selectKeys: string | string[] = ";'456789"
 ): EvaluationWordResult {
+  const selectKeyArray: string[] = Array.isArray(selectKeys) ? selectKeys : selectKeys.split('')
+  const allowedKeysSet = new Set([...KEYS_46_SET, ...selectKeyArray.flatMap(k => [...k])])
   // 按频率排序（不过滤，包含单字和词组）
   const sortedWords = [...wordFreqMap.entries()]
     .sort((a, b) => b[1] - a[1])
@@ -1290,7 +1298,7 @@ export function evaluateMixed(
       // 检查超标键位
       let overKey = 0
       for (const k of code) {
-        if (!KEYS_46_SET.has(k)) overKey++
+        if (!allowedKeysSet.has(k)) overKey++
       }
 
       // 字词冲突：同一编码下同时存在单字和词组（仅统计本分区内的冲突），首选位不算冲突
