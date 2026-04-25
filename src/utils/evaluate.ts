@@ -254,6 +254,7 @@ export interface EvaluateHanziItem {
   fullCollision: number    // 全码重（最长编码的重码情况）
   
   // 加权值
+  keysLen: number    // 编码键数（含选重键）
   cl: number         // 加权键长
   ziEq: number       // 加权字均当量（原始当量表）
   keyEq: number      // 加权键均当量（原始当量表）
@@ -539,6 +540,7 @@ export function evaluateScheme(
           simpleCollision: 0,
           fullCollision: 0,
           cl: 0,
+          keysLen: 0,
           ziEq: 0,
           keyEq: 0,
           ziEqCombo: 0,
@@ -651,6 +653,7 @@ export function evaluateScheme(
         brief2,
         simpleCollision,
         fullCollision,
+        keysLen,
         cl: keysLen * freq,
         ziEq: 0,
         keyEq: 0,
@@ -886,13 +889,18 @@ export function getColumnValue(
  * 获取加权值
  */
 export function getWeightedValue(line: EvaluateLine, field: 'cl' | 'ziEq' | 'keyEq' | 'ksZiEq' | 'ksKeyEq'): number {
+  const isEqField = field === 'ziEq' || field === 'keyEq' || field === 'ksZiEq' || field === 'ksKeyEq'
   let total = 0
+  let freqDenom = 0
   for (const item of line.items) {
     if (!item.isLack && item.overKey === 0) {
+      // 当量字段排除一键字（keysLen < 2），避免其频率压低均值
+      if (isEqField && item.keysLen < 2) continue
       total += item[field]
+      freqDenom += item.freq
     }
   }
-  return line.totalFreq > 0 ? total / line.totalFreq : 0
+  return freqDenom > 0 ? total / freqDenom : 0
 }
 
 /**
