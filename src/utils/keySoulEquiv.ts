@@ -968,10 +968,10 @@ class TypingModel {
    * 总时间不可能短于任一只手的独立完成时间。
    *
    * @param keys - 击键序列字符串（如 "fjdk"）
-   * @returns 总时间 (ms)，< 2 键返回 0，包含未知键返回 -1
+   * @returns 总时间 (ms)，空串返回 0，包含未知键返回 -1
    */
   sequenceTime(keys: string): number {
-    if (keys.length < 2) return 0
+    if (keys.length === 0) return 0
     const infos: KeyInfo[] = []
     for (const ch of keys) {
       const key = this.kb.get(ch)
