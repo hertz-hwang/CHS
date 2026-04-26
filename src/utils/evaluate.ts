@@ -130,19 +130,20 @@ const LFD_TOP_KEYS = new Set(['q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p'])
  * 判断是否为小指干扰
  * 定义：同手中小指与无名指或中指的组合（存在神经干扰）
  * 不包含：小指与食指组合（食指独立）、跨手组合
+ * @param excludeMiddle 为 true 时排除小指+中指组合，只统计小指+无名指
  */
-function isPinkyDisturb(key1: string, key2: string): boolean {
+function isPinkyDisturb(key1: string, key2: string, excludeMiddle = false): boolean {
   const info1 = KEYBOARD_LAYOUT[key1.toLowerCase()]
   const info2 = KEYBOARD_LAYOUT[key2.toLowerCase()]
-  
+
   if (!info1 || !info2) return false
-  
+
   // 必须同手
   if (info1.hand !== info2.hand) return false
-  
+
   const k1 = key1.toLowerCase()
   const k2 = key2.toLowerCase()
-  
+
   // 检查是否为小指+无名指 或 小指+中指 的组合
   const isPinky1 = PINKY_KEYS.has(k1)
   const isPinky2 = PINKY_KEYS.has(k2)
@@ -150,12 +151,12 @@ function isPinkyDisturb(key1: string, key2: string): boolean {
   const isRing2 = RING_KEYS.has(k2)
   const isMiddle1 = MIDDLE_KEYS.has(k1)
   const isMiddle2 = MIDDLE_KEYS.has(k2)
-  
+
   // 小指 + 无名指
   if ((isPinky1 && isRing2) || (isRing1 && isPinky2)) return true
-  // 小指 + 中指
-  if ((isPinky1 && isMiddle2) || (isMiddle1 && isPinky2)) return true
-  
+  // 小指 + 中指（可选排除）
+  if (!excludeMiddle && ((isPinky1 && isMiddle2) || (isMiddle1 && isPinky2))) return true
+
   return false
 }
 
@@ -195,7 +196,8 @@ interface ComboFeel {
   dh: number   // 左右互击
   ms: number   // 同指大跨排
   ss: number   // 同指小跨排
-  pd: number   // 小指干扰
+  pdRing: number   // 小指干扰（小指+无名指）
+  pdMiddle: number // 小指干扰（小指+中指）
   lfd: number  // 错手
 }
 
@@ -203,18 +205,18 @@ interface ComboFeel {
 function getComboFeel(key1: string, key2: string): ComboFeel {
   const info1 = KEYBOARD_LAYOUT[key1.toLowerCase()]
   const info2 = KEYBOARD_LAYOUT[key2.toLowerCase()]
-  
-  const result: ComboFeel = { dh: 0, ms: 0, ss: 0, pd: 0, lfd: 0 }
-  
+
+  const result: ComboFeel = { dh: 0, ms: 0, ss: 0, pdRing: 0, pdMiddle: 0, lfd: 0 }
+
   if (!info1 || !info2) return result
-  
+
   // 左右互击：两个按键不在同一个手区域
   const isLeft1 = LEFT_SET.has(key1.toLowerCase())
   const isLeft2 = LEFT_SET.has(key2.toLowerCase())
   if (isLeft1 !== isLeft2) {
     result.dh = 1
   }
-  
+
   // 同指跨排：两个按键需要用相同手指，但不是同一键
   if (info1.hand === info2.hand && info1.finger === info2.finger && key1 !== key2) {
     const rowDiff = Math.abs(info1.row - info2.row)
@@ -224,17 +226,25 @@ function getComboFeel(key1: string, key2: string): ComboFeel {
       result.ss = 1  // 小跨排（一排）
     }
   }
-  
-  // 小指干扰
-  if (isPinkyDisturb(key1, key2)) {
-    result.pd = 1
+
+  // 小指干扰（分别统计两种组合）
+  if (isPinkyDisturb(key1, key2, false)) {
+    // 判断是小指+无名指还是小指+中指
+    const k1 = key1.toLowerCase()
+    const k2 = key2.toLowerCase()
+    const isRing = RING_KEYS.has(k1) || RING_KEYS.has(k2)
+    if (isRing) {
+      result.pdRing = 1
+    } else {
+      result.pdMiddle = 1
+    }
   }
-  
+
   // 错手
   if (isLongFingerDisturb(key1, key2)) {
     result.lfd = 1
   }
-  
+
   return result
 }
 
@@ -264,12 +274,13 @@ export interface EvaluateHanziItem {
   ksKeyEq: number    // 加权键魂键均当量
   ksZiEqCombo: number  // 键魂字当量（键魂模型计算的完整序列当量）
   ksKeyEqCombo: number // 键魂键当量（键魂字当量/键值对数量）
-  
+
   // 手感指标（次数）
   dh: number         // 左右互击
   ms: number         // 同指大跨排
   ss: number         // 同指小跨排
-  pd: number         // 小指干扰
+  pdRing: number     // 小指干扰（小指+无名指）
+  pdMiddle: number   // 小指干扰（小指+中指）
   lfd: number        // 错手
   trible: number     // 三连击
   overKey: number    // 超标键位
@@ -552,7 +563,8 @@ export function evaluateScheme(
           dh: 0,
           ms: 0,
           ss: 0,
-          pd: 0,
+          pdRing: 0,
+          pdMiddle: 0,
           lfd: 0,
           trible: 0,
           overKey: 0,
@@ -666,7 +678,8 @@ export function evaluateScheme(
         dh: 0,
         ms: 0,
         ss: 0,
-        pd: 0,
+        pdRing: 0,
+        pdMiddle: 0,
         lfd: 0,
         trible: 0,
         overKey,
@@ -716,7 +729,8 @@ export function evaluateScheme(
         item.dh += feel.dh
         item.ms += feel.ms
         item.ss += feel.ss
-        item.pd += feel.pd
+        item.pdRing += feel.pdRing
+        item.pdMiddle += feel.pdMiddle
         item.lfd += feel.lfd
       }
       
@@ -802,10 +816,12 @@ function recalculateCollisionStats(items: EvaluateHanziItem[]): void {
 
 /**
  * 计算某一列的统计值
+ * @param filterMiddle 为 true 时小指干扰只统计小指+无名指，忽略小指+中指
  */
 export function getColumnValue(
   line: EvaluateLine,
-  column: string
+  column: string,
+  filterMiddle = true
 ): { count: number; weight: number } {
   let count = 0
   let weight = 0
@@ -870,10 +886,12 @@ export function getColumnValue(
         count += item.ss
         weight += item.ss * item.freq
         break
-      case 'pd':
-        count += item.pd
-        weight += item.pd * item.freq
+      case 'pd': {
+        const pd = item.pdRing + (filterMiddle ? 0 : item.pdMiddle)
+        count += pd
+        weight += pd * item.freq
         break
+      }
       case 'lfd':
         count += item.lfd
         weight += item.lfd * item.freq
@@ -883,7 +901,7 @@ export function getColumnValue(
         break
     }
   }
-  
+
   return { count, weight }
 }
 
@@ -975,7 +993,8 @@ export interface EvaluateWordItem {
   dh: number         // 左右互击
   ms: number         // 同指大跨排
   ss: number         // 同指小跨排
-  pd: number         // 小指干扰
+  pdRing: number     // 小指干扰（小指+无名指）
+  pdMiddle: number   // 小指干扰（小指+中指）
   lfd: number        // 错手
   trible: number     // 三连击
   overKey: number    // 超标键位
@@ -1092,7 +1111,8 @@ export function evaluateWords(
           dh: 0,
           ms: 0,
           ss: 0,
-          pd: 0,
+          pdRing: 0,
+          pdMiddle: 0,
           lfd: 0,
           trible: 0,
           overKey: 0,
@@ -1140,7 +1160,8 @@ export function evaluateWords(
         dh: 0,
         ms: 0,
         ss: 0,
-        pd: 0,
+        pdRing: 0,
+        pdMiddle: 0,
         lfd: 0,
         trible: 0,
         overKey,
@@ -1167,7 +1188,8 @@ export function evaluateWords(
         item.dh += feel.dh
         item.ms += feel.ms
         item.ss += feel.ss
-        item.pd += feel.pd
+        item.pdRing += feel.pdRing
+        item.pdMiddle += feel.pdMiddle
         item.lfd += feel.lfd
       }
 
@@ -1277,7 +1299,8 @@ export function evaluateMixed(
           dh: 0,
           ms: 0,
           ss: 0,
-          pd: 0,
+          pdRing: 0,
+          pdMiddle: 0,
           lfd: 0,
           trible: 0,
           overKey: 0,
@@ -1331,7 +1354,8 @@ export function evaluateMixed(
         dh: 0,
         ms: 0,
         ss: 0,
-        pd: 0,
+        pdRing: 0,
+        pdMiddle: 0,
         lfd: 0,
         trible: 0,
         overKey,
@@ -1359,7 +1383,8 @@ export function evaluateMixed(
         item.dh += feel.dh
         item.ms += feel.ms
         item.ss += feel.ss
-        item.pd += feel.pd
+        item.pdRing += feel.pdRing
+        item.pdMiddle += feel.pdMiddle
         item.lfd += feel.lfd
       }
 
@@ -1429,11 +1454,13 @@ export function zipWordLines(lines: EvaluateWordLine[]): EvaluateWordLine {
 
 /**
  * 计算多字词某一列的统计值
+ * @param filterMiddle 为 true 时小指干扰只统计小指+无名指，忽略小指+中指
  */
 export function getWordColumnValue(
   line: EvaluateWordLine,
   column: string,
-  useGlobalConflict?: boolean
+  useGlobalConflict?: boolean,
+  filterMiddle = true
 ): { count: number; weight: number } {
   let count = 0
   let weight = 0
@@ -1472,10 +1499,12 @@ export function getWordColumnValue(
         count += item.ss
         weight += item.ss * item.freq
         break
-      case 'pd':
-        count += item.pd
-        weight += item.pd * item.freq
+      case 'pd': {
+        const pd = item.pdRing + (filterMiddle ? 0 : item.pdMiddle)
+        count += pd
+        weight += pd * item.freq
         break
+      }
       case 'lfd':
         count += item.lfd
         weight += item.lfd * item.freq
@@ -1550,8 +1579,9 @@ export function getWordWeightedKeyEq(line: EvaluateWordLine): number {
 
 /**
  * 获取多字词手感指标的加权百分比
+ * @param filterMiddle 为 true 时小指干扰只统计小指+无名指
  */
-export function getWordComboWeightPercent(line: EvaluateWordLine, column: string): string {
+export function getWordComboWeightPercent(line: EvaluateWordLine, column: string, filterMiddle = true): string {
   let totalCombo = 0
   let weightedValue = 0
 
@@ -1564,7 +1594,7 @@ export function getWordComboWeightPercent(line: EvaluateWordLine, column: string
       case 'dh': weightedValue += item.dh * item.freq; break
       case 'ms': weightedValue += item.ms * item.freq; break
       case 'ss': weightedValue += item.ss * item.freq; break
-      case 'pd': weightedValue += item.pd * item.freq; break
+      case 'pd': weightedValue += (item.pdRing + (filterMiddle ? 0 : item.pdMiddle)) * item.freq; break
       case 'lfd': weightedValue += item.lfd * item.freq; break
     }
   }

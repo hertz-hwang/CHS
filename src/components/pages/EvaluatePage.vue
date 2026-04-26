@@ -143,6 +143,8 @@ function removeSelectKeyPosition(index: number) {
 
 // 键位热力图配置
 const includeSpaceInStats = ref(true)
+// 小指干扰：过滤中指影响（只统计小指+无名指，不含小指+中指）
+const filterMiddleInPinky = ref(true)
 
 // 从当前字词频数据源提取单字频
 function loadDefaultFreq() {
@@ -253,7 +255,6 @@ async function runEvaluation() {
       {
         const mixedCodeMap = new Map<string, string>()
         const mixedFreqMap = new Map<string, number>()
-
         for (const [char, freq] of freqMap) {
           mixedFreqMap.set(char, freq)
           const code = calculateCharCode(char)
@@ -692,22 +693,22 @@ function getWeightPercent(line: EvaluateLine, column: string): string {
 function getComboWeightPercent(line: EvaluateLine, column: string): string {
   let totalCombo = 0
   let weightedValue = 0
-  
+
   for (const item of line.items) {
     if (item.isLack || item.overKey > 0) continue
     const keysLen = item.code.length + item.selectKey.length
     const comboCount = keysLen < 2 ? 1 : keysLen - 1
     totalCombo += comboCount * item.freq
-    
+
     switch (column) {
       case 'dh': weightedValue += item.dh * item.freq; break
       case 'ms': weightedValue += item.ms * item.freq; break
       case 'ss': weightedValue += item.ss * item.freq; break
-      case 'pd': weightedValue += item.pd * item.freq; break
+      case 'pd': weightedValue += (item.pdRing + (filterMiddleInPinky.value ? 0 : item.pdMiddle)) * item.freq; break
       case 'lfd': weightedValue += item.lfd * item.freq; break
     }
   }
-  
+
   return totalCombo > 0 ? fmt(weightedValue / totalCombo * 100, 4) : '0.0000'
 }
 
@@ -944,12 +945,13 @@ function filterItemsByColumn(line: EvaluateLine, column: string): EvaluateHanziI
       case 'dh': match = item.dh > 0 && !item.isLack && item.overKey === 0; break
       case 'ms': match = item.ms > 0 && !item.isLack && item.overKey === 0; break
       case 'ss': match = item.ss > 0 && !item.isLack && item.overKey === 0; break
-      case 'pd': match = item.pd > 0 && !item.isLack && item.overKey === 0; break
+      case 'pd': match = (item.pdRing + (filterMiddleInPinky.value ? 0 : item.pdMiddle)) > 0 && !item.isLack && item.overKey === 0; break
       case 'lfd': match = item.lfd > 0 && !item.isLack && item.overKey === 0; break
       case 'trible': match = item.trible > 0 && !item.isLack && item.overKey === 0; break
       case 'overKey': match = item.overKey > 0 && !item.isLack; break
     }
-    
+
+
     if (match) items.push(item)
   }
   
@@ -993,7 +995,7 @@ function filterWordItemsByColumn(line: EvaluateWordLine, column: string, useGlob
       case 'dh': match = item.dh > 0 && !item.isLack && item.overKey === 0; break
       case 'ms': match = item.ms > 0 && !item.isLack && item.overKey === 0; break
       case 'ss': match = item.ss > 0 && !item.isLack && item.overKey === 0; break
-      case 'pd': match = item.pd > 0 && !item.isLack && item.overKey === 0; break
+      case 'pd': match = (item.pdRing + (filterMiddleInPinky.value ? 0 : item.pdMiddle)) > 0 && !item.isLack && item.overKey === 0; break
       case 'lfd': match = item.lfd > 0 && !item.isLack && item.overKey === 0; break
       case 'trible': match = item.trible > 0 && !item.isLack && item.overKey === 0; break
       case 'overKey': match = item.overKey > 0 && !item.isLack; break
@@ -1410,7 +1412,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                 <th>左右互击</th>
                 <th>同指大跨</th>
                 <th>同指小跨</th>
-                <th>小指干扰</th>
+                <th><label class="th-checkbox-label"><input v-model="filterMiddleInPinky" type="checkbox" />小指干扰</label></th>
                 <th>错手</th>
                 <th>三连击</th>
                 <th>超标键位</th>
@@ -1438,7 +1440,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                   <td class="clickable" @click="handleCellClick(line, 'dh', `${line.start + 1}~${line.end}`)">{{ getColumnValue(line, 'dh').count }}</td>
                   <td class="clickable" @click="handleCellClick(line, 'ms', `${line.start + 1}~${line.end}`)">{{ getColumnValue(line, 'ms').count }}</td>
                   <td class="clickable" @click="handleCellClick(line, 'ss', `${line.start + 1}~${line.end}`)">{{ getColumnValue(line, 'ss').count }}</td>
-                  <td class="clickable" @click="handleCellClick(line, 'pd', `${line.start + 1}~${line.end}`)">{{ getColumnValue(line, 'pd').count }}</td>
+                  <td class="clickable" @click="handleCellClick(line, 'pd', `${line.start + 1}~${line.end}`)">{{ getColumnValue(line, 'pd', filterMiddleInPinky).count }}</td>
                   <td class="clickable" @click="handleCellClick(line, 'lfd', `${line.start + 1}~${line.end}`)">{{ getColumnValue(line, 'lfd').count }}</td>
                   <td class="clickable" @click="handleCellClick(line, 'trible', `${line.start + 1}~${line.end}`)">{{ getColumnValue(line, 'trible').count }}</td>
                   <td class="clickable" @click="handleCellClick(line, 'overKey', `${line.start + 1}~${line.end}`)">{{ getColumnValue(line, 'overKey').count }}</td>
@@ -1464,7 +1466,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                   <td class="clickable" @click="handleCellClick(getSubtotal(evaluationResult.lines.slice(0, 3)), 'dh', '小计')">{{ getColumnValue(getSubtotal(evaluationResult.lines.slice(0, 3)), 'dh').count }}</td>
                   <td class="clickable" @click="handleCellClick(getSubtotal(evaluationResult.lines.slice(0, 3)), 'ms', '小计')">{{ getColumnValue(getSubtotal(evaluationResult.lines.slice(0, 3)), 'ms').count }}</td>
                   <td class="clickable" @click="handleCellClick(getSubtotal(evaluationResult.lines.slice(0, 3)), 'ss', '小计')">{{ getColumnValue(getSubtotal(evaluationResult.lines.slice(0, 3)), 'ss').count }}</td>
-                  <td class="clickable" @click="handleCellClick(getSubtotal(evaluationResult.lines.slice(0, 3)), 'pd', '小计')">{{ getColumnValue(getSubtotal(evaluationResult.lines.slice(0, 3)), 'pd').count }}</td>
+                  <td class="clickable" @click="handleCellClick(getSubtotal(evaluationResult.lines.slice(0, 3)), 'pd', '小计')">{{ getColumnValue(getSubtotal(evaluationResult.lines.slice(0, 3)), 'pd', filterMiddleInPinky).count }}</td>
                   <td class="clickable" @click="handleCellClick(getSubtotal(evaluationResult.lines.slice(0, 3)), 'lfd', '小计')">{{ getColumnValue(getSubtotal(evaluationResult.lines.slice(0, 3)), 'lfd').count }}</td>
                   <td class="clickable" @click="handleCellClick(getSubtotal(evaluationResult.lines.slice(0, 3)), 'trible', '小计')">{{ getColumnValue(getSubtotal(evaluationResult.lines.slice(0, 3)), 'trible').count }}</td>
                   <td class="clickable" @click="handleCellClick(getSubtotal(evaluationResult.lines.slice(0, 3)), 'overKey', '小计')">{{ getColumnValue(getSubtotal(evaluationResult.lines.slice(0, 3)), 'overKey').count }}</td>
@@ -1517,7 +1519,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                 <td class="clickable" @click="handleCellClick(getSubtotal(evaluationResult.lines), 'dh', '总计')">{{ getColumnValue(getSubtotal(evaluationResult.lines), 'dh').count }}</td>
                 <td class="clickable" @click="handleCellClick(getSubtotal(evaluationResult.lines), 'ms', '总计')">{{ getColumnValue(getSubtotal(evaluationResult.lines), 'ms').count }}</td>
                 <td class="clickable" @click="handleCellClick(getSubtotal(evaluationResult.lines), 'ss', '总计')">{{ getColumnValue(getSubtotal(evaluationResult.lines), 'ss').count }}</td>
-                <td class="clickable" @click="handleCellClick(getSubtotal(evaluationResult.lines), 'pd', '总计')">{{ getColumnValue(getSubtotal(evaluationResult.lines), 'pd').count }}</td>
+                <td class="clickable" @click="handleCellClick(getSubtotal(evaluationResult.lines), 'pd', '总计')">{{ getColumnValue(getSubtotal(evaluationResult.lines), 'pd', filterMiddleInPinky).count }}</td>
                 <td class="clickable" @click="handleCellClick(getSubtotal(evaluationResult.lines), 'lfd', '总计')">{{ getColumnValue(getSubtotal(evaluationResult.lines), 'lfd').count }}</td>
                 <td class="clickable" @click="handleCellClick(getSubtotal(evaluationResult.lines), 'trible', '总计')">{{ getColumnValue(getSubtotal(evaluationResult.lines), 'trible').count }}</td>
                 <td class="clickable" @click="handleCellClick(getSubtotal(evaluationResult.lines), 'overKey', '总计')">{{ getColumnValue(getSubtotal(evaluationResult.lines), 'overKey').count }}</td>
@@ -1585,7 +1587,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                 <th>左右互击</th>
                 <th>同指大跨</th>
                 <th>同指小跨</th>
-                <th>小指干扰</th>
+                <th><label class="th-checkbox-label"><input v-model="filterMiddleInPinky" type="checkbox" />小指干扰</label></th>
                 <th>错手</th>
                 <th>三连击</th>
                 <th>超标键位</th>
@@ -1603,7 +1605,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                   <td class="clickable" @click="handleWordCellClick(line, 'dh', `${line.start + 1}~${line.end}`)">{{ getWordColumnValue(line, 'dh').count }}</td>
                   <td class="clickable" @click="handleWordCellClick(line, 'ms', `${line.start + 1}~${line.end}`)">{{ getWordColumnValue(line, 'ms').count }}</td>
                   <td class="clickable" @click="handleWordCellClick(line, 'ss', `${line.start + 1}~${line.end}`)">{{ getWordColumnValue(line, 'ss').count }}</td>
-                  <td class="clickable" @click="handleWordCellClick(line, 'pd', `${line.start + 1}~${line.end}`)">{{ getWordColumnValue(line, 'pd').count }}</td>
+                  <td class="clickable" @click="handleWordCellClick(line, 'pd', `${line.start + 1}~${line.end}`)">{{ getWordColumnValue(line, 'pd', undefined, filterMiddleInPinky).count }}</td>
                   <td class="clickable" @click="handleWordCellClick(line, 'lfd', `${line.start + 1}~${line.end}`)">{{ getWordColumnValue(line, 'lfd').count }}</td>
                   <td class="clickable" @click="handleWordCellClick(line, 'trible', `${line.start + 1}~${line.end}`)">{{ getWordColumnValue(line, 'trible').count }}</td>
                   <td class="clickable" @click="handleWordCellClick(line, 'overKey', `${line.start + 1}~${line.end}`)">{{ getWordColumnValue(line, 'overKey').count }}</td>
@@ -1619,7 +1621,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                   <td class="clickable" @click="handleWordCellClick(getWordSubtotal(wordEvaluationResult.lines.slice(0, 3)), 'dh', '小计')">{{ getWordColumnValue(getWordSubtotal(wordEvaluationResult.lines.slice(0, 3)), 'dh').count }}</td>
                   <td class="clickable" @click="handleWordCellClick(getWordSubtotal(wordEvaluationResult.lines.slice(0, 3)), 'ms', '小计')">{{ getWordColumnValue(getWordSubtotal(wordEvaluationResult.lines.slice(0, 3)), 'ms').count }}</td>
                   <td class="clickable" @click="handleWordCellClick(getWordSubtotal(wordEvaluationResult.lines.slice(0, 3)), 'ss', '小计')">{{ getWordColumnValue(getWordSubtotal(wordEvaluationResult.lines.slice(0, 3)), 'ss').count }}</td>
-                  <td class="clickable" @click="handleWordCellClick(getWordSubtotal(wordEvaluationResult.lines.slice(0, 3)), 'pd', '小计')">{{ getWordColumnValue(getWordSubtotal(wordEvaluationResult.lines.slice(0, 3)), 'pd').count }}</td>
+                  <td class="clickable" @click="handleWordCellClick(getWordSubtotal(wordEvaluationResult.lines.slice(0, 3)), 'pd', '小计')">{{ getWordColumnValue(getWordSubtotal(wordEvaluationResult.lines.slice(0, 3)), 'pd', undefined, filterMiddleInPinky).count }}</td>
                   <td class="clickable" @click="handleWordCellClick(getWordSubtotal(wordEvaluationResult.lines.slice(0, 3)), 'lfd', '小计')">{{ getWordColumnValue(getWordSubtotal(wordEvaluationResult.lines.slice(0, 3)), 'lfd').count }}</td>
                   <td class="clickable" @click="handleWordCellClick(getWordSubtotal(wordEvaluationResult.lines.slice(0, 3)), 'trible', '小计')">{{ getWordColumnValue(getWordSubtotal(wordEvaluationResult.lines.slice(0, 3)), 'trible').count }}</td>
                   <td>-</td>
@@ -1635,7 +1637,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                   <td>{{ getWordComboWeightPercent(getWordSubtotal(wordEvaluationResult.lines.slice(0, 3)), 'dh') }}%</td>
                   <td>{{ getWordComboWeightPercent(getWordSubtotal(wordEvaluationResult.lines.slice(0, 3)), 'ms') }}%</td>
                   <td>{{ getWordComboWeightPercent(getWordSubtotal(wordEvaluationResult.lines.slice(0, 3)), 'ss') }}%</td>
-                  <td>{{ getWordComboWeightPercent(getWordSubtotal(wordEvaluationResult.lines.slice(0, 3)), 'pd') }}%</td>
+                  <td>{{ getWordComboWeightPercent(getWordSubtotal(wordEvaluationResult.lines.slice(0, 3)), 'pd', filterMiddleInPinky) }}%</td>
                   <td>{{ getWordComboWeightPercent(getWordSubtotal(wordEvaluationResult.lines.slice(0, 3)), 'lfd') }}%</td>
                   <td>{{ getWordWeightPercent(getWordSubtotal(wordEvaluationResult.lines.slice(0, 3)), 'trible') }}%</td>
                   <td>-</td>
@@ -1652,7 +1654,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                 <td class="clickable" @click="handleWordCellClick(getWordSubtotal(wordEvaluationResult.lines), 'dh', '总计')">{{ getWordColumnValue(getWordSubtotal(wordEvaluationResult.lines), 'dh').count }}</td>
                 <td class="clickable" @click="handleWordCellClick(getWordSubtotal(wordEvaluationResult.lines), 'ms', '总计')">{{ getWordColumnValue(getWordSubtotal(wordEvaluationResult.lines), 'ms').count }}</td>
                 <td class="clickable" @click="handleWordCellClick(getWordSubtotal(wordEvaluationResult.lines), 'ss', '总计')">{{ getWordColumnValue(getWordSubtotal(wordEvaluationResult.lines), 'ss').count }}</td>
-                <td class="clickable" @click="handleWordCellClick(getWordSubtotal(wordEvaluationResult.lines), 'pd', '总计')">{{ getWordColumnValue(getWordSubtotal(wordEvaluationResult.lines), 'pd').count }}</td>
+                <td class="clickable" @click="handleWordCellClick(getWordSubtotal(wordEvaluationResult.lines), 'pd', '总计')">{{ getWordColumnValue(getWordSubtotal(wordEvaluationResult.lines), 'pd', undefined, filterMiddleInPinky).count }}</td>
                 <td class="clickable" @click="handleWordCellClick(getWordSubtotal(wordEvaluationResult.lines), 'lfd', '总计')">{{ getWordColumnValue(getWordSubtotal(wordEvaluationResult.lines), 'lfd').count }}</td>
                 <td class="clickable" @click="handleWordCellClick(getWordSubtotal(wordEvaluationResult.lines), 'trible', '总计')">{{ getWordColumnValue(getWordSubtotal(wordEvaluationResult.lines), 'trible').count }}</td>
                 <td class="clickable" @click="handleWordCellClick(getWordSubtotal(wordEvaluationResult.lines), 'overKey', '总计')">{{ getWordColumnValue(getWordSubtotal(wordEvaluationResult.lines), 'overKey').count }}</td>
@@ -1668,7 +1670,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                 <td>{{ getWordComboWeightPercent(getWordSubtotal(wordEvaluationResult.lines), 'dh') }}%</td>
                 <td>{{ getWordComboWeightPercent(getWordSubtotal(wordEvaluationResult.lines), 'ms') }}%</td>
                 <td>{{ getWordComboWeightPercent(getWordSubtotal(wordEvaluationResult.lines), 'ss') }}%</td>
-                <td>{{ getWordComboWeightPercent(getWordSubtotal(wordEvaluationResult.lines), 'pd') }}%</td>
+                <td>{{ getWordComboWeightPercent(getWordSubtotal(wordEvaluationResult.lines), 'pd', filterMiddleInPinky) }}%</td>
                 <td>{{ getWordComboWeightPercent(getWordSubtotal(wordEvaluationResult.lines), 'lfd') }}%</td>
                 <td>{{ getWordWeightPercent(getWordSubtotal(wordEvaluationResult.lines), 'trible') }}%</td>
                 <td>-</td>
@@ -1710,7 +1712,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                 <th>键均当量</th>
                 <th>同指大跨</th>
                 <th>同指小跨</th>
-                <th>小指干扰</th>
+                <th><label class="th-checkbox-label"><input v-model="filterMiddleInPinky" type="checkbox" />小指干扰</label></th>
                 <th>错手</th>
                 <th>三连击</th>
               </tr>
@@ -1726,7 +1728,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                   <td>{{ fmt(getWordWeightedKeyEq(line)) }}</td>
                   <td class="clickable" @click="handleWordCellClick(line, 'ms', `${line.start + 1}~${line.end}`)">{{ getWordColumnValue(line, 'ms').count }}</td>
                   <td class="clickable" @click="handleWordCellClick(line, 'ss', `${line.start + 1}~${line.end}`)">{{ getWordColumnValue(line, 'ss').count }}</td>
-                  <td class="clickable" @click="handleWordCellClick(line, 'pd', `${line.start + 1}~${line.end}`)">{{ getWordColumnValue(line, 'pd').count }}</td>
+                  <td class="clickable" @click="handleWordCellClick(line, 'pd', `${line.start + 1}~${line.end}`)">{{ getWordColumnValue(line, 'pd', undefined, filterMiddleInPinky).count }}</td>
                   <td class="clickable" @click="handleWordCellClick(line, 'lfd', `${line.start + 1}~${line.end}`)">{{ getWordColumnValue(line, 'lfd').count }}</td>
                   <td class="clickable" @click="handleWordCellClick(line, 'trible', `${line.start + 1}~${line.end}`)">{{ getWordColumnValue(line, 'trible').count }}</td>
                 </tr>
@@ -1740,7 +1742,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                   <td>{{ fmt(getWordWeightedKeyEq(getWordSubtotal(mixedEvaluationResult.lines.slice(0, 3)))) }}</td>
                   <td class="clickable" @click="handleWordCellClick(getWordSubtotal(mixedEvaluationResult.lines.slice(0, 3)), 'ms', '小计')">{{ getWordColumnValue(getWordSubtotal(mixedEvaluationResult.lines.slice(0, 3)), 'ms').count }}</td>
                   <td class="clickable" @click="handleWordCellClick(getWordSubtotal(mixedEvaluationResult.lines.slice(0, 3)), 'ss', '小计')">{{ getWordColumnValue(getWordSubtotal(mixedEvaluationResult.lines.slice(0, 3)), 'ss').count }}</td>
-                  <td class="clickable" @click="handleWordCellClick(getWordSubtotal(mixedEvaluationResult.lines.slice(0, 3)), 'pd', '小计')">{{ getWordColumnValue(getWordSubtotal(mixedEvaluationResult.lines.slice(0, 3)), 'pd').count }}</td>
+                  <td class="clickable" @click="handleWordCellClick(getWordSubtotal(mixedEvaluationResult.lines.slice(0, 3)), 'pd', '小计')">{{ getWordColumnValue(getWordSubtotal(mixedEvaluationResult.lines.slice(0, 3)), 'pd', undefined, filterMiddleInPinky).count }}</td>
                   <td class="clickable" @click="handleWordCellClick(getWordSubtotal(mixedEvaluationResult.lines.slice(0, 3)), 'lfd', '小计')">{{ getWordColumnValue(getWordSubtotal(mixedEvaluationResult.lines.slice(0, 3)), 'lfd').count }}</td>
                   <td class="clickable" @click="handleWordCellClick(getWordSubtotal(mixedEvaluationResult.lines.slice(0, 3)), 'trible', '小计')">{{ getWordColumnValue(getWordSubtotal(mixedEvaluationResult.lines.slice(0, 3)), 'trible').count }}</td>
                 </tr>
@@ -1754,7 +1756,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                   <td>-</td>
                   <td>{{ getWordComboWeightPercent(getWordSubtotal(mixedEvaluationResult.lines.slice(0, 3)), 'ms') }}%</td>
                   <td>{{ getWordComboWeightPercent(getWordSubtotal(mixedEvaluationResult.lines.slice(0, 3)), 'ss') }}%</td>
-                  <td>{{ getWordComboWeightPercent(getWordSubtotal(mixedEvaluationResult.lines.slice(0, 3)), 'pd') }}%</td>
+                  <td>{{ getWordComboWeightPercent(getWordSubtotal(mixedEvaluationResult.lines.slice(0, 3)), 'pd', filterMiddleInPinky) }}%</td>
                   <td>{{ getWordComboWeightPercent(getWordSubtotal(mixedEvaluationResult.lines.slice(0, 3)), 'lfd') }}%</td>
                   <td>{{ getWordWeightPercent(getWordSubtotal(mixedEvaluationResult.lines.slice(0, 3)), 'trible') }}%</td>
                 </tr>
@@ -1769,7 +1771,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                 <td>{{ fmt(getWordWeightedKeyEq(getWordSubtotal(mixedEvaluationResult.lines))) }}</td>
                 <td class="clickable" @click="handleWordCellClick(getWordSubtotal(mixedEvaluationResult.lines), 'ms', '总计')">{{ getWordColumnValue(getWordSubtotal(mixedEvaluationResult.lines), 'ms').count }}</td>
                 <td class="clickable" @click="handleWordCellClick(getWordSubtotal(mixedEvaluationResult.lines), 'ss', '总计')">{{ getWordColumnValue(getWordSubtotal(mixedEvaluationResult.lines), 'ss').count }}</td>
-                <td class="clickable" @click="handleWordCellClick(getWordSubtotal(mixedEvaluationResult.lines), 'pd', '总计')">{{ getWordColumnValue(getWordSubtotal(mixedEvaluationResult.lines), 'pd').count }}</td>
+                <td class="clickable" @click="handleWordCellClick(getWordSubtotal(mixedEvaluationResult.lines), 'pd', '总计')">{{ getWordColumnValue(getWordSubtotal(mixedEvaluationResult.lines), 'pd', undefined, filterMiddleInPinky).count }}</td>
                 <td class="clickable" @click="handleWordCellClick(getWordSubtotal(mixedEvaluationResult.lines), 'lfd', '总计')">{{ getWordColumnValue(getWordSubtotal(mixedEvaluationResult.lines), 'lfd').count }}</td>
                 <td class="clickable" @click="handleWordCellClick(getWordSubtotal(mixedEvaluationResult.lines), 'trible', '总计')">{{ getWordColumnValue(getWordSubtotal(mixedEvaluationResult.lines), 'trible').count }}</td>
               </tr>
@@ -1783,7 +1785,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                 <td>-</td>
                 <td>{{ getWordComboWeightPercent(getWordSubtotal(mixedEvaluationResult.lines), 'ms') }}%</td>
                 <td>{{ getWordComboWeightPercent(getWordSubtotal(mixedEvaluationResult.lines), 'ss') }}%</td>
-                <td>{{ getWordComboWeightPercent(getWordSubtotal(mixedEvaluationResult.lines), 'pd') }}%</td>
+                <td>{{ getWordComboWeightPercent(getWordSubtotal(mixedEvaluationResult.lines), 'pd', filterMiddleInPinky) }}%</td>
                 <td>{{ getWordComboWeightPercent(getWordSubtotal(mixedEvaluationResult.lines), 'lfd') }}%</td>
                 <td>{{ getWordWeightPercent(getWordSubtotal(mixedEvaluationResult.lines), 'trible') }}%</td>
               </tr>
@@ -1921,7 +1923,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                 <th>左右互击</th>
                 <th>同指大跨</th>
                 <th>同指小跨</th>
-                <th>小指干扰</th>
+                <th><label class="th-checkbox-label"><input v-model="filterMiddleInPinky" type="checkbox" />小指干扰</label></th>
                 <th>错手</th>
                 <th>三连击</th>
                 <th>超标键位</th>
@@ -1948,7 +1950,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                   <td class="clickable" @click="handleCellClick(line, 'dh', `${line.start + 1}~${line.end}`)">{{ getColumnValue(line, 'dh').count }}</td>
                   <td class="clickable" @click="handleCellClick(line, 'ms', `${line.start + 1}~${line.end}`)">{{ getColumnValue(line, 'ms').count }}</td>
                   <td class="clickable" @click="handleCellClick(line, 'ss', `${line.start + 1}~${line.end}`)">{{ getColumnValue(line, 'ss').count }}</td>
-                  <td class="clickable" @click="handleCellClick(line, 'pd', `${line.start + 1}~${line.end}`)">{{ getColumnValue(line, 'pd').count }}</td>
+                  <td class="clickable" @click="handleCellClick(line, 'pd', `${line.start + 1}~${line.end}`)">{{ getColumnValue(line, 'pd', filterMiddleInPinky).count }}</td>
                   <td class="clickable" @click="handleCellClick(line, 'lfd', `${line.start + 1}~${line.end}`)">{{ getColumnValue(line, 'lfd').count }}</td>
                   <td class="clickable" @click="handleCellClick(line, 'trible', `${line.start + 1}~${line.end}`)">{{ getColumnValue(line, 'trible').count }}</td>
                   <td class="clickable" @click="handleCellClick(line, 'overKey', `${line.start + 1}~${line.end}`)">{{ getColumnValue(line, 'overKey').count }}</td>
@@ -1974,7 +1976,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                   <td class="clickable" @click="handleCellClick(getSubtotal(uploadedResult.lines.slice(0, 3)), 'dh', '小计')">{{ getColumnValue(getSubtotal(uploadedResult.lines.slice(0, 3)), 'dh').count }}</td>
                   <td class="clickable" @click="handleCellClick(getSubtotal(uploadedResult.lines.slice(0, 3)), 'ms', '小计')">{{ getColumnValue(getSubtotal(uploadedResult.lines.slice(0, 3)), 'ms').count }}</td>
                   <td class="clickable" @click="handleCellClick(getSubtotal(uploadedResult.lines.slice(0, 3)), 'ss', '小计')">{{ getColumnValue(getSubtotal(uploadedResult.lines.slice(0, 3)), 'ss').count }}</td>
-                  <td class="clickable" @click="handleCellClick(getSubtotal(uploadedResult.lines.slice(0, 3)), 'pd', '小计')">{{ getColumnValue(getSubtotal(uploadedResult.lines.slice(0, 3)), 'pd').count }}</td>
+                  <td class="clickable" @click="handleCellClick(getSubtotal(uploadedResult.lines.slice(0, 3)), 'pd', '小计')">{{ getColumnValue(getSubtotal(uploadedResult.lines.slice(0, 3)), 'pd', filterMiddleInPinky).count }}</td>
                   <td class="clickable" @click="handleCellClick(getSubtotal(uploadedResult.lines.slice(0, 3)), 'lfd', '小计')">{{ getColumnValue(getSubtotal(uploadedResult.lines.slice(0, 3)), 'lfd').count }}</td>
                   <td class="clickable" @click="handleCellClick(getSubtotal(uploadedResult.lines.slice(0, 3)), 'trible', '小计')">{{ getColumnValue(getSubtotal(uploadedResult.lines.slice(0, 3)), 'trible').count }}</td>
                   <td class="clickable" @click="handleCellClick(getSubtotal(uploadedResult.lines.slice(0, 3)), 'overKey', '小计')">{{ getColumnValue(getSubtotal(uploadedResult.lines.slice(0, 3)), 'overKey').count }}</td>
@@ -2027,7 +2029,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                 <td class="clickable" @click="handleCellClick(getSubtotal(uploadedResult.lines), 'dh', '总计')">{{ getColumnValue(getSubtotal(uploadedResult.lines), 'dh').count }}</td>
                 <td class="clickable" @click="handleCellClick(getSubtotal(uploadedResult.lines), 'ms', '总计')">{{ getColumnValue(getSubtotal(uploadedResult.lines), 'ms').count }}</td>
                 <td class="clickable" @click="handleCellClick(getSubtotal(uploadedResult.lines), 'ss', '总计')">{{ getColumnValue(getSubtotal(uploadedResult.lines), 'ss').count }}</td>
-                <td class="clickable" @click="handleCellClick(getSubtotal(uploadedResult.lines), 'pd', '总计')">{{ getColumnValue(getSubtotal(uploadedResult.lines), 'pd').count }}</td>
+                <td class="clickable" @click="handleCellClick(getSubtotal(uploadedResult.lines), 'pd', '总计')">{{ getColumnValue(getSubtotal(uploadedResult.lines), 'pd', filterMiddleInPinky).count }}</td>
                 <td class="clickable" @click="handleCellClick(getSubtotal(uploadedResult.lines), 'lfd', '总计')">{{ getColumnValue(getSubtotal(uploadedResult.lines), 'lfd').count }}</td>
                 <td class="clickable" @click="handleCellClick(getSubtotal(uploadedResult.lines), 'trible', '总计')">{{ getColumnValue(getSubtotal(uploadedResult.lines), 'trible').count }}</td>
                 <td class="clickable" @click="handleCellClick(getSubtotal(uploadedResult.lines), 'overKey', '总计')">{{ getColumnValue(getSubtotal(uploadedResult.lines), 'overKey').count }}</td>
@@ -2095,7 +2097,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                 <th>左右互击</th>
                 <th>同指大跨</th>
                 <th>同指小跨</th>
-                <th>小指干扰</th>
+                <th><label class="th-checkbox-label"><input v-model="filterMiddleInPinky" type="checkbox" />小指干扰</label></th>
                 <th>错手</th>
                 <th>三连击</th>
                 <th>超标键位</th>
@@ -2112,7 +2114,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                   <td class="clickable" @click="handleWordCellClick(line, 'dh', `${line.start + 1}~${line.end}`)">{{ getWordColumnValue(line, 'dh').count }}</td>
                   <td class="clickable" @click="handleWordCellClick(line, 'ms', `${line.start + 1}~${line.end}`)">{{ getWordColumnValue(line, 'ms').count }}</td>
                   <td class="clickable" @click="handleWordCellClick(line, 'ss', `${line.start + 1}~${line.end}`)">{{ getWordColumnValue(line, 'ss').count }}</td>
-                  <td class="clickable" @click="handleWordCellClick(line, 'pd', `${line.start + 1}~${line.end}`)">{{ getWordColumnValue(line, 'pd').count }}</td>
+                  <td class="clickable" @click="handleWordCellClick(line, 'pd', `${line.start + 1}~${line.end}`)">{{ getWordColumnValue(line, 'pd', undefined, filterMiddleInPinky).count }}</td>
                   <td class="clickable" @click="handleWordCellClick(line, 'lfd', `${line.start + 1}~${line.end}`)">{{ getWordColumnValue(line, 'lfd').count }}</td>
                   <td class="clickable" @click="handleWordCellClick(line, 'trible', `${line.start + 1}~${line.end}`)">{{ getWordColumnValue(line, 'trible').count }}</td>
                   <td class="clickable" @click="handleWordCellClick(line, 'overKey', `${line.start + 1}~${line.end}`)">{{ getWordColumnValue(line, 'overKey').count }}</td>
@@ -2127,7 +2129,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                   <td class="clickable" @click="handleWordCellClick(getWordSubtotal(uploadedWordResult.lines.slice(0, 3)), 'dh', '小计')">{{ getWordColumnValue(getWordSubtotal(uploadedWordResult.lines.slice(0, 3)), 'dh').count }}</td>
                   <td class="clickable" @click="handleWordCellClick(getWordSubtotal(uploadedWordResult.lines.slice(0, 3)), 'ms', '小计')">{{ getWordColumnValue(getWordSubtotal(uploadedWordResult.lines.slice(0, 3)), 'ms').count }}</td>
                   <td class="clickable" @click="handleWordCellClick(getWordSubtotal(uploadedWordResult.lines.slice(0, 3)), 'ss', '小计')">{{ getWordColumnValue(getWordSubtotal(uploadedWordResult.lines.slice(0, 3)), 'ss').count }}</td>
-                  <td class="clickable" @click="handleWordCellClick(getWordSubtotal(uploadedWordResult.lines.slice(0, 3)), 'pd', '小计')">{{ getWordColumnValue(getWordSubtotal(uploadedWordResult.lines.slice(0, 3)), 'pd').count }}</td>
+                  <td class="clickable" @click="handleWordCellClick(getWordSubtotal(uploadedWordResult.lines.slice(0, 3)), 'pd', '小计')">{{ getWordColumnValue(getWordSubtotal(uploadedWordResult.lines.slice(0, 3)), 'pd', undefined, filterMiddleInPinky).count }}</td>
                   <td class="clickable" @click="handleWordCellClick(getWordSubtotal(uploadedWordResult.lines.slice(0, 3)), 'lfd', '小计')">{{ getWordColumnValue(getWordSubtotal(uploadedWordResult.lines.slice(0, 3)), 'lfd').count }}</td>
                   <td class="clickable" @click="handleWordCellClick(getWordSubtotal(uploadedWordResult.lines.slice(0, 3)), 'trible', '小计')">{{ getWordColumnValue(getWordSubtotal(uploadedWordResult.lines.slice(0, 3)), 'trible').count }}</td>
                   <td>-</td>
@@ -2143,7 +2145,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                   <td>{{ getWordComboWeightPercent(getWordSubtotal(uploadedWordResult.lines.slice(0, 3)), 'dh') }}%</td>
                   <td>{{ getWordComboWeightPercent(getWordSubtotal(uploadedWordResult.lines.slice(0, 3)), 'ms') }}%</td>
                   <td>{{ getWordComboWeightPercent(getWordSubtotal(uploadedWordResult.lines.slice(0, 3)), 'ss') }}%</td>
-                  <td>{{ getWordComboWeightPercent(getWordSubtotal(uploadedWordResult.lines.slice(0, 3)), 'pd') }}%</td>
+                  <td>{{ getWordComboWeightPercent(getWordSubtotal(uploadedWordResult.lines.slice(0, 3)), 'pd', filterMiddleInPinky) }}%</td>
                   <td>{{ getWordComboWeightPercent(getWordSubtotal(uploadedWordResult.lines.slice(0, 3)), 'lfd') }}%</td>
                   <td>{{ getWordWeightPercent(getWordSubtotal(uploadedWordResult.lines.slice(0, 3)), 'trible') }}%</td>
                   <td>-</td>
@@ -2159,7 +2161,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                 <td class="clickable" @click="handleWordCellClick(getWordSubtotal(uploadedWordResult.lines), 'dh', '总计')">{{ getWordColumnValue(getWordSubtotal(uploadedWordResult.lines), 'dh').count }}</td>
                 <td class="clickable" @click="handleWordCellClick(getWordSubtotal(uploadedWordResult.lines), 'ms', '总计')">{{ getWordColumnValue(getWordSubtotal(uploadedWordResult.lines), 'ms').count }}</td>
                 <td class="clickable" @click="handleWordCellClick(getWordSubtotal(uploadedWordResult.lines), 'ss', '总计')">{{ getWordColumnValue(getWordSubtotal(uploadedWordResult.lines), 'ss').count }}</td>
-                <td class="clickable" @click="handleWordCellClick(getWordSubtotal(uploadedWordResult.lines), 'pd', '总计')">{{ getWordColumnValue(getWordSubtotal(uploadedWordResult.lines), 'pd').count }}</td>
+                <td class="clickable" @click="handleWordCellClick(getWordSubtotal(uploadedWordResult.lines), 'pd', '总计')">{{ getWordColumnValue(getWordSubtotal(uploadedWordResult.lines), 'pd', undefined, filterMiddleInPinky).count }}</td>
                 <td class="clickable" @click="handleWordCellClick(getWordSubtotal(uploadedWordResult.lines), 'lfd', '总计')">{{ getWordColumnValue(getWordSubtotal(uploadedWordResult.lines), 'lfd').count }}</td>
                 <td class="clickable" @click="handleWordCellClick(getWordSubtotal(uploadedWordResult.lines), 'trible', '总计')">{{ getWordColumnValue(getWordSubtotal(uploadedWordResult.lines), 'trible').count }}</td>
                 <td class="clickable" @click="handleWordCellClick(getWordSubtotal(uploadedWordResult.lines), 'overKey', '总计')">{{ getWordColumnValue(getWordSubtotal(uploadedWordResult.lines), 'overKey').count }}</td>
@@ -2174,7 +2176,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                 <td>{{ getWordComboWeightPercent(getWordSubtotal(uploadedWordResult.lines), 'dh') }}%</td>
                 <td>{{ getWordComboWeightPercent(getWordSubtotal(uploadedWordResult.lines), 'ms') }}%</td>
                 <td>{{ getWordComboWeightPercent(getWordSubtotal(uploadedWordResult.lines), 'ss') }}%</td>
-                <td>{{ getWordComboWeightPercent(getWordSubtotal(uploadedWordResult.lines), 'pd') }}%</td>
+                <td>{{ getWordComboWeightPercent(getWordSubtotal(uploadedWordResult.lines), 'pd', filterMiddleInPinky) }}%</td>
                 <td>{{ getWordComboWeightPercent(getWordSubtotal(uploadedWordResult.lines), 'lfd') }}%</td>
                 <td>{{ getWordWeightPercent(getWordSubtotal(uploadedWordResult.lines), 'trible') }}%</td>
                 <td>-</td>
@@ -2216,7 +2218,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                 <th>键均当量</th>
                 <th>同指大跨</th>
                 <th>同指小跨</th>
-                <th>小指干扰</th>
+                <th><label class="th-checkbox-label"><input v-model="filterMiddleInPinky" type="checkbox" />小指干扰</label></th>
                 <th>错手</th>
                 <th>三连击</th>
               </tr>
@@ -2232,7 +2234,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                   <td>{{ fmt(getWordWeightedKeyEq(line)) }}</td>
                   <td class="clickable" @click="handleWordCellClick(line, 'ms', `${line.start + 1}~${line.end}`)">{{ getWordColumnValue(line, 'ms').count }}</td>
                   <td class="clickable" @click="handleWordCellClick(line, 'ss', `${line.start + 1}~${line.end}`)">{{ getWordColumnValue(line, 'ss').count }}</td>
-                  <td class="clickable" @click="handleWordCellClick(line, 'pd', `${line.start + 1}~${line.end}`)">{{ getWordColumnValue(line, 'pd').count }}</td>
+                  <td class="clickable" @click="handleWordCellClick(line, 'pd', `${line.start + 1}~${line.end}`)">{{ getWordColumnValue(line, 'pd', undefined, filterMiddleInPinky).count }}</td>
                   <td class="clickable" @click="handleWordCellClick(line, 'lfd', `${line.start + 1}~${line.end}`)">{{ getWordColumnValue(line, 'lfd').count }}</td>
                   <td class="clickable" @click="handleWordCellClick(line, 'trible', `${line.start + 1}~${line.end}`)">{{ getWordColumnValue(line, 'trible').count }}</td>
                 </tr>
@@ -2246,7 +2248,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                   <td>{{ fmt(getWordWeightedKeyEq(getWordSubtotal(uploadedMixedResult.lines.slice(0, 3)))) }}</td>
                   <td class="clickable" @click="handleWordCellClick(getWordSubtotal(uploadedMixedResult.lines.slice(0, 3)), 'ms', '小计')">{{ getWordColumnValue(getWordSubtotal(uploadedMixedResult.lines.slice(0, 3)), 'ms').count }}</td>
                   <td class="clickable" @click="handleWordCellClick(getWordSubtotal(uploadedMixedResult.lines.slice(0, 3)), 'ss', '小计')">{{ getWordColumnValue(getWordSubtotal(uploadedMixedResult.lines.slice(0, 3)), 'ss').count }}</td>
-                  <td class="clickable" @click="handleWordCellClick(getWordSubtotal(uploadedMixedResult.lines.slice(0, 3)), 'pd', '小计')">{{ getWordColumnValue(getWordSubtotal(uploadedMixedResult.lines.slice(0, 3)), 'pd').count }}</td>
+                  <td class="clickable" @click="handleWordCellClick(getWordSubtotal(uploadedMixedResult.lines.slice(0, 3)), 'pd', '小计')">{{ getWordColumnValue(getWordSubtotal(uploadedMixedResult.lines.slice(0, 3)), 'pd', undefined, filterMiddleInPinky).count }}</td>
                   <td class="clickable" @click="handleWordCellClick(getWordSubtotal(uploadedMixedResult.lines.slice(0, 3)), 'lfd', '小计')">{{ getWordColumnValue(getWordSubtotal(uploadedMixedResult.lines.slice(0, 3)), 'lfd').count }}</td>
                   <td class="clickable" @click="handleWordCellClick(getWordSubtotal(uploadedMixedResult.lines.slice(0, 3)), 'trible', '小计')">{{ getWordColumnValue(getWordSubtotal(uploadedMixedResult.lines.slice(0, 3)), 'trible').count }}</td>
                 </tr>
@@ -2260,7 +2262,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                   <td>-</td>
                   <td>{{ getWordComboWeightPercent(getWordSubtotal(uploadedMixedResult.lines.slice(0, 3)), 'ms') }}%</td>
                   <td>{{ getWordComboWeightPercent(getWordSubtotal(uploadedMixedResult.lines.slice(0, 3)), 'ss') }}%</td>
-                  <td>{{ getWordComboWeightPercent(getWordSubtotal(uploadedMixedResult.lines.slice(0, 3)), 'pd') }}%</td>
+                  <td>{{ getWordComboWeightPercent(getWordSubtotal(uploadedMixedResult.lines.slice(0, 3)), 'pd', filterMiddleInPinky) }}%</td>
                   <td>{{ getWordComboWeightPercent(getWordSubtotal(uploadedMixedResult.lines.slice(0, 3)), 'lfd') }}%</td>
                   <td>{{ getWordWeightPercent(getWordSubtotal(uploadedMixedResult.lines.slice(0, 3)), 'trible') }}%</td>
                 </tr>
@@ -2275,7 +2277,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                 <td>{{ fmt(getWordWeightedKeyEq(getWordSubtotal(uploadedMixedResult.lines))) }}</td>
                 <td class="clickable" @click="handleWordCellClick(getWordSubtotal(uploadedMixedResult.lines), 'ms', '总计')">{{ getWordColumnValue(getWordSubtotal(uploadedMixedResult.lines), 'ms').count }}</td>
                 <td class="clickable" @click="handleWordCellClick(getWordSubtotal(uploadedMixedResult.lines), 'ss', '总计')">{{ getWordColumnValue(getWordSubtotal(uploadedMixedResult.lines), 'ss').count }}</td>
-                <td class="clickable" @click="handleWordCellClick(getWordSubtotal(uploadedMixedResult.lines), 'pd', '总计')">{{ getWordColumnValue(getWordSubtotal(uploadedMixedResult.lines), 'pd').count }}</td>
+                <td class="clickable" @click="handleWordCellClick(getWordSubtotal(uploadedMixedResult.lines), 'pd', '总计')">{{ getWordColumnValue(getWordSubtotal(uploadedMixedResult.lines), 'pd', undefined, filterMiddleInPinky).count }}</td>
                 <td class="clickable" @click="handleWordCellClick(getWordSubtotal(uploadedMixedResult.lines), 'lfd', '总计')">{{ getWordColumnValue(getWordSubtotal(uploadedMixedResult.lines), 'lfd').count }}</td>
                 <td class="clickable" @click="handleWordCellClick(getWordSubtotal(uploadedMixedResult.lines), 'trible', '总计')">{{ getWordColumnValue(getWordSubtotal(uploadedMixedResult.lines), 'trible').count }}</td>
               </tr>
@@ -2289,7 +2291,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                 <td>-</td>
                 <td>{{ getWordComboWeightPercent(getWordSubtotal(uploadedMixedResult.lines), 'ms') }}%</td>
                 <td>{{ getWordComboWeightPercent(getWordSubtotal(uploadedMixedResult.lines), 'ss') }}%</td>
-                <td>{{ getWordComboWeightPercent(getWordSubtotal(uploadedMixedResult.lines), 'pd') }}%</td>
+                <td>{{ getWordComboWeightPercent(getWordSubtotal(uploadedMixedResult.lines), 'pd', filterMiddleInPinky) }}%</td>
                 <td>{{ getWordComboWeightPercent(getWordSubtotal(uploadedMixedResult.lines), 'lfd') }}%</td>
                 <td>{{ getWordWeightPercent(getWordSubtotal(uploadedMixedResult.lines), 'trible') }}%</td>
               </tr>
@@ -3102,6 +3104,23 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
   height: 16px;
   accent-color: var(--primary);
   cursor: pointer;
+}
+
+.th-checkbox-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  user-select: none;
+  font-weight: inherit;
+}
+
+.th-checkbox-label input[type="checkbox"] {
+  width: 12px;
+  height: 12px;
+  accent-color: var(--primary);
+  cursor: pointer;
+  flex-shrink: 0;
 }
 
 /* 方案名称表头 - 表格内部标题行 */
