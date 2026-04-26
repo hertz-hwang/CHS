@@ -683,11 +683,11 @@ export function evaluateScheme(
       
       // 计算当量
       if (keysLen < 2) {
-        // 1 码字：无法形成键值对，原始当量表当量为 0
+        // 1 码字：无法形成键值对，字当量为 0，键均当量视为 1（单键基准）
         item.ziEq = 0
-        item.keyEq = 0
+        item.keyEq = 1 * freq
         item.ziEqCombo = 0
-        item.keyEqCombo = 0
+        item.keyEqCombo = 1
         // 键魂模型对单键有首键定位成本，正常计算
         const ksEq = calcKeySoulEquivalence(fullCode)
         item.ksZiEq = ksEq * freq
@@ -891,9 +891,10 @@ export function getColumnValue(
  * 获取加权值
  */
 export function getWeightedValue(line: EvaluateLine, field: 'cl' | 'ziEq' | 'keyEq' | 'ksZiEq' | 'ksKeyEq'): number {
-  // 原始当量字段需排除一键字（无键对，当量强制为 0，不应压低均值）
+  // ziEq 排除一键字（无键对，字当量强制为 0，不应压低均值）
+  // keyEq 不排除，1 码字键均当量视为 1，是有意义的非零值
   // 键魂字段不排除，单键有首键定位成本，是有意义的非零值
-  const excludeSingleKey = field === 'ziEq' || field === 'keyEq'
+  const excludeSingleKey = field === 'ziEq'
   let total = 0
   let freqDenom = 0
   for (const item of line.items) {
