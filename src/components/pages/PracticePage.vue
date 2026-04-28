@@ -22,6 +22,18 @@ interface PracticeCard {
 type Record = [count: number, index: number]
 
 const LS_KEY_ROOT = 'chars_hijack_practice_records'
+const LS_KEY_IMPORTED = 'chars_hijack_imported_roots'
+const LS_KEY_FONT = 'chars_hijack_root_font'
+
+// ==================== 导入字根数据 ====================
+interface ImportedCard { root: string; code: string; freq: number }
+const importedCards = shallowRef<ImportedCard[] | null>(null)
+
+// ==================== 字体设置 ====================
+const DEFAULT_FONT = `PingFang SC, Plangothic P1, TH-Tshyn-P0, TH-Tshyn-P1, TH-Tshyn-P2, TH-Tshyn-P16, ChaiPUA-0.2.7, CHS_PUA`
+const rootFont = ref(DEFAULT_FONT)
+const appliedFont = ref(DEFAULT_FONT)
+const showFontInput = ref(false)
 
 // 计算字根的字频加权分数（取相关汉字字频之和的对数）
 function calcFreqScore(chars: string[]): number {
@@ -37,6 +49,25 @@ function calcFreqScore(chars: string[]): number {
 // 获取所有有编码的字根，按字频加权降序排序
 const allCards = computed<PracticeCard[]>(() => {
   rootsVersion.value // 依赖字根版本
+
+  // 优先使用导入数据
+  if (importedCards.value) {
+    return importedCards.value.map(({ root, code, freq }) => {
+      const allRelatedChars = engine.findCharsDeep(root)
+      const sortedByFreq = [...allRelatedChars].sort((a, b) => {
+        const freqA = engine.freq.get(a) || 0
+        const freqB = engine.freq.get(b) || 0
+        return freqB - freqA
+      })
+      return {
+        root,
+        code,
+        relatedChars: sortedByFreq.slice(0, 10),
+        freqScore: freq
+      }
+    })
+  }
+
   const cards: PracticeCard[] = []
 
   for (const [root, rootCode] of engine.rootCodes) {
@@ -52,7 +83,7 @@ const allCards = computed<PracticeCard[]>(() => {
       return freqB - freqA
     })
     const relatedChars = sortedByFreq.slice(0, 10)
-    
+
     // 计算字频加权分数（使用所有相关汉字）
     const freqScore = calcFreqScore(allRelatedChars)
 
@@ -143,6 +174,94 @@ function saveRecords() {
   try {
     localStorage.setItem(LS_KEY_ROOT, JSON.stringify(records.value))
   } catch {}
+}
+
+// ==================== 导入 TSV ====================
+function parseTsv(text: string): ImportedCard[] {
+  const result: ImportedCard[] = []
+  for (const line of text.split('\n')) {
+    const parts = line.trim().split('\t')
+    if (parts.length < 2) continue
+    const [root, code, freqStr] = parts
+    if (!root || !code) continue
+    const freq = freqStr ? (parseInt(freqStr) || 0) : 0
+    result.push({ root: root.trim(), code: code.trim(), freq })
+  }
+  return result
+}
+
+function saveImportedCards() {
+  try { localStorage.setItem(LS_KEY_IMPORTED, JSON.stringify(importedCards.value)) } catch {}
+}
+
+function loadImportedCards() {
+  try {
+    const s = localStorage.getItem(LS_KEY_IMPORTED)
+    if (s) importedCards.value = JSON.parse(s)
+  } catch {}
+}
+
+function clearImportedCards() {
+  importedCards.value = null
+  localStorage.removeItem(LS_KEY_IMPORTED)
+  initRecords()
+  progress.value = scanProgress()
+}
+
+function handleImportFile(e: Event) {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+  const reader = new FileReader()
+  reader.onload = (ev) => {
+    const text = ev.target?.result as string
+    const cards = parseTsv(text)
+    if (cards.length === 0) return
+    importedCards.value = cards
+    saveImportedCards()
+    initRecords()
+    progress.value = scanProgress()
+  }
+  reader.readAsText(file)
+  // 重置 input，允许重复导入同一文件
+  input.value = ''
+}
+
+// ==================== 字体设置 ====================
+const rootCharStyle = computed(() => {
+  // 支持多字体：按逗号分割，每个字体名单独加引号，最后追加 sans-serif 兜底
+  const families = appliedFont.value
+    .split(',')
+    .map(f => f.trim())
+    .filter(Boolean)
+    .map(f => `'${f}'`)
+    .join(', ')
+  return families ? { fontFamily: `${families}, sans-serif` } : {}
+})
+
+function loadFont() {
+  try {
+    const s = localStorage.getItem(LS_KEY_FONT)
+    if (s) { appliedFont.value = s; rootFont.value = s }
+  } catch {}
+}
+
+function applyFont() {
+  appliedFont.value = rootFont.value.trim()
+  try {
+    if (appliedFont.value) {
+      localStorage.setItem(LS_KEY_FONT, appliedFont.value)
+    } else {
+      localStorage.removeItem(LS_KEY_FONT)
+    }
+  } catch {}
+  showFontInput.value = false
+}
+
+function clearFont() {
+  rootFont.value = DEFAULT_FONT
+  appliedFont.value = DEFAULT_FONT
+  localStorage.removeItem(LS_KEY_FONT)
 }
 
 // 扫描进度
@@ -646,6 +765,10 @@ watch(userInput, handleCharInput)
 
 // 初始化
 onMounted(() => {
+  // 加载导入数据和字体设置
+  loadImportedCards()
+  loadFont()
+
   // 字根练习初始化
   initRecords()
   progress.value = scanProgress()
@@ -719,6 +842,33 @@ watch(configVersion, () => {
             <input type="checkbox" v-model="spaceForHint" />
             <span>空格提示</span>
           </label>
+          <!-- 导入 TSV -->
+          <label class="action-btn" :class="{ 'active': importedCards }" title="导入 TSV 字根练习">
+            <Icon name="import" :size="14" />
+            <input type="file" accept=".tsv,.txt" @change="handleImportFile" style="display:none" />
+          </label>
+          <!-- 已导入时显示清除按钮 -->
+          <button v-if="importedCards" class="action-btn danger" @click="clearImportedCards" title="清除导入数据（恢复引擎字根）">
+            <Icon name="close" :size="14" />
+          </button>
+          <!-- 字体设置 -->
+          <div class="font-setting">
+            <button class="action-btn" :class="{ 'active': appliedFont !== DEFAULT_FONT }" @click="showFontInput = !showFontInput" title="设置字根显示字体">
+              字
+            </button>
+            <div v-if="showFontInput" class="font-input-popup">
+              <input
+                v-model="rootFont"
+                type="text"
+                placeholder="字体名称，多个用逗号分隔"
+                class="font-input"
+                @keydown.enter="applyFont"
+                autofocus
+              />
+              <button class="font-apply-btn" @click="applyFont">应用</button>
+              <button v-if="appliedFont !== DEFAULT_FONT" class="font-clear-btn" @click="clearFont">重置</button>
+            </div>
+          </div>
           <button class="reset-btn" @click="restartRoot" title="重置进度">
             <Icon name="refresh" :size="14" />
           </button>
@@ -735,6 +885,7 @@ watch(configVersion, () => {
           <div
             class="root-char"
             :class="[getRootFontClass(currentCard.root), { 'shake': !isCorrect }]"
+            :style="rootCharStyle"
           >
             {{ displayRoot(currentCard.root) }}
           </div>
@@ -1053,6 +1204,108 @@ watch(configVersion, () => {
 .reset-btn:hover {
   background: var(--bg3);
   color: var(--text2);
+}
+
+/* 通用操作按钮（导入、字体等） */
+.action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  color: var(--text3);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.action-btn:hover {
+  background: var(--bg3);
+  color: var(--text2);
+}
+
+.action-btn.active {
+  color: var(--primary);
+  background: var(--primary-bg);
+}
+
+.action-btn.danger:hover {
+  background: color-mix(in srgb, var(--danger) 10%, var(--bg3));
+  color: var(--danger);
+}
+
+/* 字体设置 */
+.font-setting {
+  position: relative;
+}
+
+.font-input-popup {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  z-index: 10;
+  white-space: nowrap;
+}
+
+.font-input {
+  width: 860px;
+  padding: 5px 10px;
+  font-size: 13px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.font-input:focus {
+  border-color: var(--primary);
+}
+
+.font-apply-btn {
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  color: white;
+  background: var(--primary);
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.font-apply-btn:hover {
+  background: color-mix(in srgb, var(--primary) 85%, black);
+}
+
+.font-clear-btn {
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text2);
+  background: var(--bg3);
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.font-clear-btn:hover {
+  background: color-mix(in srgb, var(--danger) 10%, var(--bg3));
+  color: var(--danger);
 }
 
 .progress-bar {
