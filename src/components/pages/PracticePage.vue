@@ -30,7 +30,7 @@ interface ImportedCard { root: string; code: string; freq: number }
 const importedCards = shallowRef<ImportedCard[] | null>(null)
 
 // ==================== 字体设置 ====================
-const DEFAULT_FONT = `PingFang SC, Plangothic P1, TH-Tshyn-P0, TH-Tshyn-P1, TH-Tshyn-P2, TH-Tshyn-P16, ChaiPUA-0.2.7, CHS_PUA`
+const DEFAULT_FONT = `CHS_PUA, ChaiPUA-0.2.7, PingFang SC, Plangothic P1, TH-Tshyn-P0, TH-Tshyn-P1, TH-Tshyn-P2, TH-Tshyn-P16`
 const rootFont = ref(DEFAULT_FONT)
 const appliedFont = ref(DEFAULT_FONT)
 const showFontInput = ref(false)
