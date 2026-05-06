@@ -10,20 +10,19 @@ type TabType = 'root' | 'char'
 const activeTab = shallowRef<TabType>('root')
 
 // ==================== 字根练习部分 ====================
-// 练习卡片类型
 interface PracticeCard {
-  root: string       // 字根
-  code: string       // 完整编码
-  relatedChars: string[]  // 相关汉字
-  freqScore: number  // 字频加权分数
+  root: string
+  code: string
+  relatedChars: string[]
+  freqScore: number
 }
 
-// 练习记录类型 [练习次数, 原始索引]
-type Record = [count: number, index: number]
-
-const LS_KEY_ROOT = 'chars_hijack_practice_records'
+// ==================== localStorage 键 ====================
+const LS_KEY_LEITNER = 'chars_hijack_practice_records'
+const LS_KEY_FSRS = 'chars_hijack_fsrs_v1'
 const LS_KEY_IMPORTED = 'chars_hijack_imported_roots'
 const LS_KEY_FONT = 'chars_hijack_root_font'
+const LS_KEY_PRACTICE_MODE = 'chars_hijack_practice_mode'
 
 // ==================== 导入字根数据 ====================
 interface ImportedCard { root: string; code: string; freq: number }
@@ -35,145 +34,338 @@ const rootFont = ref(DEFAULT_FONT)
 const appliedFont = ref(DEFAULT_FONT)
 const showFontInput = ref(false)
 
-// 计算字根的字频加权分数（取相关汉字字频之和的对数）
 function calcFreqScore(chars: string[]): number {
   let sum = 0
   for (const ch of chars) {
     const f = engine.freq.get(ch)
     if (f) sum += f
   }
-  // 使用对数平滑，避免极端差异
   return sum > 0 ? Math.log10(sum) : 0
 }
 
-// 获取所有有编码的字根，按字频加权降序排序
 const allCards = computed<PracticeCard[]>(() => {
-  rootsVersion.value // 依赖字根版本
+  rootsVersion.value
 
-  // 优先使用导入数据
   if (importedCards.value) {
     return importedCards.value.map(({ root, code, freq }) => {
       const allRelatedChars = engine.findCharsDeep(root)
-      const sortedByFreq = [...allRelatedChars].sort((a, b) => {
-        const freqA = engine.freq.get(a) || 0
-        const freqB = engine.freq.get(b) || 0
-        return freqB - freqA
-      })
-      return {
-        root,
-        code,
-        relatedChars: sortedByFreq.slice(0, 10),
-        freqScore: freq
-      }
+      const sortedByFreq = [...allRelatedChars].sort((a, b) => (engine.freq.get(b) || 0) - (engine.freq.get(a) || 0))
+      return { root, code, relatedChars: sortedByFreq.slice(0, 10), freqScore: freq }
     })
   }
 
   const cards: PracticeCard[] = []
-
   for (const [root, rootCode] of engine.rootCodes) {
     const code = (rootCode.main || '') + (rootCode.sub || '') + (rootCode.supplement || '')
     if (!code) continue
-
-    // 查找包含该字根的汉字（按字频降序排序，取前10个用于显示）
     const allRelatedChars = engine.findCharsDeep(root)
-    // 按字频降序排序
-    const sortedByFreq = [...allRelatedChars].sort((a, b) => {
-      const freqA = engine.freq.get(a) || 0
-      const freqB = engine.freq.get(b) || 0
-      return freqB - freqA
-    })
-    const relatedChars = sortedByFreq.slice(0, 10)
-
-    // 计算字频加权分数（使用所有相关汉字）
-    const freqScore = calcFreqScore(allRelatedChars)
-
-    cards.push({
-      root,
-      code,
-      relatedChars,
-      freqScore
-    })
+    const sortedByFreq = [...allRelatedChars].sort((a, b) => (engine.freq.get(b) || 0) - (engine.freq.get(a) || 0))
+    cards.push({ root, code, relatedChars: sortedByFreq.slice(0, 10), freqScore: calcFreqScore(allRelatedChars) })
   }
-
-  // 按字频加权分数降序排序（高频字根优先）
   cards.sort((a, b) => b.freqScore - a.freqScore)
-
   return cards
 })
 
-// 练习记录
-const records = shallowRef<Record[]>([])
-const progress = shallowRef(0)
+// ==================== 共享练习状态 ====================
+const practiceMode = shallowRef<'intensive'|'daily'>('intensive')
 const currentCard = shallowRef<PracticeCard | null>(null)
-const showHint = shallowRef(true)  // 是否显示答案提示
+const currentCardIdx = shallowRef(-1)
+const showHint = shallowRef(false)
 const userKeys = shallowRef('')
 const isCorrect = shallowRef(true)
 const showComplete = shallowRef(false)
-const spaceForHint = shallowRef(true)  // 空格键提示编码（默认勾选）
-const usedHint = shallowRef(false)     // 当前卡片是否使用了提示
-const isHintRequested = shallowRef(false)  // 用户主动请求提示
+const spaceForHint = shallowRef(true)
+const usedHint = shallowRef(false)
+const isHintRequested = shallowRef(false)
+const nextReviewText = shallowRef('')
+const isTransitioning = shallowRef(false)
 
-// 初始化记录
-function initRecords() {
-  const cards = allCards.value
-  if (cards.length === 0) return
+// ==================== 时间评级 ====================
+const cardShownAt = shallowRef(0)
+const lastElapsed = shallowRef(0)
+const lastTimeRating = shallowRef<0|2|3>(0) // 0=未评级, 2=Hard, 3=Good
 
-  // 从 localStorage 加载记录
-  let savedRecords: Record[] | null = null
-  try {
-    const saved = localStorage.getItem(LS_KEY_ROOT)
-    if (saved) {
-      savedRecords = JSON.parse(saved)
-    }
-  } catch {}
-
-  if (savedRecords && savedRecords.length === cards.length) {
-    records.value = savedRecords
-  } else {
-    // 创建新记录
-    records.value = cards.map((_, i) => [-1, i] as Record)
-  }
-
-  // 排序：已完成的卡片放后面
-  records.value.sort((a, b) => {
-    if (a[0] === 8 && b[0] < 8) return 1
-    if (b[0] === 8 && a[0] < 8) return -1
-    return 0
-  })
-
-  updateCurrentCard()
+function computeTimeRating(codeLength: number, elapsedMs: number): 2|3 {
+  const easyThreshold = 2000 + codeLength * 300
+  return elapsedMs <= easyThreshold + 2000 ? 3 : 2
 }
 
-// 更新当前卡片
-function updateCurrentCard() {
+// ==================== 集中练习：Leitner 算法 ====================
+// records[i] = [count, cardIndex]，count: -1=新卡, 0-5=学习中, 8=已掌握
+const MOVE_STEPS = [3, 9, 21, 36, 60, 100]
+const INTERLEAVE_RATIO = 5
+const leitnerRecords = shallowRef<[number, number][]>([])
+const interleaveCounter = shallowRef(0)
+const currentLeitnerRecordIdx = shallowRef(0)
+
+const leitnerProgress = computed(() => leitnerRecords.value.filter(r => r[0] > 1).length)
+
+function saveLeitner() {
+  try { localStorage.setItem(LS_KEY_LEITNER, JSON.stringify(leitnerRecords.value)) } catch {}
+}
+
+function initLeitner() {
   const cards = allCards.value
-  if (cards.length === 0 || records.value.length === 0) {
+  if (cards.length === 0) return
+  try {
+    const raw = localStorage.getItem(LS_KEY_LEITNER)
+    if (raw) {
+      const saved = JSON.parse(raw)
+      if (Array.isArray(saved) && saved.length === cards.length) {
+        leitnerRecords.value = saved
+        if (practiceMode.value === 'intensive') updateCurrentCardLeitner()
+        return
+      }
+    }
+  } catch {}
+  leitnerRecords.value = cards.map((_, i) => [-1, i] as [number, number])
+  saveLeitner()
+  if (practiceMode.value === 'intensive') updateCurrentCardLeitner()
+}
+
+function pickNextLeitnerCard(): number {
+  const records = leitnerRecords.value
+  if (records.length === 0 || records[0][0] === 8) return -1
+
+  interleaveCounter.value++
+  if (interleaveCounter.value > INTERLEAVE_RATIO) {
+    const reviewIdx = records.findIndex((r, i) => i > 0 && r[0] >= 1 && r[0] < 8)
+    if (reviewIdx > 0) {
+      interleaveCounter.value = 0
+      return reviewIdx
+    }
+  }
+  return 0
+}
+
+function updateCurrentCardLeitner() {
+  const records = leitnerRecords.value
+  if (records.length === 0 || records[0][0] === 8) {
     currentCard.value = null
+    currentCardIdx.value = -1
+    showComplete.value = true
     return
   }
-
-  const idx = records.value[0][1]
-  currentCard.value = cards[idx]
-
-  // 如果上一张卡片用户使用了提示，新卡片不自动显示提示
-  // 把新卡片标记为已见过
-  if (usedHint.value && records.value[0][0] === -1) {
-    records.value[0][0] = 0
+  const pickedIdx = pickNextLeitnerCard()
+  if (pickedIdx < 0) {
+    currentCard.value = null
+    currentCardIdx.value = -1
+    showComplete.value = true
+    return
   }
-
-  // 新卡片（count === -1）时显示提示，否则不显示
-  showHint.value = records.value[0][0] === -1
-  // 重置状态
+  currentLeitnerRecordIdx.value = pickedIdx
+  const [count, idx] = records[pickedIdx]
+  currentCardIdx.value = idx
+  currentCard.value = allCards.value[idx]
+  showHint.value = count === -1
   usedHint.value = false
   isHintRequested.value = false
   isCorrect.value = true
+  nextReviewText.value = ''
+  lastTimeRating.value = 0
+  lastElapsed.value = 0
+  cardShownAt.value = Date.now()
 }
 
-// 保存记录
-function saveRecords() {
+function answerLeitner(correct: boolean) {
+  if (isTransitioning.value) return
+  const records = leitnerRecords.value.map(r => [r[0], r[1]] as [number, number])
+  if (records.length === 0) return
+  const recIdx = currentLeitnerRecordIdx.value
+  const rec = records[recIdx]
+
+  if (!correct) {
+    rec[0] = -1
+    showHint.value = true
+    usedHint.value = true
+    isCorrect.value = false
+    leitnerRecords.value = records
+    saveLeitner()
+    return
+  }
+
+  isTransitioning.value = true
+  isCorrect.value = true
+  rec[0] = rec[0] + 1
+
+  // 时间评级：慢速正确步长减半
+  const elapsed = Date.now() - cardShownAt.value
+  const rating = computeTimeRating(currentCard.value!.code.length, elapsed)
+  lastElapsed.value = elapsed
+  lastTimeRating.value = rating
+
+  const maxIndex = records.length - 1
+  let targetPos: number
+  const count = rec[0]
+  if (count > MOVE_STEPS.length - 1) {
+    rec[0] = 8
+    targetPos = maxIndex
+  } else {
+    const baseStep = MOVE_STEPS[count]
+    const step = rating === 2
+      ? Math.max(1, Math.floor(baseStep / 2))
+      : baseStep
+    targetPos = Math.min(recIdx + step, maxIndex)
+  }
+
+  // 从当前位置移动到目标位置
+  records.splice(recIdx, 1)
+  records.splice(targetPos > recIdx ? targetPos - 1 : targetPos, 0, rec)
+
+  records.sort((a, b) => {
+    if (a[0] === 8 && b[0] !== 8) return 1
+    if (b[0] === 8 && a[0] !== 8) return -1
+    return 0
+  })
+
+  leitnerRecords.value = records
+  saveLeitner()
+
+  triggerConfusionFlash()
+
+  setTimeout(() => {
+    isTransitioning.value = false
+    confusionFlash.value = null
+    if (leitnerRecords.value.length === 0 || leitnerRecords.value[0][0] === 8) {
+      showComplete.value = true
+    } else {
+      updateCurrentCardLeitner()
+    }
+  }, 1200)
+}
+
+function restartLeitner() {
+  if (!confirm('重置进度需要清空数据，无法撤回，您确定继续吗？')) return
+  leitnerRecords.value = allCards.value.map((_, i) => [-1, i] as [number, number])
+  showComplete.value = false
+  saveLeitner()
+  updateCurrentCardLeitner()
+  focusRootInput()
+}
+
+// ==================== 每日复习：FSRS-4.5 算法 ====================
+interface FSRSCard {
+  s: number
+  d: number
+  due: number
+  state: 0|1|2|3
+  lapses: number
+  reps: number
+  step: number
+}
+
+const W = [0.4072,1.1829,3.1262,15.4722,7.2102,0.5316,1.0651,0.0589,
+           1.5330,0.1544,1.0070,1.9395,0.1100,0.2900,2.2700,0.2500,2.9898,0.5100,0.3400]
+const DESIRED_RETENTION = 0.9
+const LEARNING_STEPS_MIN = [1, 10]
+const RELEARNING_STEPS_MIN = [10]
+
+function fsrsInitS(g: 1|2|3): number { return W[g - 1] }
+function fsrsInitD(g: 1|2|3): number {
+  return Math.min(10, Math.max(1, W[4] - Math.exp(W[5] * (g - 1)) + 1))
+}
+function fsrsR(s: number, elapsedDays: number): number {
+  return Math.pow(1 + elapsedDays / (9 * s), -1)
+}
+function fsrsInterval(s: number): number {
+  return Math.max(1, Math.round(9 * s * (1 / DESIRED_RETENTION - 1)))
+}
+function fsrsSRecall(d: number, s: number, r: number, g: 1|2|3): number {
+  const hardPenalty = g === 2 ? W[15] : 1
+  return s * (Math.exp(W[8]) * (11 - d) * Math.pow(s, -W[9]) * (Math.exp(W[10] * (1 - r)) - 1) * hardPenalty + 1)
+}
+function fsrsSForget(d: number, s: number, r: number): number {
+  return Math.max(0.1, W[11] * Math.pow(d, -W[12]) * (Math.pow(s + 1, W[13]) - 1) * Math.exp(W[14] * (1 - r)))
+}
+function fsrsUpdateD(d: number, g: 1|2|3): number {
+  const d0_4 = fsrsInitD(3)  // mean reversion target
+  const delta = -W[6] * (g - 3)
+  const dNew = d + delta * (10 - d) / 9
+  return Math.min(10, Math.max(1, W[7] * d0_4 + (1 - W[7]) * dNew))
+}
+
+function newFSRSCard(): FSRSCard {
+  return { s: 0, d: 0, due: 0, state: 0, lapses: 0, reps: 0, step: 0 }
+}
+
+const fsrsCards = shallowRef<FSRSCard[]>([])
+const queue = shallowRef<number[]>([])
+const dailyNewLimit = ref(20)
+const daysOffset = ref(0)
+
+const effectiveNow = computed(() => Date.now() + daysOffset.value * 86400000)
+
+const masteredCount = computed(() => {
+  return fsrsCards.value.filter(c => c.state === 2 && fsrsInterval(c.s) >= 21).length
+})
+const dueCount = computed(() => {
+  const now = effectiveNow.value
+  return fsrsCards.value.filter(c => (c.state === 2 || c.state === 3) && c.due <= now).length
+})
+const newCount = computed(() => fsrsCards.value.filter(c => c.state === 0).length)
+
+function saveFSRS() {
+  try { localStorage.setItem(LS_KEY_FSRS, JSON.stringify(fsrsCards.value)) } catch {}
+}
+
+function initFSRS() {
+  const cards = allCards.value
+  if (cards.length === 0) return
   try {
-    localStorage.setItem(LS_KEY_ROOT, JSON.stringify(records.value))
+    const raw = localStorage.getItem(LS_KEY_FSRS)
+    if (raw) {
+      const saved: FSRSCard[] = JSON.parse(raw)
+      if (saved.length === cards.length) {
+        fsrsCards.value = saved
+        if (practiceMode.value === 'daily') { buildQueue(); updateCurrentCardFSRS() }
+        return
+      }
+    }
   } catch {}
+  fsrsCards.value = cards.map(() => newFSRSCard())
+  saveFSRS()
+  if (practiceMode.value === 'daily') { buildQueue(); updateCurrentCardFSRS() }
+}
+
+function buildQueue() {
+  const now = effectiveNow.value
+  const cards = fsrsCards.value
+  const overdue: number[] = []
+  const learning: number[] = []
+  const newCards: number[] = []
+
+  for (let i = 0; i < cards.length; i++) {
+    const c = cards[i]
+    if (c.state === 1 || c.state === 3) learning.push(i)
+    else if (c.state === 2 && c.due <= now) overdue.push(i)
+    else if (c.state === 0) newCards.push(i)
+  }
+
+  learning.sort((a, b) => cards[a].due - cards[b].due)
+  overdue.sort((a, b) => cards[a].due - cards[b].due)
+  queue.value = [...learning, ...overdue, ...newCards.slice(0, dailyNewLimit.value)]
+}
+
+function updateCurrentCardFSRS() {
+  const cards = allCards.value
+  if (cards.length === 0 || queue.value.length === 0) {
+    currentCard.value = null
+    currentCardIdx.value = -1
+    if (queue.value.length === 0) showComplete.value = true
+    return
+  }
+  const idx = queue.value[0]
+  currentCardIdx.value = idx
+  currentCard.value = cards[idx]
+  const fc = fsrsCards.value[idx]
+  showHint.value = fc.state === 0
+  usedHint.value = false
+  isHintRequested.value = false
+  isCorrect.value = true
+  nextReviewText.value = ''
+  lastTimeRating.value = 0
+  lastElapsed.value = 0
+  cardShownAt.value = Date.now()
 }
 
 // ==================== 导入 TSV ====================
@@ -204,8 +396,8 @@ function loadImportedCards() {
 function clearImportedCards() {
   importedCards.value = null
   localStorage.removeItem(LS_KEY_IMPORTED)
-  initRecords()
-  progress.value = scanProgress()
+  initLeitner()
+  initFSRS()
 }
 
 function handleImportFile(e: Event) {
@@ -219,11 +411,10 @@ function handleImportFile(e: Event) {
     if (cards.length === 0) return
     importedCards.value = cards
     saveImportedCards()
-    initRecords()
-    progress.value = scanProgress()
+    initLeitner()
+    initFSRS()
   }
   reader.readAsText(file)
-  // 重置 input，允许重复导入同一文件
   input.value = ''
 }
 
@@ -264,119 +455,201 @@ function clearFont() {
   localStorage.removeItem(LS_KEY_FONT)
 }
 
-// 扫描进度
-function scanProgress(): number {
-  return records.value.reduce((p, c) => p + Number(c[0] > 1), 0)
+// FSRS 调度：处理一次答题
+function scheduleFSRS(idx: number, rating: 1|2|3) {
+  const now = effectiveNow.value
+  const c = { ...fsrsCards.value[idx] }
+  c.reps++
+
+  if (c.state === 0) {
+    c.s = fsrsInitS(rating)
+    c.d = fsrsInitD(rating)
+    if (rating === 1) {
+      c.step = 0
+      c.due = now + LEARNING_STEPS_MIN[0] * 60000
+    } else {
+      c.step = 1
+      c.due = now + (LEARNING_STEPS_MIN[1] ?? LEARNING_STEPS_MIN[0]) * 60000
+    }
+    c.state = 1
+  } else if (c.state === 1) {
+    if (rating === 1) {
+      c.step = 0
+      c.due = now + LEARNING_STEPS_MIN[0] * 60000
+    } else {
+      c.step++
+      if (c.step >= LEARNING_STEPS_MIN.length) {
+        c.state = 2
+        c.due = now + fsrsInterval(c.s) * 86400000
+      } else {
+        c.due = now + LEARNING_STEPS_MIN[c.step] * 60000
+      }
+    }
+  } else if (c.state === 2) {
+    const elapsedDays = (now - (c.due - fsrsInterval(c.s) * 86400000)) / 86400000
+    const r = fsrsR(c.s, Math.max(0, elapsedDays))
+    if (rating === 1) {
+      c.lapses++
+      c.s = fsrsSForget(c.d, c.s, r)
+      c.d = fsrsUpdateD(c.d, rating)
+      c.state = 3
+      c.step = 0
+      c.due = now + RELEARNING_STEPS_MIN[0] * 60000
+    } else {
+      c.s = fsrsSRecall(c.d, c.s, r, rating)
+      c.d = fsrsUpdateD(c.d, rating)
+      c.due = now + fsrsInterval(c.s) * 86400000
+    }
+  } else if (c.state === 3) {
+    if (rating === 1) {
+      c.step = 0
+      c.due = now + RELEARNING_STEPS_MIN[0] * 60000
+    } else {
+      c.step++
+      if (c.step >= RELEARNING_STEPS_MIN.length) {
+        c.state = 2
+        c.due = now + fsrsInterval(c.s) * 86400000
+      } else {
+        c.due = now + RELEARNING_STEPS_MIN[c.step] * 60000
+      }
+    }
+  }
+
+  const updated = [...fsrsCards.value]
+  updated[idx] = c
+  fsrsCards.value = updated
+  saveFSRS()
+  return c
 }
 
-// 回答处理
-const moveSteps = [3, 9, 21, 36, 60, 100]
+function formatNextReview(c: FSRSCard): string {
+  if (c.state === 1 || c.state === 3) {
+    const mins = Math.round((c.due - effectiveNow.value) / 60000)
+    return mins <= 1 ? '1 分钟后' : `${mins} 分钟后`
+  }
+  const days = fsrsInterval(c.s)
+  return days === 1 ? '明天' : `${days} 天后`
+}
 
-function answer(correct: boolean) {
+function answerFSRS(correct: boolean) {
+  if (isTransitioning.value) return
+  const idx = currentCardIdx.value
+  if (idx < 0 || !currentCard.value) return
+
   if (!correct) {
-    const currentCount = records.value[0][0]
-    // 如果卡片已完成（count >= 2 表示已计入进度），需要减少进度
-    if (currentCount >= 2 && currentCount < 8) {
-      progress.value -= 1
-    } else if (currentCount === 8) {
-      // 已标记为完成的卡片答错，减少进度并重置计数
-      progress.value -= 1
-      records.value[0][0] = 0
-    }
-    // 答错后显示编码提示，标记使用了提示
+    const updated = scheduleFSRS(idx, 1)
     showHint.value = true
     usedHint.value = true
-    saveRecords()
+    lastTimeRating.value = 0
+    void updated
     return
   }
 
-  const firstRecord = records.value[0]
+  // 时间评级
+  const elapsed = Date.now() - cardShownAt.value
+  const rating = computeTimeRating(currentCard.value.code.length, elapsed)
+  lastElapsed.value = elapsed
+  lastTimeRating.value = rating
 
-  // 如果使用了提示，这次练习不计入 count，只移动卡片
-  if (!usedHint.value) {
-    const firstCount = ++firstRecord[0]
+  const updated = scheduleFSRS(idx, rating)
 
-    if (firstCount === 2) {
-      progress.value += 1
-    }
+  isTransitioning.value = true
+  nextReviewText.value = formatNextReview(updated)
 
-    const maxIndex = allCards.value.length - 1
-    const maxMoveStepsIndex = moveSteps.length - 1
+  const newQueue = queue.value.slice(1)
+  if (updated.state === 1 || updated.state === 3) {
+    const insertAt = newQueue.findIndex(i => fsrsCards.value[i].due > updated.due)
+    if (insertAt === -1) newQueue.push(idx)
+    else newQueue.splice(insertAt, 0, idx)
+  }
+  queue.value = newQueue
 
-    // 计算移动步数
-    let step = 0
-    if (firstCount > maxMoveStepsIndex) {
-      firstRecord[0] = 8
-      step = maxIndex
+  triggerConfusionFlash()
+
+  setTimeout(() => {
+    isTransitioning.value = false
+    confusionFlash.value = null
+    if (queue.value.length === 0) {
+      showComplete.value = true
     } else {
-      step = moveSteps[firstCount]
-      if (step > maxIndex) step = maxIndex
+      updateCurrentCardFSRS()
     }
+  }, 1200)
+}
 
-    // 移动卡片
-    records.value.copyWithin(0, 1, step + 1)
-    records.value[step] = firstRecord
-  } else {
-    // 使用了提示，只移动到后面几个位置
-    const step = Math.min(3, allCards.value.length - 1)
-    records.value.copyWithin(0, 1, step + 1)
-    records.value[step] = firstRecord
+function restartFSRS() {
+  if (!confirm('重置进度需要清空数据，无法撤回，您确定继续吗？')) return
+  fsrsCards.value = allCards.value.map(() => newFSRSCard())
+  showComplete.value = false
+  saveFSRS()
+  buildQueue()
+  updateCurrentCardFSRS()
+  focusRootInput()
+}
+
+// ==================== 模式分发 ====================
+function answer(correct: boolean) {
+  if (practiceMode.value === 'intensive') answerLeitner(correct)
+  else answerFSRS(correct)
+}
+
+// ==================== 混淆字根 ====================
+const confusableGroups = computed<Map<string, PracticeCard[]>>(() => {
+  const groups = new Map<string, PracticeCard[]>()
+  for (const card of allCards.value) {
+    const mainKey = card.code[0]
+    if (!mainKey) continue
+    const group = groups.get(mainKey) || []
+    group.push(card)
+    groups.set(mainKey, group)
   }
-
-  saveRecords()
-  updateCurrentCard()
-
-  // 检查是否完成
-  if (progress.value === allCards.value.length) {
-    showComplete.value = true
+  for (const [key, group] of groups) {
+    if (group.length < 3) groups.delete(key)
   }
+  return groups
+})
+
+const confusionFlash = shallowRef<PracticeCard[] | null>(null)
+const confusionHighlight = shallowRef('')
+
+function triggerConfusionFlash() {
+  if (!currentCard.value) return
+  const mainKey = currentCard.value.code[0]
+  const group = confusableGroups.value.get(mainKey)
+  if (!group || Math.random() > 0.35) {
+    confusionFlash.value = null
+    return
+  }
+  confusionHighlight.value = currentCard.value.root
+  const others = group.filter(c => c.root !== currentCard.value!.root)
+  const picked = others.sort(() => Math.random() - 0.5).slice(0, 3)
+  const all = [currentCard.value, ...picked].sort(() => Math.random() - 0.5)
+  confusionFlash.value = all
+}
+
+function restartRoot() {
+  if (practiceMode.value === 'intensive') restartLeitner()
+  else restartFSRS()
 }
 
 // 处理键盘事件（字根练习）
 function handleRootKeydown(e: KeyboardEvent) {
   if (e.key === ' ' && spaceForHint.value) {
-    // 空格键提示编码模式：表示用户忘记编码，显示提示
     e.preventDefault()
-
     if (!currentCard.value) return
-
-    // 标记使用了提示，这次练习不计入 count
     usedHint.value = true
-    // 标记用户主动请求提示，显示黄色状态
     isHintRequested.value = true
-
-    const currentCount = records.value[0][0]
-    // 如果是新卡片（count === -1），标记为已见过
-    if (currentCount === -1) {
-      records.value[0][0] = 0
-    }
-    // 如果是已完成的卡片（count >= 2），减少进度并重置
-    if (currentCount >= 2 && currentCount < 8) {
-      progress.value -= 1
-    } else if (currentCount === 8) {
-      progress.value -= 1
-      records.value[0][0] = 0
-    }
-
-    // 显示编码提示
     showHint.value = true
-    saveRecords()
   }
-  // 如果未勾选空格提示，空格键作为编码输入，显示为 "_"
 }
 
 // 监听用户输入（字根练习）
 watch(userKeys, (newKeys) => {
   if (!currentCard.value) return
-
-  // 编码长度不足时不判断
   if (newKeys.length < currentCard.value.code.length) return
 
-  // 检查答案（将 "_" 视为空格）
   const normalizedInput = newKeys.replace(/_/g, ' ')
-  const normalizedCode = currentCard.value.code
-
-  if (normalizedInput === normalizedCode) {
+  if (normalizedInput === currentCard.value.code) {
     answer(true)
     isCorrect.value = true
   } else {
@@ -387,18 +660,17 @@ watch(userKeys, (newKeys) => {
   userKeys.value = ''
 })
 
-// 重新开始（字根练习）
-function restartRoot() {
-  if (!confirm('重置进度需要清空数据，无法撤回，您确定继续吗？')) return
-
-  const cards = allCards.value
-  records.value = cards.map((_, i) => [-1, i] as Record)
-  progress.value = 0
-  showHint.value = true
+// 切换练习模式
+function togglePracticeMode() {
+  practiceMode.value = practiceMode.value === 'intensive' ? 'daily' : 'intensive'
+  try { localStorage.setItem(LS_KEY_PRACTICE_MODE, practiceMode.value) } catch {}
   showComplete.value = false
-  saveRecords()
-  updateCurrentCard()
-  focusRootInput()
+  if (practiceMode.value === 'intensive') {
+    updateCurrentCardLeitner()
+  } else {
+    buildQueue()
+    updateCurrentCardFSRS()
+  }
 }
 
 // 聚焦输入框（字根练习）
@@ -765,26 +1037,29 @@ watch(userInput, handleCharInput)
 
 // 初始化
 onMounted(() => {
-  // 加载导入数据和字体设置
   loadImportedCards()
   loadFont()
 
+  // 加载练习模式
+  try {
+    const m = localStorage.getItem(LS_KEY_PRACTICE_MODE)
+    if (m === 'daily' || m === 'intensive') practiceMode.value = m
+  } catch {}
+
   // 字根练习初始化
-  initRecords()
-  progress.value = scanProgress()
-  
+  initLeitner()
+  initFSRS()
+
   // 单字练习初始化
   loadCharSettings()
   initCharPractice()
-  
-  // 聚焦当前标签的输入框
+
   if (activeTab.value === 'root') {
     focusRootInput()
   } else {
     focusCharInput()
   }
-  
-  // 添加全局键盘事件监听
+
   document.addEventListener('keydown', handleGlobalKeydown)
 })
 
@@ -795,8 +1070,8 @@ onUnmounted(() => {
 
 // 监听字根变化
 watch(allCards, () => {
-  initRecords()
-  progress.value = scanProgress()
+  initLeitner()
+  initFSRS()
 }, { deep: true })
 
 // 监听字根变化（单字练习）
@@ -835,13 +1110,42 @@ watch(configVersion, () => {
       <!-- 进度条 -->
       <div class="progress-header">
         <div class="progress-info">
-          <span class="progress-text">{{ progress }} / {{ allCards.length }}</span>
+          <template v-if="practiceMode === 'intensive'">
+            <span class="progress-stat mastered">进度 {{ leitnerProgress }}/{{ allCards.length }}</span>
+          </template>
+          <template v-else>
+            <span class="progress-stat" title="今日待复习">复习 {{ dueCount }}</span>
+            <span class="progress-sep">·</span>
+            <span class="progress-stat" title="新卡片">新卡 {{ newCount }}</span>
+            <span class="progress-sep">·</span>
+            <span class="progress-stat mastered" title="已掌握（间隔≥21天）">掌握 {{ masteredCount }}/{{ allCards.length }}</span>
+          </template>
         </div>
         <div class="header-actions">
           <label class="hint-toggle">
             <input type="checkbox" v-model="spaceForHint" />
             <span>空格提示</span>
           </label>
+          <!-- 模式切换 -->
+          <button
+            class="action-btn mode-btn"
+            :class="{ 'active': practiceMode === 'daily' }"
+            @click="togglePracticeMode"
+            :title="practiceMode === 'intensive' ? '当前：集中练习（切换为每日复习）' : '当前：每日复习（切换为集中练习）'"
+          >{{ practiceMode === 'intensive' ? '集中' : '每日' }}</button>
+          <!-- 每日复习：模拟天数偏移 -->
+          <template v-if="practiceMode === 'daily'">
+            <span class="days-label">+</span>
+            <input
+              type="number"
+              v-model.number="daysOffset"
+              min="0"
+              max="3650"
+              class="days-input"
+              title="模拟 N 天后的复习状态"
+            />
+            <span class="days-label">天</span>
+          </template>
           <!-- 导入 TSV -->
           <label class="action-btn" :class="{ 'active': importedCards }" title="导入 TSV 字根练习">
             <Icon name="import" :size="14" />
@@ -875,7 +1179,9 @@ watch(configVersion, () => {
         </div>
       </div>
       <div class="progress-bar">
-        <div class="progress-fill" :style="{ width: `${(progress / allCards.length) * 100}%` }"></div>
+        <div class="progress-fill" :style="{ width: practiceMode === 'intensive'
+          ? `${allCards.length ? (leitnerProgress / allCards.length) * 100 : 0}%`
+          : `${allCards.length ? (masteredCount / allCards.length) * 100 : 0}%` }"></div>
       </div>
 
       <!-- 主练习区域 -->
@@ -910,24 +1216,68 @@ watch(configVersion, () => {
           />
         </div>
 
-        <!-- 提示区域 -->
-        <div class="hint-area" :class="{ 'visible': showHint }">
-          <span class="hint-label">提示</span>
-          <span class="hint-code">{{ currentCard.code }}</span>
+        <!-- 提示区域：显示编码提示或下次复习时间 -->
+        <div class="hint-area" :class="{ 'visible': showHint || nextReviewText || lastTimeRating }">
+          <template v-if="nextReviewText">
+            <span class="hint-label">下次</span>
+            <span class="hint-next">{{ nextReviewText }}</span>
+            <span v-if="lastTimeRating" class="time-badge" :class="lastTimeRating === 3 ? 'good' : 'hard'">
+              {{ (lastElapsed / 1000).toFixed(1) }}s
+            </span>
+          </template>
+          <template v-else-if="lastTimeRating && isTransitioning">
+            <span class="time-badge" :class="lastTimeRating === 3 ? 'good' : 'hard'">
+              {{ (lastElapsed / 1000).toFixed(1) }}s
+            </span>
+          </template>
+          <template v-else>
+            <span class="hint-label">提示</span>
+            <span class="hint-code">{{ currentCard.code }}</span>
+          </template>
+        </div>
+
+        <!-- 混淆字根闪现 -->
+        <div v-if="confusionFlash && isTransitioning" class="confusion-flash">
+          <div class="confusion-label">同键字根</div>
+          <div class="confusion-items">
+            <div
+              v-for="card in confusionFlash"
+              :key="card.root"
+              class="confusion-item"
+              :class="{ highlight: card.root === confusionHighlight }"
+            >
+              <span
+                class="confusion-root"
+                :class="getRootFontClass(card.root)"
+                :style="rootCharStyle"
+              >{{ displayRoot(card.root) }}</span>
+              <span class="confusion-code">{{ card.code }}</span>
+            </div>
+          </div>
         </div>
       </div>
 
       <!-- 完成提示 -->
       <div v-else-if="showComplete" class="complete-area">
         <div class="complete-icon">✓</div>
-        <div class="complete-text">练习完成</div>
-        <button class="continue-btn" @click="showComplete = false; focusRootInput()">继续</button>
+        <template v-if="practiceMode === 'intensive'">
+          <div class="complete-text">本轮练习完成</div>
+          <div class="complete-sub">进度 {{ leitnerProgress }} / {{ allCards.length }} 个字根</div>
+          <button class="continue-btn" @click="showComplete = false; updateCurrentCardLeitner(); focusRootInput()">继续</button>
+        </template>
+        <template v-else>
+          <div class="complete-text">今日复习完成</div>
+          <div class="complete-sub">已掌握 {{ masteredCount }} / {{ allCards.length }} 个字根</div>
+          <button class="continue-btn" @click="showComplete = false; buildQueue(); updateCurrentCardFSRS(); focusRootInput()">继续</button>
+        </template>
       </div>
 
       <!-- 空状态 -->
       <div v-else class="empty-state">
         <div class="empty-icon">-</div>
-        <p>暂无可练习的字根</p>
+        <p v-if="allCards.length === 0">暂无可练习的字根</p>
+        <p v-else-if="practiceMode === 'daily'">今日无待复习卡片</p>
+        <p v-else>暂无可练习的字根</p>
       </div>
     </template>
 
@@ -1185,6 +1535,67 @@ watch(configVersion, () => {
   font-weight: 500;
   color: var(--text2);
   font-variant-numeric: tabular-nums;
+}
+
+.progress-stat {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text3);
+  font-variant-numeric: tabular-nums;
+}
+
+.progress-stat.mastered {
+  color: var(--primary);
+}
+
+.days-label {
+  font-size: 12px;
+  color: var(--text3);
+}
+
+.days-input {
+  width: 48px;
+  padding: 2px 4px;
+  font-size: 12px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  text-align: center;
+}
+
+.days-input:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+.progress-sep {
+  font-size: 12px;
+  color: var(--text3);
+  opacity: 0.4;
+}
+
+.mode-btn {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
+.hint-next {
+  font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+  font-size: 14px;
+  font-weight: 600;
+  color: #10b981;
+  background: color-mix(in srgb, #10b981 10%, var(--bg3));
+  padding: 4px 12px;
+  border-radius: 6px;
+  letter-spacing: 1px;
+}
+
+.complete-sub {
+  font-size: 14px;
+  color: var(--text3);
+  margin-top: -8px;
 }
 
 .reset-btn {
@@ -1457,6 +1868,97 @@ watch(configVersion, () => {
   padding: 4px 12px;
   border-radius: 6px;
   letter-spacing: 2px;
+}
+
+.time-badge {
+  font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 5px;
+  letter-spacing: 0.5px;
+}
+
+.time-badge.good {
+  color: #10b981;
+  background: color-mix(in srgb, #10b981 10%, var(--bg3));
+}
+
+.time-badge.hard {
+  color: #f59e0b;
+  background: color-mix(in srgb, #f59e0b 10%, var(--bg3));
+}
+
+/* 混淆字根闪现 */
+.confusion-flash {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 24px;
+  background: color-mix(in srgb, var(--primary) 4%, var(--bg));
+  border: 1px solid color-mix(in srgb, var(--primary) 20%, var(--border));
+  border-radius: 10px;
+  animation: fadeIn 0.3s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.confusion-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text3);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.confusion-items {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.confusion-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  transition: all 0.2s ease;
+}
+
+.confusion-item.highlight {
+  background: color-mix(in srgb, var(--primary) 10%, var(--bg2));
+  border-color: var(--primary);
+}
+
+.confusion-root {
+  font-size: 28px;
+  line-height: 1.2;
+  color: var(--text);
+}
+
+.confusion-item.highlight .confusion-root {
+  color: var(--primary);
+}
+
+.confusion-code {
+  font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text2);
+  letter-spacing: 1px;
+}
+
+.confusion-item.highlight .confusion-code {
+  color: var(--primary);
 }
 
 /* 完成区域 */
