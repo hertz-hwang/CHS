@@ -255,6 +255,31 @@ const showEquivModal = ref(false)
 function openEquivModal() {
   showEquivModal.value = true
 }
+
+// 一键添加原子字根弹窗
+const showAtomicModal = ref(false)
+const atomicCodeLength = ref(1)
+const CODE_PRESETS = ['d', 'dk', 'dke', 'dkei']
+
+function openAtomicModal() {
+  atomicCodeLength.value = 1
+  showAtomicModal.value = true
+}
+
+function confirmAddAtomicRoots() {
+  const code = CODE_PRESETS[atomicCodeLength.value - 1]
+  const atomics = engine.atomicComponents()
+  let count = 0
+  for (const root of atomics) {
+    if (engine.isEquivalentRoot(root)) continue
+    engine.setRootCode(root, code)
+    count++
+  }
+  saveCurrentConfig()
+  refreshStats()
+  showAtomicModal.value = false
+  toast(`已添加 ${count} 个原子字根，编码预分配为 ${code}`)
+}
 </script>
 
 <template>
@@ -276,6 +301,7 @@ function openEquivModal() {
         </span>
       </div>
       <div class="toolbar-right">
+        <button class="btn btn-sm btn-success" @click="openAtomicModal">一键添加原子字根</button>
         <ExportRootMapping />
         <ExportRootsImage />
         <button class="btn btn-sm btn-info" @click="openEquivModal">等效字根设置</button>
@@ -436,6 +462,34 @@ function openEquivModal() {
 
     <!-- 等效字根设置弹窗 -->
     <EquivalentRootsModal :visible="showEquivModal" @close="showEquivModal = false" />
+
+    <!-- 一键添加原子字根弹窗 -->
+    <Teleport to="body">
+      <div v-if="showAtomicModal" class="modal-overlay" @click.self="showAtomicModal = false">
+        <div class="modal-content" style="min-width: 360px;">
+          <div class="modal-header">
+            <h3>一键添加原子字根</h3>
+            <button class="btn-close" @click="showAtomicModal = false">&times;</button>
+          </div>
+          <div class="modal-body">
+            <p class="modal-desc">将所有原子字根添加到字根集，并预分配编码。若设置了等效字根，则只添加主字根。</p>
+            <div class="atomic-length-select">
+              <label>字根编码长度：</label>
+              <div class="length-options">
+                <label v-for="n in 4" :key="n" class="length-option">
+                  <input type="radio" :value="n" v-model="atomicCodeLength" />
+                  <span class="length-label">{{ n }} <code>{{ CODE_PRESETS[n - 1] }}</code></span>
+                </label>
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-outline" @click="showAtomicModal = false">取消</button>
+            <button class="btn btn-primary" @click="confirmAddAtomicRoots">确认添加</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -1001,5 +1055,60 @@ function openEquivModal() {
 
 .btn-info:hover {
   background: #40a9ff;
+}
+
+.btn-success {
+  background: var(--success);
+  color: white;
+}
+
+.btn-success:hover {
+  filter: brightness(1.1);
+}
+
+/* 原子字根弹窗 */
+.atomic-length-select {
+  margin-top: 12px;
+}
+
+.atomic-length-select label {
+  font-size: 13px;
+  color: var(--text);
+  margin-bottom: 8px;
+  display: block;
+}
+
+.length-options {
+  display: flex;
+  gap: 12px;
+}
+
+.length-option {
+  display: flex !important;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  transition: all 0.15s;
+}
+
+.length-option:has(input:checked) {
+  border-color: var(--primary);
+  background: var(--primary-bg);
+}
+
+.length-label {
+  font-size: 13px;
+}
+
+.length-label code {
+  font-family: monospace;
+  background: var(--bg3);
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 12px;
+  color: var(--primary);
 }
 </style>
