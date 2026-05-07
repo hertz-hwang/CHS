@@ -872,6 +872,87 @@ export class CharsHijack {
     return code
   }
 
+  getCharCodeElements(char: string): { root: string; codeIndex: number }[] {
+    const rules = this.codeRules
+    if (rules.length < 2) return []
+    const hasActualRules = rules.some(r => r.type !== 'start' && r.type !== 'end')
+    if (!hasActualRules) return []
+
+    const decomp = this.decompose(char)
+    const roots = decomp.leaves
+    if (!roots.length) return []
+
+    const elements: { root: string; codeIndex: number }[] = []
+    let currentNodeId = 'start'
+    const visited = new Set<string>()
+
+    while (currentNodeId !== 'end' && !visited.has(currentNodeId) && visited.size < 100) {
+      visited.add(currentNodeId)
+      const node = rules.find(r => r.id === currentNodeId)
+      if (!node) break
+
+      if (node.type === 'start') {
+        currentNodeId = node.nextNode || ''
+      } else if (node.type === 'pick') {
+        if (node.pickType === 'pinyin') {
+          elements.push({ root: char, codeIndex: 0 })
+        } else {
+          const pickRoots = (node.rootSource === 'binary')
+            ? this.binarySplit(char, node.binaryParts || 3)
+            : roots
+          const rootIdx = node.rootIndex || 1
+          const codeIdx = node.codeIndex || 1
+          let actualRootIdx: number
+          let adjustedCodeIdx: number = codeIdx
+          if (rootIdx === -1) {
+            actualRootIdx = pickRoots.length - 1
+          } else if (rootIdx > pickRoots.length) {
+            actualRootIdx = pickRoots.length - 1
+            adjustedCodeIdx = codeIdx + (rootIdx - pickRoots.length)
+          } else {
+            actualRootIdx = rootIdx - 1
+          }
+          if (actualRootIdx >= 0 && actualRootIdx < pickRoots.length) {
+            const root = pickRoots[actualRootIdx]
+            const fullCode = this.getRootFullCode(root)
+            const actualCodeIdx = adjustedCodeIdx === -1 ? (fullCode ? fullCode.length - 1 : 0) : adjustedCodeIdx - 1
+            elements.push({ root, codeIndex: actualCodeIdx })
+          } else {
+            elements.push({ root: '', codeIndex: 0 })
+          }
+        }
+        currentNodeId = node.nextNode || ''
+      } else if (node.type === 'condition') {
+        const condRoots = (node.rootSource === 'binary')
+          ? this.binarySplit(char, node.binaryParts || 3)
+          : roots
+        let conditionMet = false
+        if (node.conditionType === 'root_exists') {
+          conditionMet = ((node.conditionValue || 1) - 1) < condRoots.length
+        } else if (node.conditionType === 'root_has_code') {
+          const ri = (node.conditionValue || 1) - 1
+          const ci = (node.conditionCodeIndex || 1) - 1
+          if (ri >= 0 && ri < condRoots.length) {
+            conditionMet = ci < this.getRootFullCode(condRoots[ri]).length
+          }
+        } else if (node.conditionType === 'root_count') {
+          conditionMet = condRoots.length >= (node.conditionValue || 1)
+        }
+        if (conditionMet && node.trueBranch) {
+          currentNodeId = node.trueBranch
+        } else if (!conditionMet && node.falseBranch) {
+          currentNodeId = node.falseBranch
+        } else {
+          const idx = rules.findIndex(r => r.id === node.id)
+          currentNodeId = idx >= 0 && idx < rules.length - 1 ? rules[idx + 1].id : ''
+        }
+      } else {
+        break
+      }
+    }
+    return elements
+  }
+
   // 设置等效字根
   setEquivalentRoots(mainRoot: string, equivalents: string[]): void {
     if (equivalents.length === 0) {

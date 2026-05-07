@@ -18,6 +18,7 @@ import PracticePage from './components/pages/PracticePage.vue'
 // 保留的页面
 import CoveragePage from './components/pages/CoveragePage.vue'
 import SuggestPage from './components/pages/SuggestPage.vue'
+import AnalysisPage from './components/pages/AnalysisPage.vue'
 
 import { useEngine, type LoadingProgress } from './composables/useEngine'
 
@@ -84,6 +85,7 @@ onMounted(async () => {
         <!-- 保留页面 -->
         <CoveragePage v-else-if="currentPage === 'coverage'" />
         <SuggestPage v-else-if="currentPage === 'suggest'" />
+        <AnalysisPage v-else-if="currentPage === 'analysis'" />
         
         <!-- 占位 -->
         <div v-else class="placeholder-page">

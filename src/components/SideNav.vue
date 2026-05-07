@@ -25,6 +25,7 @@ const navItems = [
 const auxItems = [
   { page: 'coverage', icon: 'coverage', label: '覆盖率' },
   { page: 'suggest', icon: 'suggest', label: '推荐' },
+  { page: 'analysis', icon: 'analysis', label: '分析' },
 ]
 
 function toggleCollapse() {
