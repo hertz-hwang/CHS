@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { ref, shallowRef, computed } from 'vue'
+import { ref, shallowRef, computed, watch } from 'vue'
 import { useEngine } from '../../composables/useEngine'
+import { codeToString } from '../../engine/config'
 import Icon from '../Icon.vue'
 
-const { engine, toast, getCurrentCharset, getCurrentCharsetName } = useEngine()
+const { engine, toast, getCurrentCharset, getCurrentCharsetName, rootsVersion, bracedRootToPua, isBracedRoot } = useEngine()
 
 const activeTab = ref<'distribution' | 'collision' | 'balance' | 'marginal' | 'multi'>('distribution')
 const useFreqWeight = ref(true)
@@ -42,7 +43,8 @@ interface MarginalResult {
   baseCollisionCount: number
   mergedCollisionCount: number
   delta: number
-  mergedGroups: { code: string; chars: string[] }[]
+  mergedGroups: { elements: string; chars: string[]; isChanged: boolean }[]
+  hasMerge: boolean
 }
 
 interface MultiDistGroup {
@@ -59,8 +61,132 @@ const balanceResult = shallowRef<BalanceResult | null>(null)
 
 // 边际一阶重码
 const marginalPositions = ref<boolean[]>([true, true, true, true])
-const marginalMergeInput = ref('')
 const marginalResult = shallowRef<MarginalResult | null>(null)
+
+// 归并模拟 - 结构化数据
+interface MergeItem {
+  root: string
+  codeIndex: number | null  // null = 全量归并，0/1/2/3 = 部分归并
+}
+const mergeGroups = ref<MergeItem[][]>([[]])
+const mergeSearchQueries = ref<string[]>([''])
+const mergeSearchDebounced = ref('')
+const mergeActiveGroupIdx = ref<number | null>(null)
+let mergeSearchTimer: ReturnType<typeof setTimeout> | null = null
+
+function onMergeSearchInput(gIdx: number, val: string) {
+  mergeSearchQueries.value[gIdx] = val
+  if (mergeSearchTimer) clearTimeout(mergeSearchTimer)
+  mergeSearchTimer = setTimeout(() => { mergeSearchDebounced.value = val }, 200)
+}
+
+const hasMergeSpec = computed(() => mergeGroups.value.some(g => g.length >= 2))
+
+const mergeSearchResults = computed(() => {
+  rootsVersion.value
+  const query = mergeSearchDebounced.value.trim().toLowerCase()
+  if (!query || mergeActiveGroupIdx.value === null) return []
+
+  const results: { root: string; code: string }[] = []
+  const strokeSearch = /^[1-5]+$/.test(query)
+
+  for (const root of engine.roots) {
+    const code = engine.rootCodes.get(root)
+    const codeStr = code ? codeToString(code) : ''
+    if (strokeSearch) {
+      const strokes = engine.getStrokes(root)
+      const strokeCode = strokes.length > 0 ? strokes[0] : ''
+      if (strokeCode.includes(query)) results.push({ root, code: codeStr })
+    } else {
+      if (root.toLowerCase().includes(query) || codeStr.toLowerCase().includes(query))
+        results.push({ root, code: codeStr })
+    }
+  }
+
+  if (strokeSearch) {
+    results.sort((a, b) => {
+      const sa = engine.getStrokes(a.root)[0] ?? ''
+      const sb = engine.getStrokes(b.root)[0] ?? ''
+      return (sa === query ? 0 : 1) - (sb === query ? 0 : 1)
+    })
+  }
+  return results.slice(0, 20)
+})
+
+function addMergeGroup() {
+  mergeGroups.value = [...mergeGroups.value, []]
+  mergeSearchQueries.value = [...mergeSearchQueries.value, '']
+}
+
+function removeMergeGroup(gIdx: number) {
+  const groups = [...mergeGroups.value]
+  const queries = [...mergeSearchQueries.value]
+  groups.splice(gIdx, 1)
+  queries.splice(gIdx, 1)
+  if (groups.length === 0) { groups.push([]); queries.push('') }
+  mergeGroups.value = groups
+  mergeSearchQueries.value = queries
+  runMarginalAnalysis()
+}
+
+function addToGroup(gIdx: number, root: string) {
+  const groups = mergeGroups.value.map(g => [...g])
+  if (!groups[gIdx].some(item => item.root === root)) {
+    groups[gIdx].push({ root, codeIndex: null })
+  }
+  mergeGroups.value = groups
+  mergeSearchQueries.value[gIdx] = ''
+  mergeSearchDebounced.value = ''
+  runMarginalAnalysis()
+}
+
+function removeFromGroup(gIdx: number, iIdx: number) {
+  const groups = mergeGroups.value.map(g => [...g])
+  groups[gIdx].splice(iIdx, 1)
+  mergeGroups.value = groups
+  runMarginalAnalysis()
+}
+
+function setCodeIndex(gIdx: number, iIdx: number, value: string) {
+  const groups = mergeGroups.value.map(g => g.map(item => ({ ...item })))
+  groups[gIdx][iIdx].codeIndex = value === '' ? null : parseInt(value)
+  mergeGroups.value = groups
+  runMarginalAnalysis()
+}
+
+function closeMergeSearch() {
+  if (mergeActiveGroupIdx.value !== null) {
+    mergeSearchQueries.value[mergeActiveGroupIdx.value] = ''
+  }
+  mergeSearchDebounced.value = ''
+  mergeActiveGroupIdx.value = null
+}
+
+function onMergeSearchBlur() {
+  // 延迟关闭，让 mousedown.prevent 的 addToGroup 先执行
+  setTimeout(closeMergeSearch, 150)
+}
+
+function buildMergeSpec(): MergeSpec | null {
+  const full = new Map<string, string>()
+  const partial = new Map<string, string>()
+  for (const group of mergeGroups.value) {
+    if (group.length < 2) continue
+    const target = group[0]
+    for (let i = 1; i < group.length; i++) {
+      const src = group[i]
+      if (src.codeIndex === null && target.codeIndex === null) {
+        full.set(src.root, target.root)
+      } else {
+        const srcIdx = src.codeIndex ?? 0
+        const tgtIdx = target.codeIndex ?? 0
+        partial.set(`${src.root}.${srcIdx}`, `${target.root}.${tgtIdx}`)
+      }
+    }
+  }
+  if (full.size === 0 && partial.size === 0) return null
+  return { full, partial }
+}
 
 // 多元分布
 const multiPositions = ref<boolean[]>([true, true, false, false])
@@ -259,66 +385,75 @@ function extractPartialCode(code: string, positions: number[]): string {
   return positions.map(p => p < code.length ? code[p] : '').join('')
 }
 
-function computeMarginalCollisions(
-  codeMap: Map<string, string>,
+interface MergeSpec {
+  full: Map<string, string>    // root → root（全量归并）
+  partial: Map<string, string> // "root.N" → "root.N"（部分归并）
+}
+
+function computeMarginalCollisionsByElements(
+  chars: string[],
   positions: number[],
-  mergeMap: Map<string, string> | null
-): { count: number; groups: { code: string; chars: string[] }[] } {
-  const codeToChars = new Map<string, string[]>()
-  for (const [char, code] of codeMap) {
-    let partial = extractPartialCode(code, positions)
-    if (mergeMap) {
-      partial = [...partial].map(k => mergeMap.get(k) ?? k).join('')
+  mergeSpec: MergeSpec | null
+): { count: number; groups: { elements: string; chars: string[] }[] } {
+  const elemKeyToChars = new Map<string, string[]>()
+  const elemKeyToDisplay = new Map<string, string>()
+
+  for (const char of chars) {
+    const elems = engine.getCharCodeElements(char)
+    if (!elems.length) continue
+    const sliced = positions.map(p => {
+      const e = elems[p]
+      if (!e || !e.root) return ''
+      if (!mergeSpec) return `${e.root}.${e.codeIndex}`
+      const partialKey = `${e.root}.${e.codeIndex}`
+      if (mergeSpec.partial.has(partialKey)) return mergeSpec.partial.get(partialKey)!
+      const fullMapped = mergeSpec.full.get(e.root)
+      return fullMapped ? `${fullMapped}.${e.codeIndex}` : partialKey
+    })
+    if (sliced.every(s => !s)) continue
+    const key = JSON.stringify(sliced)
+    if (!elemKeyToChars.has(key)) {
+      elemKeyToChars.set(key, [])
+      elemKeyToDisplay.set(key, sliced.join(' '))
     }
-    if (!partial) continue
-    if (!codeToChars.has(partial)) codeToChars.set(partial, [])
-    codeToChars.get(partial)!.push(char)
+    elemKeyToChars.get(key)!.push(char)
   }
 
   let count = 0
-  const groups: { code: string; chars: string[] }[] = []
-  for (const [code, chars] of codeToChars) {
-    if (chars.length >= 2) {
-      count += chars.length - 1
-      groups.push({ code, chars })
+  const groups: { elements: string; chars: string[] }[] = []
+  for (const [key, groupChars] of elemKeyToChars) {
+    if (groupChars.length >= 2) {
+      count += groupChars.length - 1
+      groups.push({ elements: elemKeyToDisplay.get(key) ?? '', chars: groupChars })
     }
   }
   groups.sort((a, b) => b.chars.length - a.chars.length)
   return { count, groups }
 }
 
-function parseMergeInput(input: string): Map<string, string> | null {
-  if (!input.trim()) return null
-  const map = new Map<string, string>()
-  for (const group of input.split(/[;；\n]+/)) {
-    const keys = group.trim().split(/[\s,，]+/).filter(Boolean)
-    if (keys.length >= 2) {
-      const target = keys[0]
-      for (let i = 1; i < keys.length; i++) {
-        map.set(keys[i], target)
-      }
-    }
-  }
-  return map.size > 0 ? map : null
-}
-
 function runMarginalAnalysis() {
-  if (!cachedCodeMap.value) return
   const positions = getSelectedPositions(marginalPositions.value)
   if (positions.length === 0) {
     marginalResult.value = null
     return
   }
 
-  const base = computeMarginalCollisions(cachedCodeMap.value, positions, null)
-  const mergeMap = parseMergeInput(marginalMergeInput.value)
-  const merged = computeMarginalCollisions(cachedCodeMap.value, positions, mergeMap)
+  const chars = getCurrentCharset()
+  const mergeSpec = buildMergeSpec()
+  const base = computeMarginalCollisionsByElements(chars, positions, null)
+  const merged = computeMarginalCollisionsByElements(chars, positions, mergeSpec)
+
+  const baseCharSets = new Set(base.groups.map(g => JSON.stringify([...g.chars].sort())))
 
   marginalResult.value = {
     baseCollisionCount: base.count,
     mergedCollisionCount: merged.count,
     delta: merged.count - base.count,
-    mergedGroups: merged.groups,
+    hasMerge: mergeSpec !== null,
+    mergedGroups: merged.groups.map(g => ({
+      ...g,
+      isChanged: !baseCharSets.has(JSON.stringify([...g.chars].sort())),
+    })),
   }
 }
 
@@ -494,33 +629,79 @@ function runMultiDistAnalysis() {
               第{{ idx + 1 }}码
             </label>
           </div>
-          <div class="config-row">
+          <div class="config-row merge-config-row">
             <span class="config-label">归并模拟：</span>
-            <input
-              type="text"
-              v-model="marginalMergeInput"
-              class="merge-input"
-              placeholder="如：a b c; d e（同组键视为相同）"
-              @input="runMarginalAnalysis"
-            />
+            <div class="merge-groups-editor">
+              <div v-for="(group, gIdx) in mergeGroups" :key="gIdx" class="merge-group-row">
+                <div class="merge-chips">
+                  <span
+                    v-for="(item, iIdx) in group"
+                    :key="iIdx"
+                    class="merge-chip"
+                    :class="{ 'chip-partial': item.codeIndex !== null }"
+                  >
+                    <span :class="isBracedRoot(item.root) ? 'pua-font' : ''">{{ bracedRootToPua(item.root) }}</span>
+                    <select
+                      class="chip-code-select"
+                      :value="item.codeIndex !== null ? String(item.codeIndex) : ''"
+                      @change="setCodeIndex(gIdx, iIdx, ($event.target as HTMLSelectElement).value)"
+                      @click.stop
+                    >
+                      <option value="">全</option>
+                      <option v-for="n in (distResult?.maxCodeLength ?? 4)" :key="n - 1" :value="String(n - 1)">.{{ n - 1 }}</option>
+                    </select>
+                    <button class="chip-remove" @click.stop="removeFromGroup(gIdx, iIdx)">×</button>
+                  </span>
+                  <div class="merge-search-wrapper">
+                    <input
+                      type="text"
+                      class="merge-search-input"
+                      :value="mergeSearchQueries[gIdx] ?? ''"
+                      placeholder="搜索字根..."
+                      @focus="mergeActiveGroupIdx = gIdx"
+                      @input="onMergeSearchInput(gIdx, ($event.target as HTMLInputElement).value)"
+                      @blur="onMergeSearchBlur"
+                    />
+                    <div
+                      v-if="mergeActiveGroupIdx === gIdx && mergeSearchResults.length > 0"
+                      class="merge-dropdown"
+                    >
+                      <div
+                        v-for="item in mergeSearchResults"
+                        :key="item.root"
+                        class="merge-dropdown-item"
+                        @mousedown.prevent="addToGroup(gIdx, item.root)"
+                      >
+                        <span class="dropdown-root" :class="isBracedRoot(item.root) ? 'pua-font' : ''">{{ bracedRootToPua(item.root) }}</span>
+                        <span class="dropdown-code">{{ item.code.toUpperCase() }}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <button class="btn-group-remove" @click="removeMergeGroup(gIdx)" title="删除此组">×</button>
+              </div>
+              <button class="btn btn-sm btn-outline merge-add-group" @click="addMergeGroup">+ 新建组</button>
+            </div>
           </div>
         </div>
         <div v-if="marginalResult" class="marginal-summary">
           <div class="stat-row">
             <span class="stat-item">基础重码：<strong>{{ marginalResult.baseCollisionCount }}</strong></span>
-            <span class="stat-item" v-if="marginalMergeInput.trim()">
+            <span class="stat-item" v-if="hasMergeSpec">
               归并后：<strong>{{ marginalResult.mergedCollisionCount }}</strong>
             </span>
-            <span class="stat-item stat-delta" v-if="marginalMergeInput.trim()" :class="{ negative: marginalResult.delta < 0 }">
+            <span class="stat-item stat-delta" v-if="hasMergeSpec" :class="{ negative: marginalResult.delta < 0 }">
               变化：<strong>{{ marginalResult.delta >= 0 ? '+' : '' }}{{ marginalResult.delta }}</strong>
             </span>
           </div>
           <div class="collision-list">
-            <div v-for="(group, idx) in marginalResult.mergedGroups.slice(0, 150)" :key="idx" class="collision-item">
-              <span class="collision-code">{{ group.code }}</span>
-              <span class="collision-chars">{{ group.chars.slice(0, 20).join(' ') }}{{ group.chars.length > 20 ? '…' : '' }}</span>
-              <span class="collision-freq">{{ group.chars.length }}字</span>
-            </div>
+            <template v-for="(group, idx) in marginalResult.mergedGroups" :key="idx">
+              <div v-if="!marginalResult.hasMerge || group.isChanged" class="collision-item">
+                <span class="collision-code elem-cell">{{ group.elements }}</span>
+                <span class="collision-chars">{{ group.chars.slice(0, 20).join(' ') }}{{ group.chars.length > 20 ? '…' : '' }}</span>
+                <span class="collision-freq">{{ group.chars.length }}字</span>
+              </div>
+            </template>
             <div v-if="marginalResult.mergedGroups.length > 150" class="no-data">
               仅显示前 150 组（共 {{ marginalResult.mergedGroups.length }} 组）
             </div>
@@ -730,16 +911,107 @@ function runMultiDistAnalysis() {
   cursor: pointer;
   color: var(--text);
 }
-.merge-input {
-  flex: 1;
-  padding: 5px 10px;
+.merge-config-row { align-items: flex-start; }
+.merge-groups-editor { flex: 1; display: flex; flex-direction: column; gap: 6px; }
+.merge-group-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 6px 8px;
+  background: var(--bg2);
   border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.merge-chips {
+  flex: 1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+.merge-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 6px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 14px;
+  cursor: pointer;
+  user-select: none;
+  transition: border-color 0.15s;
+}
+.merge-chip:hover { border-color: var(--primary); }
+.merge-chip.chip-partial { border-color: var(--primary); background: rgba(var(--primary-rgb, 59,130,246), 0.08); }
+.chip-code-select {
+  border: none;
+  background: transparent;
+  color: var(--primary);
+  font-size: 11px;
+  font-family: monospace;
+  cursor: pointer;
+  padding: 0;
+  max-width: 36px;
+}
+.chip-remove {
+  border: none;
+  background: transparent;
+  color: var(--text3);
+  font-size: 13px;
+  cursor: pointer;
+  padding: 0 1px;
+  line-height: 1;
+}
+.chip-remove:hover { color: var(--danger, #e53e3e); }
+.merge-search-wrapper { position: relative; }
+.merge-search-input {
+  width: 100px;
+  padding: 2px 6px;
+  border: 1px dashed var(--border);
   border-radius: 4px;
   background: var(--bg);
   color: var(--text);
   font-size: 13px;
-  font-family: monospace;
 }
+.merge-search-input:focus { border-color: var(--primary); outline: none; width: 140px; }
+.merge-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  min-width: 140px;
+  max-height: 180px;
+  overflow-y: auto;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  z-index: 20;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  margin-top: 2px;
+}
+.merge-dropdown-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 10px;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.merge-dropdown-item:hover { background: var(--bg3); }
+.dropdown-root { font-size: 16px; }
+.dropdown-code { font-family: monospace; font-size: 12px; color: var(--success); }
+.btn-group-remove {
+  border: none;
+  background: transparent;
+  color: var(--text3);
+  font-size: 16px;
+  cursor: pointer;
+  padding: 0 4px;
+  flex-shrink: 0;
+  align-self: center;
+}
+.btn-group-remove:hover { color: var(--danger, #e53e3e); }
+.merge-add-group { align-self: flex-start; font-size: 12px; padding: 3px 10px; }
 .marginal-summary { margin-bottom: 12px; }
 .stat-row {
   display: flex;
