@@ -1219,6 +1219,104 @@ watch(ksWordDetailCurrentPage, () => {
   if (modalBody) modalBody.scrollTop = 0
 })
 
+// 导出 TSV 工具函数
+function downloadTsv(rows: (string | number)[][], filename: string) {
+  const tsvContent = rows
+    .map(row => row.map(cell => {
+      const text = String(cell ?? '')
+      // 替换 TSV 中的制表符与换行，避免破坏字段结构
+      return text.replace(/\t/g, ' ').replace(/\r?\n/g, ' ')
+    }).join('\t'))
+    .join('\n')
+  const blob = new Blob(['﻿' + tsvContent], { type: 'text/tab-separated-values;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+// 生成安全的文件名（去除非法字符）
+function sanitizeFilename(name: string): string {
+  return name.replace(/[\\/:*?"<>|\s]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 80) || 'export'
+}
+
+// 导出单字详情弹窗为 TSV
+function exportDetailItemsToTsv() {
+  if (isWordDetail.value) {
+    const items = filteredDetailWordItems.value
+    if (items.length === 0) {
+      toast('当前无可导出的数据')
+      return
+    }
+    const header = ['词组', '编码', '重码位', '键魂词当量', '词当量', '词频']
+    const rows: (string | number)[][] = [header]
+    for (const item of items) {
+      const code = item.code || ''
+      const collision = item.collision > 1 ? item.collision : ''
+      const ksWordEq = item.isLack || item.overKey > 0 ? '' : fmt(calcKeySoulEquivalence(item.code))
+      const wordEq = item.isLack || item.overKey > 0 ? '' : fmt(calcEquivalenceForDisplay(item.code))
+      rows.push([item.word, code, collision, ksWordEq, wordEq, item.freq])
+    }
+    downloadTsv(rows, `${sanitizeFilename(detailTitle.value)}.tsv`)
+  } else {
+    const items = filteredDetailItems.value
+    if (items.length === 0) {
+      toast('当前无可导出的数据')
+      return
+    }
+    const header = ['汉字', '编码', '重码位', '键魂字当量', '字当量', '字频']
+    const rows: (string | number)[][] = [header]
+    const useFull = detailColumn.value === 'fullCollision'
+    for (const item of items) {
+      const code = useFull ? (item.longestCode || '') : (item.code || '')
+      const collisionVal = useFull ? item.fullCollision : item.collision
+      const collision = collisionVal > 1 ? collisionVal : ''
+      const ksZi = item.isLack || item.overKey > 0 ? '' : fmt(item.ksZiEqCombo)
+      const zi = item.isLack || item.overKey > 0 ? '' : fmt(item.ziEqCombo)
+      rows.push([item.char, code, collision, ksZi, zi, item.freq])
+    }
+    downloadTsv(rows, `${sanitizeFilename(detailTitle.value)}.tsv`)
+  }
+}
+
+// 导出键魂字均当量详情弹窗为 TSV
+function exportKsDetailItemsToTsv() {
+  const items = filteredKsDetailItems.value
+  if (items.length === 0) {
+    toast('当前无可导出的数据')
+    return
+  }
+  const header = ['汉字', '编码', '重码位', '键魂字当量', '字当量', '字频']
+  const rows: (string | number)[][] = [header]
+  for (const item of items) {
+    const code = item.code || ''
+    const collision = item.collision > 1 ? item.collision : ''
+    rows.push([item.char, code, collision, fmt(item.ksZiEqCombo), fmt(item.ziEqCombo), item.freq])
+  }
+  downloadTsv(rows, `${sanitizeFilename(ksDetailTitle.value)}.tsv`)
+}
+
+// 导出键魂词均当量详情弹窗为 TSV
+function exportKsWordDetailItemsToTsv() {
+  const items = filteredKsWordDetailItems.value
+  if (items.length === 0) {
+    toast('当前无可导出的数据')
+    return
+  }
+  const header = ['词组', '编码', '重码位', '键魂词当量', '词当量', '词频']
+  const rows: (string | number)[][] = [header]
+  for (const item of items) {
+    const code = item.code || ''
+    const collision = item.collision > 1 ? item.collision : ''
+    const ksWordEq = fmt(calcKeySoulEquivalence(item.code))
+    const wordEq = fmt(calcEquivalenceForDisplay(item.code))
+    rows.push([item.word, code, collision, ksWordEq, wordEq, item.freq])
+  }
+  downloadTsv(rows, `${sanitizeFilename(ksWordDetailTitle.value)}.tsv`)
+}
+
 // 监听配置变化
 watch([rootsVersion, configVersion, charsetVersion], () => {
   evaluationResult.value = null
@@ -2318,7 +2416,13 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
       <div class="modal-content">
         <div class="modal-header">
           <h3>{{ detailTitle }}</h3>
-          <button class="modal-close" @click="closeDetailModal">&times;</button>
+          <div class="modal-header-actions">
+            <button class="modal-export" @click="exportDetailItemsToTsv" title="导出 TSV">
+              <Icon name="download" :size="14" />
+              <span>导出 TSV</span>
+            </button>
+            <button class="modal-close" @click="closeDetailModal">&times;</button>
+          </div>
         </div>
         <div class="modal-body" @scroll="handleModalScroll">
           <!-- 单字详情表格 -->
@@ -2540,7 +2644,13 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
       <div class="modal-content">
         <div class="modal-header">
           <h3>{{ ksDetailTitle }}</h3>
-          <button class="modal-close" @click="closeKsDetailModal">&times;</button>
+          <div class="modal-header-actions">
+            <button class="modal-export" @click="exportKsDetailItemsToTsv" title="导出 TSV">
+              <Icon name="download" :size="14" />
+              <span>导出 TSV</span>
+            </button>
+            <button class="modal-close" @click="closeKsDetailModal">&times;</button>
+          </div>
         </div>
         <div class="modal-body ks-modal-body">
           <div class="modal-search">
@@ -2654,7 +2764,13 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
       <div class="modal-content">
         <div class="modal-header">
           <h3>{{ ksWordDetailTitle }}</h3>
-          <button class="modal-close" @click="closeKsWordDetailModal">&times;</button>
+          <div class="modal-header-actions">
+            <button class="modal-export" @click="exportKsWordDetailItemsToTsv" title="导出 TSV">
+              <Icon name="download" :size="14" />
+              <span>导出 TSV</span>
+            </button>
+            <button class="modal-close" @click="closeKsWordDetailModal">&times;</button>
+          </div>
         </div>
         <div class="modal-body ks-word-modal-body">
           <div class="modal-search">
@@ -3405,6 +3521,33 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
   font-size: 15px;
   font-weight: 600;
   color: var(--text);
+}
+
+.modal-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.modal-export {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.modal-export:hover {
+  background: var(--primary);
+  color: white;
+  border-color: var(--primary);
 }
 
 .modal-close {
