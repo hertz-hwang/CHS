@@ -1620,3 +1620,95 @@ export function getWordWeightPercent(line: EvaluateWordLine, column: string): st
   const { weight } = getWordColumnValue(line, column)
   return line.totalFreq > 0 ? (weight / line.totalFreq * 100).toFixed(4) : '0.0000'
 }
+
+// ============ 编码候选数 Top N ============
+
+export interface CodeCandidate {
+  code: string       // 完整编码字符串（最长码）
+  count: number      // 候选条目数
+  entries: string[]  // 该编码下的字 / 词，按频次降序，最多保留 entriesPerCode 个
+  hasMore: boolean   // 是否还有更多未在 entries 中
+}
+
+export interface CodeCandidates {
+  char: CodeCandidate[]   // 仅汉字（按候选数降序，全量）
+  word: CodeCandidate[]   // 仅词组（按候选数降序，全量）
+  mixed: CodeCandidate[]  // 字 + 词（按候选数降序，全量）
+}
+
+interface Bucket {
+  items: { text: string; freq: number }[]
+}
+
+function pushToBucket(map: Map<string, Bucket>, code: string, text: string, freq: number) {
+  let bucket = map.get(code)
+  if (!bucket) {
+    bucket = { items: [] }
+    map.set(code, bucket)
+  }
+  bucket.items.push({ text, freq })
+}
+
+function allFromBuckets(map: Map<string, Bucket>, entriesPerCode: number): CodeCandidate[] {
+  const arr: CodeCandidate[] = []
+  for (const [code, bucket] of map) {
+    if (bucket.items.length < 2) continue
+    bucket.items.sort((a, b) => b.freq - a.freq || (a.text < b.text ? -1 : 1))
+    const slice = bucket.items.slice(0, entriesPerCode).map(it => it.text)
+    arr.push({
+      code,
+      count: bucket.items.length,
+      entries: slice,
+      hasMore: bucket.items.length > slice.length,
+    })
+  }
+  arr.sort((a, b) => b.count - a.count || (a.code < b.code ? -1 : 1))
+  return arr
+}
+
+function pickLongestCode(codes: string | string[]): string {
+  if (typeof codes === 'string') return codes
+  let longest = ''
+  for (const c of codes) {
+    if (c.length > longest.length) longest = c
+  }
+  return longest
+}
+
+/**
+ * 聚合所有汉字 / 词组的最长编码，统计每个编码下的候选条目数，
+ * 返回单字 / 词组 / 混合三个视图各自的完整列表（按候选数降序）。
+ */
+export function buildCodeCandidates(
+  charCodeMap: Map<string, string> | Map<string, string[]>,
+  wordCodeMap: Map<string, string> | Map<string, string[]>,
+  charFreq: Map<string, number>,
+  wordFreq: Map<string, number>,
+  entriesPerCode = 8,
+): CodeCandidates {
+  const charBuckets = new Map<string, Bucket>()
+  const wordBuckets = new Map<string, Bucket>()
+  const mixedBuckets = new Map<string, Bucket>()
+
+  for (const [char, raw] of charCodeMap as Map<string, string | string[]>) {
+    const code = pickLongestCode(raw)
+    if (!code) continue
+    const freq = charFreq.get(char) || 0
+    pushToBucket(charBuckets, code, char, freq)
+    pushToBucket(mixedBuckets, code, char, freq)
+  }
+
+  for (const [word, raw] of wordCodeMap as Map<string, string | string[]>) {
+    const code = pickLongestCode(raw)
+    if (!code) continue
+    const freq = wordFreq.get(word) || 0
+    pushToBucket(wordBuckets, code, word, freq)
+    pushToBucket(mixedBuckets, code, word, freq)
+  }
+
+  return {
+    char: allFromBuckets(charBuckets, entriesPerCode),
+    word: allFromBuckets(wordBuckets, entriesPerCode),
+    mixed: allFromBuckets(mixedBuckets, entriesPerCode),
+  }
+}

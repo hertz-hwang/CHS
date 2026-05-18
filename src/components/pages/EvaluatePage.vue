@@ -2,6 +2,7 @@
 import { ref, watch, computed, shallowRef } from 'vue'
 import { useEngine } from '../../composables/useEngine'
 import KeyboardHeatmap from '../shared/KeyboardHeatmap.vue'
+import CodeCandidatesChart from '../shared/CodeCandidatesChart.vue'
 import Icon from '../Icon.vue'
 import { calcKeySoulEquivalence, debugKeySoulEquivalence, type SequenceDebugResult } from '../../utils/keySoulEquiv'
 import {
@@ -23,12 +24,14 @@ import {
   getWordLackWeightPercent,
   calcFingerBalance,
   calcEquivalence as calcEquivalenceForDisplay,
+  buildCodeCandidates,
   type EvaluationResult,
   type EvaluateLine,
   type EvaluateHanziItem,
   type EvaluationWordResult,
   type EvaluateWordLine,
   type EvaluateWordItem,
+  type CodeCandidates,
 } from '../../utils/evaluate'
 
 const {
@@ -45,6 +48,7 @@ const subTab = ref<'char' | 'word' | 'mixed'>('char')
 const evaluationResult = shallowRef<EvaluationResult | null>(null)
 const wordEvaluationResult = shallowRef<EvaluationWordResult | null>(null)
 const mixedEvaluationResult = shallowRef<EvaluationWordResult | null>(null)
+const candidatesResult = shallowRef<CodeCandidates | null>(null)
 const isEvaluating = ref(false)
 
 // 上传码表相关
@@ -54,6 +58,7 @@ const uploadedFileName = ref('')
 const uploadedResult = shallowRef<EvaluationResult | null>(null)
 const uploadedWordResult = shallowRef<EvaluationWordResult | null>(null)
 const uploadedMixedResult = shallowRef<EvaluationWordResult | null>(null)
+const uploadedCandidatesResult = shallowRef<CodeCandidates | null>(null)
 
 // 上传码表组词规则
 // 规则格式：大写字母表示字序(A=第1字,B=第2字...Z=末字)，小写字母表示码位(a=第1码,b=第2码...)
@@ -237,6 +242,7 @@ async function runEvaluation() {
 
     // 词组测评
     const wordFreqMap = loadWordFreq()
+    const candidateWordCodeMap = new Map<string, string>()
     if (wordFreqMap.size) {
       const wordCodeMap = new Map<string, string>()
 
@@ -245,11 +251,13 @@ async function runEvaluation() {
           const code = calculateWordCode(word)
           if (code) {
             wordCodeMap.set(word, code)
+            candidateWordCodeMap.set(word, code)
           }
         }
       }
 
       const wordResult = evaluateWords(wordCodeMap, wordFreqMap, selectKeysConfig.value)
+      wordEvaluationResult.value = wordResult
 
       // 字词混合测评
       {
@@ -275,6 +283,14 @@ async function runEvaluation() {
         }
       }
     }
+
+    // 编码候选数 Top N（覆盖全量字 / 词，不限分区）
+    candidatesResult.value = buildCodeCandidates(
+      codeMap,
+      candidateWordCodeMap,
+      freqMap,
+      wordFreqMap,
+    )
 
     // 统计词数
     let wordCount = 0
@@ -435,6 +451,7 @@ function handleFileUpload(event: Event) {
   uploadedResult.value = null
   uploadedWordResult.value = null
   uploadedMixedResult.value = null
+  uploadedCandidatesResult.value = null
 
   uploadedFileName.value = file.name
   uploadedSchemeName.value = extractSchemeName(file.name)
@@ -589,8 +606,9 @@ async function runUploadedEvaluation() {
 
     // 词组测评
     const wordFreqMap = loadWordFreq()
+    const uploadedWordCodeMap = new Map<string, string>()
     if (wordFreqMap.size) {
-      const wordCodeMap = new Map<string, string>()
+      const wordCodeMap = uploadedWordCodeMap
 
       for (const [word] of wordFreqMap) {
         if (word.length >= 2) {
@@ -637,7 +655,23 @@ async function runUploadedEvaluation() {
         uploadedMixedResult.value = mixedResult
       }
     }
-    
+
+    // 编码候选数 Top N（单字用整张码表，词组用与测评相同的 wordCodeMap）
+    {
+      const charSubMap = new Map<string, string[]>()
+      for (const [text, codes] of uploadedCodeMap.value) {
+        if ([...text].length === 1) {
+          charSubMap.set(text, codes)
+        }
+      }
+      uploadedCandidatesResult.value = buildCodeCandidates(
+        charSubMap,
+        uploadedWordCodeMap,
+        freqMap,
+        wordFreqMap,
+      )
+    }
+
     // 统计词数
     let wordCount = 0
     if (wordFreqMap.size) {
@@ -660,6 +694,7 @@ function clearUploaded() {
   uploadedFileName.value = ''
   uploadedResult.value = null
   uploadedMixedResult.value = null
+  uploadedCandidatesResult.value = null
 }
 
 // 码表是否已包含词组编码
@@ -1322,6 +1357,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
   evaluationResult.value = null
   wordEvaluationResult.value = null
   mixedEvaluationResult.value = null
+  candidatesResult.value = null
 })
 </script>
 
@@ -1653,6 +1689,11 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
           </table>
         </div>
 
+        <!-- 单字编码候选数 Top 10 -->
+        <div v-if="subTab === 'char' && evaluationResult && candidatesResult" class="heatmap-container">
+          <CodeCandidatesChart :data="candidatesResult.char" :export-filename="`${currentSchemeName}-单字重码.tsv`" />
+        </div>
+
         <!-- 键位热力图 -->
         <div v-if="subTab === 'char' && evaluationResult" class="heatmap-container">
           <div class="heatmap-header">
@@ -1778,6 +1819,11 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
           </table>
         </div>
 
+        <!-- 词组编码候选数 Top 10 -->
+        <div v-if="subTab === 'word' && wordEvaluationResult && candidatesResult" class="heatmap-container">
+          <CodeCandidatesChart :data="candidatesResult.word" :export-filename="`${currentSchemeName}-词组重码.tsv`" />
+        </div>
+
         <!-- 词组键位热力图 -->
         <div v-if="subTab === 'word' && wordEvaluationResult" class="heatmap-container">
           <div class="heatmap-header">
@@ -1889,6 +1935,11 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
               </tr>
             </tbody>
           </table>
+        </div>
+
+        <!-- 字词混合编码候选数 Top 10 -->
+        <div v-if="subTab === 'mixed' && mixedEvaluationResult && candidatesResult" class="heatmap-container">
+          <CodeCandidatesChart :data="candidatesResult.mixed" :export-filename="`${currentSchemeName}-字词混合重码.tsv`" />
         </div>
 
         <!-- 字词混合键位热力图 -->
@@ -2163,6 +2214,11 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
           </table>
         </div>
 
+        <!-- 单字编码候选数 Top 10 -->
+        <div v-if="subTab === 'char' && uploadedResult && uploadedCandidatesResult" class="heatmap-container">
+          <CodeCandidatesChart :data="uploadedCandidatesResult.char" :export-filename="`${uploadedSchemeName}-单字重码.tsv`" />
+        </div>
+
         <!-- 单字键位热力图 -->
         <div v-if="subTab === 'char' && uploadedResult" class="heatmap-container">
           <div class="heatmap-header">
@@ -2284,6 +2340,11 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
           </table>
         </div>
 
+        <!-- 词组编码候选数 Top 10 -->
+        <div v-if="subTab === 'word' && uploadedWordResult && uploadedCandidatesResult" class="heatmap-container">
+          <CodeCandidatesChart :data="uploadedCandidatesResult.word" :export-filename="`${uploadedSchemeName}-词组重码.tsv`" />
+        </div>
+
         <!-- 词组键位热力图 -->
         <div v-if="subTab === 'word' && uploadedWordResult" class="heatmap-container">
           <div class="heatmap-header">
@@ -2395,6 +2456,11 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
               </tr>
             </tbody>
           </table>
+        </div>
+
+        <!-- 字词混合编码候选数 Top 10 -->
+        <div v-if="subTab === 'mixed' && uploadedMixedResult && uploadedCandidatesResult" class="heatmap-container">
+          <CodeCandidatesChart :data="uploadedCandidatesResult.mixed" :export-filename="`${uploadedSchemeName}-字词混合重码.tsv`" />
         </div>
 
         <!-- 字词混合键位热力图 -->
