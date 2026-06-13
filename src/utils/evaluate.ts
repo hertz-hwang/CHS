@@ -308,24 +308,25 @@ export interface EvaluationResult {
 
 /**
  * 解析码表文件（支持 TXT 和 YAML 格式）
- * 返回每个字的所有编码（用于计算出简重和全码重）
+ * 返回每个字的所有编码（用于计算出简重和全码重），以及每条编码按码表行序的字列表
  */
-export function parseCodeTable(content: string, filename?: string): Map<string, string[]> {
+export function parseCodeTable(content: string, filename?: string): { codeMap: Map<string, string[]>; codeToChars: Map<string, string[]> } {
   const codeMap = new Map<string, string[]>()
+  const codeToChars = new Map<string, string[]>()
   
   const isYaml = filename?.endsWith('.yaml') || filename?.endsWith('.yml') ||
                  /^---\s*$/m.test(content)
   
   if (isYaml) {
-    parseYamlCodeTable(content, codeMap)
+    parseYamlCodeTable(content, codeMap, codeToChars)
   } else {
-    parseTxtCodeTable(content, codeMap)
+    parseTxtCodeTable(content, codeMap, codeToChars)
   }
   
-  return codeMap
+  return { codeMap, codeToChars }
 }
 
-function parseTxtCodeTable(content: string, codeMap: Map<string, string[]>): void {
+function parseTxtCodeTable(content: string, codeMap: Map<string, string[]>, codeToChars: Map<string, string[]>): void {
   const lines = content.split('\n')
 
   for (const line of lines) {
@@ -345,12 +346,19 @@ function parseTxtCodeTable(content: string, codeMap: Map<string, string[]>): voi
         if (!codes.includes(code)) {
           codes.push(code)
         }
+        // 按码表行序构建编码→字映射（用于出简重首选字判定）
+        if (!codeToChars.has(code)) {
+          codeToChars.set(code, [])
+        }
+        if (!codeToChars.get(code)!.includes(text)) {
+          codeToChars.get(code)!.push(text)
+        }
       }
     }
   }
 }
 
-function parseYamlCodeTable(content: string, codeMap: Map<string, string[]>): void {
+function parseYamlCodeTable(content: string, codeMap: Map<string, string[]>, codeToChars: Map<string, string[]>): void {
   const lines = content.split('\n')
   let passedHeader = false
 
@@ -378,13 +386,20 @@ function parseYamlCodeTable(content: string, codeMap: Map<string, string[]>): vo
           if (!codes.includes(code)) {
             codes.push(code)
           }
+          // 按码表行序构建编码→字映射（用于出简重首选字判定）
+          if (!codeToChars.has(code)) {
+            codeToChars.set(code, [])
+          }
+          if (!codeToChars.get(code)!.includes(text)) {
+            codeToChars.get(code)!.push(text)
+          }
         }
       }
     }
   }
 
   if (codeMap.size === 0) {
-    parseTxtCodeTable(content, codeMap)
+    parseTxtCodeTable(content, codeMap, codeToChars)
   }
 }
 
@@ -438,7 +453,8 @@ export function evaluateScheme(
   freqMap: Map<string, number>,
   selectKeys: string | string[] = ";'456789",
   maxCodeLength: number = 4,
-  missingSet?: Set<string>
+  missingSet?: Set<string>,
+  codeToChars?: Map<string, string[]>
 ): EvaluationResult {
   // 统一处理为数组
   const selectKeyArray: string[] = Array.isArray(selectKeys)
@@ -462,8 +478,7 @@ export function evaluateScheme(
   
   // 编码冲突计数器（全码重 - 基于最长编码）
   const fullCodeCollision = new Map<string, number>()
-  // 出简重冲突计数器（基于最短编码）
-  const simpleCodeCollision = new Map<string, number>()
+  
   
   // 理论二简集合
   const brief2Set = new Set<string>()
@@ -476,8 +491,40 @@ export function evaluateScheme(
     codeMap.size > 0 && Array.isArray(codeMap.values().next().value)
   
   // 构建编码到字的映射（用于找出首选字）
-  const codeToChars = new Map<string, string[]>()
+  // 优先使用 parseCodeTable 返回的 codeToChars（按码表行序），否则从 codeMap 构建
+  const evalCodeToChars = new Map<string, string[]>()
   const fullCodeToChars = new Map<string, string[]>()
+  // 只统计在 freqMap 中的字（排除不在字频表中的码表条目）
+  const freqCharSet = new Set(sortedChars.map(([char]) => char))
+  if (codeToChars) {
+    // 使用 parseCodeTable 返回的 codeToChars，过滤掉缺字和不在字频表中的字
+    for (const [code, chars] of codeToChars) {
+      const filtered = chars.filter(c => freqCharSet.has(c) && !(missingSet?.has(c) ?? false))
+      if (filtered.length > 0) {
+        evalCodeToChars.set(code, filtered)
+      }
+    }
+  } else {
+    // 出简重：按码表原始顺序构建 codeToChars（简码不需要按词频重新排序）
+    for (const [char, raw] of codeMap as Map<string, string | string[]>) {
+      if (!freqCharSet.has(char)) continue
+      if (missingSet?.has(char) ?? false) continue
+
+      const codes: string[] = Array.isArray(raw) ? raw : [raw]
+      if (codes.length === 0) continue
+
+      for (const code of codes) {
+        if (!evalCodeToChars.has(code)) {
+          evalCodeToChars.set(code, [])
+        }
+        if (!evalCodeToChars.get(code)!.includes(char)) {
+          evalCodeToChars.get(code)!.push(char)
+        }
+      }
+    }
+  }
+
+  // 全码重：按词频顺序构建 fullCodeToChars
   for (let i = 0; i < sortedChars.length; i++) {
     const [char, freq] = sortedChars[i]
     const isMissing = missingSet?.has(char) ?? false
@@ -493,18 +540,10 @@ export function evaluateScheme(
 
     if (!codes || codes.length === 0) continue
 
-    // 找到最短编码和最长编码
-    let shortestCode = codes[0]
     let longestCode = codes[0]
     for (const code of codes) {
-      if (code.length < shortestCode.length) shortestCode = code
       if (code.length > longestCode.length) longestCode = code
     }
-
-    if (!codeToChars.has(shortestCode)) {
-      codeToChars.set(shortestCode, [])
-    }
-    codeToChars.get(shortestCode)!.push(char)
 
     if (!fullCodeToChars.has(longestCode)) {
       fullCodeToChars.set(longestCode, [])
@@ -585,10 +624,9 @@ export function evaluateScheme(
       const code = shortestCode
       const codeLen = code.length
       
-      // 计算出简重：基于最短编码的重码情况
-      const simpleCollisionKey = shortestCode
-      const simpleCollision = (simpleCodeCollision.get(simpleCollisionKey) || 0) + 1
-      simpleCodeCollision.set(simpleCollisionKey, simpleCollision)
+      // 计算出简重：查该字最短编码在 codeToChars 中的位置（按码表行序），位置+1 即为选重位
+      const charsWithCode = evalCodeToChars.get(shortestCode)
+      const simpleCollision = charsWithCode ? charsWithCode.indexOf(char) + 1 : 1
       
       // 计算全码重：基于最长编码的重码情况
       const fullCollisionKey = longestCode
@@ -598,7 +636,7 @@ export function evaluateScheme(
       // 获取首选字（同编码下的首位候选字）
       let primaryChar: string | undefined
       if (simpleCollision > 1) {
-        const charsWithSameCode = codeToChars.get(shortestCode)
+        const charsWithSameCode = evalCodeToChars.get(shortestCode)
         if (charsWithSameCode && charsWithSameCode.length > 0) {
           primaryChar = charsWithSameCode[0]
         }
@@ -763,55 +801,16 @@ export function zipLines(lines: EvaluateLine[]): EvaluateLine {
   }
   
   for (const line of lines) {
-    result.items.push(...line.items)
+    for (const item of line.items) {
+      result.items.push({ ...item })
+    }
     result.totalFreq += line.totalFreq
     for (const [k, v] of Object.entries(line.usage)) {
       result.usage[k] = (result.usage[k] || 0) + v
     }
   }
   
-  // 重新计算重码统计（全码重和出简重）
-  recalculateCollisionStats(result.items)
-  
   return result
-}
-
-/**
- * 重新计算重码统计（全码重和出简重）
- * 用于小计和总计行，确保重码统计是基于合并后数据的重新计算
- */
-function recalculateCollisionStats(items: EvaluateHanziItem[]): void {
-  // 重新计算出简重统计（基于最短编码）
-  const simpleCollisionMap = new Map<string, number>()
-  // 重新计算全码重统计（基于最长编码）
-  const fullCollisionMap = new Map<string, number>()
-  
-  // 第一遍：统计每个编码的出现次数
-  for (const item of items) {
-    if (item.isLack || !item.code) continue
-    
-    // 统计最短编码（出简重）
-    const simpleCount = (simpleCollisionMap.get(item.code) || 0) + 1
-    simpleCollisionMap.set(item.code, simpleCount)
-    
-    // 统计最长编码（全码重）
-    const longestCode = item.longestCode || item.code
-    const fullCount = (fullCollisionMap.get(longestCode) || 0) + 1
-    fullCollisionMap.set(longestCode, fullCount)
-  }
-  
-  // 第二遍：更新每个 item 的重码统计
-  
-  // 实际解决方案：由于原始数据中没有存储 longestCode，
-  // 我们需要在 EvaluateHanziItem 中添加 longestCode 字段
-  // 这里暂时保持原样，因为 fullCollision 和 simpleCollision 已经存储在每个 item 中
-  // 问题可能在于 zipLines 只是简单合并，但没有重新统计
-  
-  // 正确的做法：重新统计合并后的所有 item 的重码情况
-  // 基于 item.code（最短编码）和 item 的原始编码信息
-  
-  // 由于 item 中只有 code（最短编码），没有 longestCode，
-  // 我们需要重新设计：在 EvaluateHanziItem 中添加 longestCode 字段
 }
 
 /**

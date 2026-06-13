@@ -53,8 +53,9 @@ const candidatesResult = shallowRef<CodeCandidates | null>(null)
 const isEvaluating = ref(false)
 
 // 上传码表相关
-// 注意：parseCodeTable 返回 Map<string, string[]>，每个字可能有多个编码
+// 注意：parseCodeTable 返回 { codeMap, codeToChars }，每个字可能有多个编码
 const uploadedCodeMap = ref<Map<string, string[]> | null>(null)
+const uploadedCodeToChars = ref<Map<string, string[]> | null>(null)
 const uploadedFileName = ref('')
 const uploadedResult = shallowRef<EvaluationResult | null>(null)
 const uploadedWordResult = shallowRef<EvaluationWordResult | null>(null)
@@ -461,8 +462,9 @@ function handleFileUpload(event: Event) {
   reader.onload = (e) => {
     try {
       const content = e.target?.result as string
-      const codeMap = parseCodeTable(content, file.name)
+      const { codeMap, codeToChars } = parseCodeTable(content, file.name)
       uploadedCodeMap.value = codeMap
+      uploadedCodeToChars.value = codeToChars
       toast(`已加载 ${codeMap.size} 个编码`)
     } catch (err) {
       toast('解析码表失败')
@@ -584,7 +586,7 @@ async function runUploadedEvaluation() {
     }
     
     // 单字测评
-    const result = evaluateScheme(uploadedCodeMap.value, freqMap, selectKeysConfig.value, maxCodeLength.value)
+    const result = evaluateScheme(uploadedCodeMap.value, freqMap, selectKeysConfig.value, maxCodeLength.value, undefined, uploadedCodeToChars.value ?? undefined)
     uploadedResult.value = result
     
     // 根据词获取编码：优先用码表中的词编码，缺失则按规则补全
