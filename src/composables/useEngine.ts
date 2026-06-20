@@ -123,7 +123,7 @@ function getInitialPage(): string {
 }
 
 const currentPage = ref(getInitialPage())
-const navCollapsed = ref(false)
+const navCollapsed = ref(localStorage.getItem('navCollapsed') === 'true')
 
 // 初始化时设置 URL hash（如果当前没有 hash 或 hash 无效）
 if (typeof window !== 'undefined' && !window.location.hash) {
@@ -831,6 +831,7 @@ function loadSavedConfig(): boolean {
 
 function toggleNavCollapsed() {
   navCollapsed.value = !navCollapsed.value
+  localStorage.setItem('navCollapsed', String(navCollapsed.value))
 }
 
 // ============ 配置方案管理方法 ============

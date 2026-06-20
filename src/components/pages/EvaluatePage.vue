@@ -49,7 +49,10 @@ const subTab = ref<'char' | 'word' | 'mixed'>('char')
 const evaluationResult = shallowRef<EvaluationResult | null>(null)
 const wordEvaluationResult = shallowRef<EvaluationWordResult | null>(null)
 const mixedEvaluationResult = shallowRef<EvaluationWordResult | null>(null)
-const candidatesResult = shallowRef<CodeCandidates | null>(null)
+const candidatesTop6000 = ref(true)
+const candidatesResultFull = shallowRef<CodeCandidates | null>(null)
+const candidatesResultTop6000 = shallowRef<CodeCandidates | null>(null)
+const candidatesResult = computed(() => candidatesTop6000.value ? candidatesResultTop6000.value : candidatesResultFull.value)
 const isEvaluating = ref(false)
 
 // 上传码表相关
@@ -60,7 +63,9 @@ const uploadedFileName = ref('')
 const uploadedResult = shallowRef<EvaluationResult | null>(null)
 const uploadedWordResult = shallowRef<EvaluationWordResult | null>(null)
 const uploadedMixedResult = shallowRef<EvaluationWordResult | null>(null)
-const uploadedCandidatesResult = shallowRef<CodeCandidates | null>(null)
+const uploadedCandidatesResultFull = shallowRef<CodeCandidates | null>(null)
+const uploadedCandidatesResultTop6000 = shallowRef<CodeCandidates | null>(null)
+const uploadedCandidatesResult = computed(() => candidatesTop6000.value ? uploadedCandidatesResultTop6000.value : uploadedCandidatesResultFull.value)
 
 // 上传码表组词规则
 // 规则格式：大写字母表示字序(A=第1字,B=第2字...Z=末字)，小写字母表示码位(a=第1码,b=第2码...)
@@ -286,13 +291,13 @@ async function runEvaluation() {
       }
     }
 
-    // 编码候选数 Top N（覆盖全量字 / 词，不限分区）
-    candidatesResult.value = buildCodeCandidates(
-      codeMap,
-      candidateWordCodeMap,
-      freqMap,
-      wordFreqMap,
-    )
+    // 编码候选数 Top N
+    candidatesResultFull.value = buildCodeCandidates(codeMap, candidateWordCodeMap, freqMap, wordFreqMap)
+    // 前6000字版本
+    const top6000Set = new Set([...freqMap.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6000).map(([c]) => c))
+    const top6000CodeMap = new Map([...codeMap].filter(([c]) => top6000Set.has(c)))
+    const top6000FreqMap = new Map([...freqMap].filter(([c]) => top6000Set.has(c)))
+    candidatesResultTop6000.value = buildCodeCandidates(top6000CodeMap, candidateWordCodeMap, top6000FreqMap, wordFreqMap)
 
     // 统计词数
     let wordCount = 0
@@ -453,7 +458,8 @@ function handleFileUpload(event: Event) {
   uploadedResult.value = null
   uploadedWordResult.value = null
   uploadedMixedResult.value = null
-  uploadedCandidatesResult.value = null
+  uploadedCandidatesResultFull.value = null
+  uploadedCandidatesResultTop6000.value = null
 
   uploadedFileName.value = file.name
   uploadedSchemeName.value = extractSchemeName(file.name)
@@ -667,12 +673,12 @@ async function runUploadedEvaluation() {
           charSubMap.set(text, codes)
         }
       }
-      uploadedCandidatesResult.value = buildCodeCandidates(
-        charSubMap,
-        uploadedWordCodeMap,
-        freqMap,
-        wordFreqMap,
-      )
+      uploadedCandidatesResultFull.value = buildCodeCandidates(charSubMap, uploadedWordCodeMap, freqMap, wordFreqMap)
+      // 前6000字版本
+      const top6000Set = new Set([...freqMap.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6000).map(([c]) => c))
+      const top6000CharMap = new Map([...charSubMap].filter(([c]) => top6000Set.has(c)))
+      const top6000FreqMap = new Map([...freqMap].filter(([c]) => top6000Set.has(c)))
+      uploadedCandidatesResultTop6000.value = buildCodeCandidates(top6000CharMap, uploadedWordCodeMap, top6000FreqMap, wordFreqMap)
     }
 
     // 统计词数
@@ -697,7 +703,8 @@ function clearUploaded() {
   uploadedFileName.value = ''
   uploadedResult.value = null
   uploadedMixedResult.value = null
-  uploadedCandidatesResult.value = null
+  uploadedCandidatesResultFull.value = null
+  uploadedCandidatesResultTop6000.value = null
 }
 
 // 码表是否已包含词组编码
@@ -1360,7 +1367,8 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
   evaluationResult.value = null
   wordEvaluationResult.value = null
   mixedEvaluationResult.value = null
-  candidatesResult.value = null
+  candidatesResultFull.value = null
+  candidatesResultTop6000.value = null
 })
 </script>
 
@@ -1695,6 +1703,9 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
 
         <!-- 单字编码候选数 Top 10 -->
         <div v-if="subTab === 'char' && evaluationResult && candidatesResult" class="heatmap-container code-candidates-chart">
+          <div class="heatmap-header">
+            <label class="checkbox-label"><input v-model="candidatesTop6000" type="checkbox" /><span>仅前 6000 字</span></label>
+          </div>
           <CodeCandidatesChart :data="candidatesResult.char" :export-filename="`${currentSchemeName}-单字重码.tsv`" />
         </div>
 
@@ -1825,6 +1836,9 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
 
         <!-- 词组编码候选数 Top 10 -->
         <div v-if="subTab === 'word' && wordEvaluationResult && candidatesResult" class="heatmap-container word-candidates-chart">
+          <div class="heatmap-header">
+            <label class="checkbox-label"><input v-model="candidatesTop6000" type="checkbox" /><span>仅前 6000 字</span></label>
+          </div>
           <CodeCandidatesChart :data="candidatesResult.word" :export-filename="`${currentSchemeName}-词组重码.tsv`" />
         </div>
 
@@ -1943,6 +1957,9 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
 
         <!-- 字词混合编码候选数 Top 10 -->
         <div v-if="subTab === 'mixed' && mixedEvaluationResult && candidatesResult" class="heatmap-container mixed-candidates-chart">
+          <div class="heatmap-header">
+            <label class="checkbox-label"><input v-model="candidatesTop6000" type="checkbox" /><span>仅前 6000 字</span></label>
+          </div>
           <CodeCandidatesChart :data="candidatesResult.mixed" :export-filename="`${currentSchemeName}-字词混合重码.tsv`" />
         </div>
 
@@ -2221,6 +2238,9 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
 
         <!-- 单字编码候选数 Top 10 -->
         <div v-if="subTab === 'char' && uploadedResult && uploadedCandidatesResult" class="heatmap-container uploaded-candidates-chart">
+          <div class="heatmap-header">
+            <label class="checkbox-label"><input v-model="candidatesTop6000" type="checkbox" /><span>仅前 6000 字</span></label>
+          </div>
           <CodeCandidatesChart :data="uploadedCandidatesResult.char" :export-filename="`${uploadedSchemeName}-单字重码.tsv`" />
         </div>
 
@@ -2347,6 +2367,9 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
 
         <!-- 词组编码候选数 Top 10 -->
         <div v-if="subTab === 'word' && uploadedWordResult && uploadedCandidatesResult" class="heatmap-container uploaded-word-candidates-chart">
+          <div class="heatmap-header">
+            <label class="checkbox-label"><input v-model="candidatesTop6000" type="checkbox" /><span>仅前 6000 字</span></label>
+          </div>
           <CodeCandidatesChart :data="uploadedCandidatesResult.word" :export-filename="`${uploadedSchemeName}-词组重码.tsv`" />
         </div>
 
@@ -2465,6 +2488,9 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
 
         <!-- 字词混合编码候选数 Top 10 -->
         <div v-if="subTab === 'mixed' && uploadedMixedResult && uploadedCandidatesResult" class="heatmap-container uploaded-mixed-candidates-chart">
+          <div class="heatmap-header">
+            <label class="checkbox-label"><input v-model="candidatesTop6000" type="checkbox" /><span>仅前 6000 字</span></label>
+          </div>
           <CodeCandidatesChart :data="uploadedCandidatesResult.mixed" :export-filename="`${uploadedSchemeName}-字词混合重码.tsv`" />
         </div>
 
