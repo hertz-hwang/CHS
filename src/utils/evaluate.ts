@@ -260,7 +260,8 @@ export interface EvaluateHanziItem {
   brief2: boolean    // 理论二简
   
   // 出简重和全码重
-  simpleCollision: number  // 出简重（最短编码的重码情况）
+  simpleCollision: number  // 出简重（最短编码的重码情况，简全同出）
+  simpleCollisionExclFull: number  // 出简重（出简不出全：已出简的字不占用其全码位）
   fullCollision: number    // 全码重（最长编码的重码情况）
   
   // 加权值
@@ -288,6 +289,7 @@ export interface EvaluateHanziItem {
   
   // 首选字（同编码下的首位候选字）
   primaryChar?: string
+  primaryCharExclFull?: string  // 出简不出全模式下的首选字
   fullPrimaryChar?: string  // 全码重首选字
 }
 
@@ -550,6 +552,26 @@ export function evaluateScheme(
     }
     fullCodeToChars.get(longestCode)!.push(char)
   }
+
+  // 出简不出全：每个字只占用其最短编码位，已出简的字不再占用其全码位
+  // 先求每个字的最短编码，再据此过滤 evalCodeToChars
+  const charShortestCode = new Map<string, string>()
+  for (const [char, raw] of codeMap as Map<string, string | string[]>) {
+    const codes: string[] = Array.isArray(raw) ? raw : [raw]
+    if (codes.length === 0) continue
+    let shortest = codes[0]
+    for (const c of codes) {
+      if (c.length < shortest.length) shortest = c
+    }
+    charShortestCode.set(char, shortest)
+  }
+  const evalCodeToCharsExclFull = new Map<string, string[]>()
+  for (const [code, chars] of evalCodeToChars) {
+    const filtered = chars.filter(c => charShortestCode.get(c) === code)
+    if (filtered.length > 0) {
+      evalCodeToCharsExclFull.set(code, filtered)
+    }
+  }
   
   for (const [start, end] of sections) {
     const line: EvaluateLine = {
@@ -588,6 +610,7 @@ export function evaluateScheme(
           selectKey: '',
           brief2: false,
           simpleCollision: 0,
+          simpleCollisionExclFull: 0,
           fullCollision: 0,
           cl: 0,
           keysLen: 0,
@@ -627,6 +650,10 @@ export function evaluateScheme(
       // 计算出简重：查该字最短编码在 codeToChars 中的位置（按码表行序），位置+1 即为选重位
       const charsWithCode = evalCodeToChars.get(shortestCode)
       const simpleCollision = charsWithCode ? charsWithCode.indexOf(char) + 1 : 1
+
+      // 计算出简重（出简不出全）：仅在已出简的字不占用其全码位的前提下计算
+      const charsWithCodeExclFull = evalCodeToCharsExclFull.get(shortestCode)
+      const simpleCollisionExclFull = charsWithCodeExclFull ? charsWithCodeExclFull.indexOf(char) + 1 : 1
       
       // 计算全码重：基于最长编码的重码情况
       const fullCollisionKey = longestCode
@@ -639,6 +666,13 @@ export function evaluateScheme(
         const charsWithSameCode = evalCodeToChars.get(shortestCode)
         if (charsWithSameCode && charsWithSameCode.length > 0) {
           primaryChar = charsWithSameCode[0]
+        }
+      }
+      let primaryCharExclFull: string | undefined
+      if (simpleCollisionExclFull > 1) {
+        const charsWithSameCode = evalCodeToCharsExclFull.get(shortestCode)
+        if (charsWithSameCode && charsWithSameCode.length > 0) {
+          primaryCharExclFull = charsWithSameCode[0]
         }
       }
       let fullPrimaryChar: string | undefined
@@ -702,6 +736,7 @@ export function evaluateScheme(
         selectKey,
         brief2,
         simpleCollision,
+        simpleCollisionExclFull,
         fullCollision,
         keysLen,
         cl: keysLen * freq,
@@ -723,6 +758,7 @@ export function evaluateScheme(
         overKey,
         isLack: false,
         primaryChar,
+        primaryCharExclFull,
         fullPrimaryChar,
       }
       
@@ -816,11 +852,13 @@ export function zipLines(lines: EvaluateLine[]): EvaluateLine {
 /**
  * 计算某一列的统计值
  * @param filterMiddle 为 true 时小指干扰只统计小指+无名指，忽略小指+中指
+ * @param exclFull 为 true 时出简重采用「出简不出全」口径（已出简的字不占用其全码位）
  */
 export function getColumnValue(
   line: EvaluateLine,
   column: string,
-  filterMiddle = true
+  filterMiddle = true,
+  exclFull = false
 ): { count: number; weight: number } {
   let count = 0
   let weight = 0
@@ -855,10 +893,12 @@ export function getColumnValue(
         if (item.codeLen >= 5) { count++; weight += item.freq }
         break
       case 'select':
-      case 'simpleCollision':
+      case 'simpleCollision': {
         // 出简重：最短编码重码数 > 1
-        if (item.simpleCollision > 1) { count++; weight += item.freq }
+        const sc = exclFull ? item.simpleCollisionExclFull : item.simpleCollision
+        if (sc > 1) { count++; weight += item.freq }
         break
+      }
       case 'fullCollision':
         // 全码重：最长编码重码数 > 1
         if (item.fullCollision > 1) { count++; weight += item.freq }

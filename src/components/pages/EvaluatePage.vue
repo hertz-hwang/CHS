@@ -157,6 +157,8 @@ function removeSelectKeyPosition(index: number) {
 const includeSpaceInStats = ref(true)
 // 小指干扰：过滤中指影响（只统计小指+无名指，不含小指+中指）
 const filterMiddleInPinky = ref(true)
+// 出简重：出简不出全（勾选后，已出简的字不占用其全码位，不与全码字算重）
+const simpleCollisionExclFull = ref(false)
 
 // 从当前字词频数据源提取单字频
 function loadDefaultFreq() {
@@ -730,7 +732,7 @@ function getWordSubtotal(lines: EvaluateWordLine[]): EvaluateWordLine {
 
 // 计算加权比重
 function getWeightPercent(line: EvaluateLine, column: string): string {
-  const { weight } = getColumnValue(line, column)
+  const { weight } = getColumnValue(line, column, true, column === 'simpleCollision' ? simpleCollisionExclFull.value : false)
   return line.totalFreq > 0 ? fmt(weight / line.totalFreq * 100, 4) : '0.0000'
 }
 
@@ -929,6 +931,23 @@ watch([detailCurrentPage, detailWordCurrentPage], () => {
   scrollModalBodyToTop()
 })
 
+// 详情弹窗中「出简重」是否采用出简不出全口径
+function detailUseExclFull(): boolean {
+  return detailColumn.value === 'simpleCollision' && simpleCollisionExclFull.value
+}
+// 详情弹窗单字的重码位
+function detailItemCollision(item: EvaluateHanziItem): number {
+  if (detailColumn.value === 'fullCollision') return item.fullCollision
+  if (detailUseExclFull()) return item.simpleCollisionExclFull
+  return item.collision
+}
+// 详情弹窗单字的首选字
+function detailItemPrimaryChar(item: EvaluateHanziItem): string | undefined {
+  if (detailColumn.value === 'fullCollision') return item.fullPrimaryChar
+  if (detailUseExclFull()) return item.primaryCharExclFull
+  return item.primaryChar
+}
+
 // 列名映射
 const COLUMN_NAMES: Record<string, string> = {
   cd1: '1 码', cd2: '2 码', cd3: '3 码', cd4: '4 码', cd5: '5 码',
@@ -983,7 +1002,7 @@ function filterItemsByColumn(line: EvaluateLine, column: string): EvaluateHanziI
       case 'cd3': match = item.codeLen === 3 && !item.isLack; break
       case 'cd4': match = item.codeLen === 4 && !item.isLack; break
       case 'cd5': match = item.codeLen >= 5 && !item.isLack; break
-      case 'simpleCollision': match = item.simpleCollision > 1 && !item.isLack; break
+      case 'simpleCollision': match = (simpleCollisionExclFull.value ? item.simpleCollisionExclFull : item.simpleCollision) > 1 && !item.isLack; break
       case 'fullCollision': match = item.fullCollision > 1 && !item.isLack; break
       case 'brief2': match = item.brief2 && !item.isLack; break
       case 'lack': match = item.isLack; break
@@ -1007,7 +1026,7 @@ function filterItemsByColumn(line: EvaluateLine, column: string): EvaluateHanziI
 function handleCellClick(line: EvaluateLine, column: string, rangeLabel: string) {
   if (!CLICKABLE_COLUMNS.includes(column)) return
   
-  const { count } = getColumnValue(line, column)
+  const { count } = getColumnValue(line, column, true, column === 'simpleCollision' ? simpleCollisionExclFull.value : false)
   if (count === 0) return
   
   const items = filterItemsByColumn(line, column)
@@ -1316,7 +1335,7 @@ function exportDetailItemsToTsv() {
     const useFull = detailColumn.value === 'fullCollision'
     for (const item of items) {
       const code = useFull ? (item.longestCode || '') : (item.code || '')
-      const collisionVal = useFull ? item.fullCollision : item.collision
+      const collisionVal = detailItemCollision(item)
       const collision = collisionVal > 1 ? collisionVal : ''
       const ksZi = item.isLack || item.overKey > 0 ? '' : fmt(item.ksZiEqCombo)
       const zi = item.isLack || item.overKey > 0 ? '' : fmt(item.ziEqCombo)
@@ -1547,7 +1566,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                 <th>3 码</th>
                 <th v-if="showCd4">4 码</th>
                 <th v-if="showCd5">5 码</th>
-                <th class="col-simple-collision">出简重</th>
+                <th class="col-simple-collision"><label class="th-checkbox-label"><input v-model="simpleCollisionExclFull" type="checkbox" />出简重</label></th>
                 <th class="col-select">全码重</th>
                 <th>理论二简</th>
                 <th>加权键长</th>
@@ -1575,7 +1594,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                   <td class="clickable" @click="handleCellClick(line, 'cd3', `${line.start + 1}~${line.end}`)">{{ getColumnValue(line, 'cd3').count }}</td>
                   <td v-if="showCd4" class="clickable" @click="handleCellClick(line, 'cd4', `${line.start + 1}~${line.end}`)">{{ getColumnValue(line, 'cd4').count }}</td>
                   <td v-if="showCd5" class="clickable" @click="handleCellClick(line, 'cd5', `${line.start + 1}~${line.end}`)">{{ getColumnValue(line, 'cd5').count }}</td>
-                  <td class="col-simple-collision clickable" @click="handleCellClick(line, 'simpleCollision', `${line.start + 1}~${line.end}`)">{{ getColumnValue(line, 'simpleCollision').count }}</td>
+                  <td class="col-simple-collision clickable" @click="handleCellClick(line, 'simpleCollision', `${line.start + 1}~${line.end}`)">{{ getColumnValue(line, 'simpleCollision', true, simpleCollisionExclFull).count }}</td>
                   <td class="col-select clickable" @click="handleCellClick(line, 'fullCollision', `${line.start + 1}~${line.end}`)">{{ getColumnValue(line, 'fullCollision').count }}</td>
                   <td class="clickable" @click="handleCellClick(line, 'brief2', `${line.start + 1}~${line.end}`)">{{ getColumnValue(line, 'brief2').count }}</td>
                   <td>{{ fmt(getWeightedValue(line, 'cl')) }}</td>
@@ -1601,7 +1620,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                   <td class="clickable" @click="handleCellClick(getSubtotal(evaluationResult.lines.slice(0, 3)), 'cd3', '小计')">{{ getColumnValue(getSubtotal(evaluationResult.lines.slice(0, 3)), 'cd3').count }}</td>
                   <td v-if="showCd4" class="clickable" @click="handleCellClick(getSubtotal(evaluationResult.lines.slice(0, 3)), 'cd4', '小计')">{{ getColumnValue(getSubtotal(evaluationResult.lines.slice(0, 3)), 'cd4').count }}</td>
                   <td v-if="showCd5" class="clickable" @click="handleCellClick(getSubtotal(evaluationResult.lines.slice(0, 3)), 'cd5', '小计')">{{ getColumnValue(getSubtotal(evaluationResult.lines.slice(0, 3)), 'cd5').count }}</td>
-                  <td class="col-simple-collision clickable" @click="handleCellClick(getSubtotal(evaluationResult.lines.slice(0, 3)), 'simpleCollision', '小计')">{{ getColumnValue(getSubtotal(evaluationResult.lines.slice(0, 3)), 'simpleCollision').count }}</td>
+                  <td class="col-simple-collision clickable" @click="handleCellClick(getSubtotal(evaluationResult.lines.slice(0, 3)), 'simpleCollision', '小计')">{{ getColumnValue(getSubtotal(evaluationResult.lines.slice(0, 3)), 'simpleCollision', true, simpleCollisionExclFull).count }}</td>
                   <td class="col-select clickable" @click="handleCellClick(getSubtotal(evaluationResult.lines.slice(0, 3)), 'fullCollision', '小计')">{{ getColumnValue(getSubtotal(evaluationResult.lines.slice(0, 3)), 'fullCollision').count }}</td>
                   <td class="clickable" @click="handleCellClick(getSubtotal(evaluationResult.lines.slice(0, 3)), 'brief2', '小计')">{{ getColumnValue(getSubtotal(evaluationResult.lines.slice(0, 3)), 'brief2').count }}</td>
                   <td>{{ fmt(getWeightedValue(getSubtotal(evaluationResult.lines.slice(0, 3)), 'cl')) }}</td>
@@ -1654,7 +1673,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                 <td class="clickable" @click="handleCellClick(getSubtotal(evaluationResult.lines), 'cd3', '总计')">{{ getColumnValue(getSubtotal(evaluationResult.lines), 'cd3').count }}</td>
                 <td v-if="showCd4" class="clickable" @click="handleCellClick(getSubtotal(evaluationResult.lines), 'cd4', '总计')">{{ getColumnValue(getSubtotal(evaluationResult.lines), 'cd4').count }}</td>
                 <td v-if="showCd5" class="clickable" @click="handleCellClick(getSubtotal(evaluationResult.lines), 'cd5', '总计')">{{ getColumnValue(getSubtotal(evaluationResult.lines), 'cd5').count }}</td>
-                <td class="col-simple-collision clickable" @click="handleCellClick(getSubtotal(evaluationResult.lines), 'simpleCollision', '总计')">{{ getColumnValue(getSubtotal(evaluationResult.lines), 'simpleCollision').count }}</td>
+                <td class="col-simple-collision clickable" @click="handleCellClick(getSubtotal(evaluationResult.lines), 'simpleCollision', '总计')">{{ getColumnValue(getSubtotal(evaluationResult.lines), 'simpleCollision', true, simpleCollisionExclFull).count }}</td>
                 <td class="col-select clickable" @click="handleCellClick(getSubtotal(evaluationResult.lines), 'fullCollision', '总计')">{{ getColumnValue(getSubtotal(evaluationResult.lines), 'fullCollision').count }}</td>
                 <td class="clickable" @click="handleCellClick(getSubtotal(evaluationResult.lines), 'brief2', '总计')">{{ getColumnValue(getSubtotal(evaluationResult.lines), 'brief2').count }}</td>
                 <td>{{ fmt(getWeightedValue(getSubtotal(evaluationResult.lines), 'cl')) }}</td>
@@ -2083,7 +2102,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                 <th>3 码</th>
                 <th v-if="showCd4">4 码</th>
                 <th v-if="showCd5">5 码</th>
-                <th class="col-simple-collision">出简重</th>
+                <th class="col-simple-collision"><label class="th-checkbox-label"><input v-model="simpleCollisionExclFull" type="checkbox" />出简重</label></th>
                 <th class="col-select">全码重</th>
                 <th>理论二简</th>
                 <th>加权键长</th>
@@ -2110,7 +2129,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                   <td class="clickable" @click="handleCellClick(line, 'cd3', `${line.start + 1}~${line.end}`)">{{ getColumnValue(line, 'cd3').count }}</td>
                   <td v-if="showCd4" class="clickable" @click="handleCellClick(line, 'cd4', `${line.start + 1}~${line.end}`)">{{ getColumnValue(line, 'cd4').count }}</td>
                   <td v-if="showCd5" class="clickable" @click="handleCellClick(line, 'cd5', `${line.start + 1}~${line.end}`)">{{ getColumnValue(line, 'cd5').count }}</td>
-                  <td class="col-simple-collision clickable" @click="handleCellClick(line, 'simpleCollision', `${line.start + 1}~${line.end}`)">{{ getColumnValue(line, 'simpleCollision').count }}</td>
+                  <td class="col-simple-collision clickable" @click="handleCellClick(line, 'simpleCollision', `${line.start + 1}~${line.end}`)">{{ getColumnValue(line, 'simpleCollision', true, simpleCollisionExclFull).count }}</td>
                   <td class="col-select clickable" @click="handleCellClick(line, 'fullCollision', `${line.start + 1}~${line.end}`)">{{ getColumnValue(line, 'fullCollision').count }}</td>
                   <td class="clickable" @click="handleCellClick(line, 'brief2', `${line.start + 1}~${line.end}`)">{{ getColumnValue(line, 'brief2').count }}</td>
                   <td>{{ fmt(getWeightedValue(line, 'cl')) }}</td>
@@ -2136,7 +2155,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                   <td class="clickable" @click="handleCellClick(getSubtotal(uploadedResult.lines.slice(0, 3)), 'cd3', '小计')">{{ getColumnValue(getSubtotal(uploadedResult.lines.slice(0, 3)), 'cd3').count }}</td>
                   <td v-if="showCd4" class="clickable" @click="handleCellClick(getSubtotal(uploadedResult.lines.slice(0, 3)), 'cd4', '小计')">{{ getColumnValue(getSubtotal(uploadedResult.lines.slice(0, 3)), 'cd4').count }}</td>
                   <td v-if="showCd5" class="clickable" @click="handleCellClick(getSubtotal(uploadedResult.lines.slice(0, 3)), 'cd5', '小计')">{{ getColumnValue(getSubtotal(uploadedResult.lines.slice(0, 3)), 'cd5').count }}</td>
-                  <td class="col-simple-collision clickable" @click="handleCellClick(getSubtotal(uploadedResult.lines.slice(0, 3)), 'simpleCollision', '小计')">{{ getColumnValue(getSubtotal(uploadedResult.lines.slice(0, 3)), 'simpleCollision').count }}</td>
+                  <td class="col-simple-collision clickable" @click="handleCellClick(getSubtotal(uploadedResult.lines.slice(0, 3)), 'simpleCollision', '小计')">{{ getColumnValue(getSubtotal(uploadedResult.lines.slice(0, 3)), 'simpleCollision', true, simpleCollisionExclFull).count }}</td>
                   <td class="col-select clickable" @click="handleCellClick(getSubtotal(uploadedResult.lines.slice(0, 3)), 'fullCollision', '小计')">{{ getColumnValue(getSubtotal(uploadedResult.lines.slice(0, 3)), 'fullCollision').count }}</td>
                   <td class="clickable" @click="handleCellClick(getSubtotal(uploadedResult.lines.slice(0, 3)), 'brief2', '小计')">{{ getColumnValue(getSubtotal(uploadedResult.lines.slice(0, 3)), 'brief2').count }}</td>
                   <td>{{ fmt(getWeightedValue(getSubtotal(uploadedResult.lines.slice(0, 3)), 'cl')) }}</td>
@@ -2189,7 +2208,7 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                 <td class="clickable" @click="handleCellClick(getSubtotal(uploadedResult.lines), 'cd3', '总计')">{{ getColumnValue(getSubtotal(uploadedResult.lines), 'cd3').count }}</td>
                 <td v-if="showCd4" class="clickable" @click="handleCellClick(getSubtotal(uploadedResult.lines), 'cd4', '总计')">{{ getColumnValue(getSubtotal(uploadedResult.lines), 'cd4').count }}</td>
                 <td v-if="showCd5" class="clickable" @click="handleCellClick(getSubtotal(uploadedResult.lines), 'cd5', '总计')">{{ getColumnValue(getSubtotal(uploadedResult.lines), 'cd5').count }}</td>
-                <td class="col-simple-collision clickable" @click="handleCellClick(getSubtotal(uploadedResult.lines), 'simpleCollision', '总计')">{{ getColumnValue(getSubtotal(uploadedResult.lines), 'simpleCollision').count }}</td>
+                <td class="col-simple-collision clickable" @click="handleCellClick(getSubtotal(uploadedResult.lines), 'simpleCollision', '总计')">{{ getColumnValue(getSubtotal(uploadedResult.lines), 'simpleCollision', true, simpleCollisionExclFull).count }}</td>
                 <td class="col-select clickable" @click="handleCellClick(getSubtotal(uploadedResult.lines), 'fullCollision', '总计')">{{ getColumnValue(getSubtotal(uploadedResult.lines), 'fullCollision').count }}</td>
                 <td class="clickable" @click="handleCellClick(getSubtotal(uploadedResult.lines), 'brief2', '总计')">{{ getColumnValue(getSubtotal(uploadedResult.lines), 'brief2').count }}</td>
                 <td>{{ fmt(getWeightedValue(getSubtotal(uploadedResult.lines), 'cl')) }}</td>
@@ -2552,11 +2571,11 @@ watch([rootsVersion, configVersion, charsetVersion], () => {
                   <td>{{ (detailCurrentPage - 1) * detailPageSize + idx + 1 }}</td>
                   <td class="char-col">
                     {{ item.char }}
-                    <span v-if="detailColumn === 'fullCollision' ? (item.fullPrimaryChar && item.fullPrimaryChar !== item.char) : (item.primaryChar && item.primaryChar !== item.char)" class="primary-char">({{ detailColumn === 'fullCollision' ? item.fullPrimaryChar : item.primaryChar }})</span>
+                    <span v-if="detailItemPrimaryChar(item) && detailItemPrimaryChar(item) !== item.char" class="primary-char">({{ detailItemPrimaryChar(item) }})</span>
                   </td>
                   <td class="code-col">{{ detailColumn === 'fullCollision' ? (item.longestCode || '-') : (item.code || '-') }}</td>
                   <td>{{ item.selectKey || '-' }}</td>
-                  <td>{{ (detailColumn === 'fullCollision' ? item.fullCollision : item.collision) > 1 ? (detailColumn === 'fullCollision' ? item.fullCollision : item.collision) : '-' }}</td>
+                  <td>{{ detailItemCollision(item) > 1 ? detailItemCollision(item) : '-' }}</td>
                   <td>{{ item.isLack || item.overKey > 0 ? '-' : fmt(item.ziEqCombo) }}</td>
                   <td>{{ item.isLack || item.overKey > 0 ? '-' : fmt(item.keyEqCombo) }}</td>
                   <td>{{ item.freq }}</td>
