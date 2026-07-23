@@ -87,6 +87,23 @@ function stripInsetShadow(doc: Document) {
   })
 }
 
+// 把克隆文档里所有 position: sticky 的元素降级为 static，避免父容器被
+// position: absolute 移走后 sticky 的参考滚动容器发生变化，导致首列跑偏。
+function disableStickyPositioning(doc: Document) {
+  doc.querySelectorAll<HTMLElement>('*').forEach((el) => {
+    const view = doc.defaultView
+    if (!view) return
+    const position = view.getComputedStyle(el).position
+    if (position === 'sticky' || position === '-webkit-sticky') {
+      el.style.position = 'static'
+      el.style.left = 'auto'
+      el.style.right = 'auto'
+      el.style.top = 'auto'
+      el.style.bottom = 'auto'
+    }
+  })
+}
+
 // html2canvas 1.4.1 在克隆文档里重新解析样式时，对 `color: var(--primary)` 这类
 // 依赖 CSS 自定义属性的颜色解析不稳定，导致测评表里本应是蓝色（var(--primary)）的
 // 可点击列被渲染成了粉红色。这里在截图前，把实时 DOM 计算出的 color 以行内样式
@@ -116,8 +133,26 @@ async function captureElement(selector: string): Promise<HTMLCanvasElement | nul
   const el = document.querySelector(selector) as HTMLElement | null
   if (!el) return null
 
-  const originalOverflow = el.style.overflow
-  const originalOverflowX = el.style.overflowX
+  // 父级 .center 设置了 overflow-y: auto，浏览器会自动把 overflow-x 也强制成 auto，
+  // 导致测评表格、键盘热力图、多候选条形图等横向溢出的内容在截图时右半部分被裁掉。
+  // 这里临时把元素脱离文档流、挪到屏幕外，并强制撑到 scrollWidth，
+  // 让 html2canvas 能完整渲染所有列与右侧的候选计数/小指占比等。
+  const origPosition = el.style.position
+  const origLeft = el.style.left
+  const origTop = el.style.top
+  const origWidth = el.style.width
+  const origMaxWidth = el.style.maxWidth
+  const origOverflow = el.style.overflow
+  const origOverflowX = el.style.overflowX
+
+  const fullWidth = el.scrollWidth
+  const fullHeight = el.scrollHeight
+
+  el.style.position = 'absolute'
+  el.style.left = '-99999px'
+  el.style.top = '0'
+  el.style.width = `${fullWidth}px`
+  el.style.maxWidth = 'none'
   el.style.overflow = 'visible'
   el.style.overflowX = 'visible'
 
@@ -130,15 +165,23 @@ async function captureElement(selector: string): Promise<HTMLCanvasElement | nul
       useCORS: true,
       logging: false,
       backgroundColor: null,
-      width: el.scrollWidth,
-      height: el.scrollHeight,
-      windowWidth: el.scrollWidth + 200,
-      onclone: (clonedDoc) => stripInsetShadow(clonedDoc),
+      width: fullWidth,
+      height: fullHeight,
+      windowWidth: fullWidth + 200,
+      onclone: (clonedDoc) => {
+        stripInsetShadow(clonedDoc)
+        disableStickyPositioning(clonedDoc)
+      },
     })
   } finally {
     restoreColors()
-    el.style.overflow = originalOverflow
-    el.style.overflowX = originalOverflowX
+    el.style.position = origPosition
+    el.style.left = origLeft
+    el.style.top = origTop
+    el.style.width = origWidth
+    el.style.maxWidth = origMaxWidth
+    el.style.overflow = origOverflow
+    el.style.overflowX = origOverflowX
   }
   return canvas
 }
