@@ -2,12 +2,13 @@
 import { computed, watch, onMounted, onUnmounted, shallowRef, ref } from 'vue'
 import { useEngine } from '../../composables/useEngine'
 import Icon from '../Icon.vue'
+import ElementPracticeTab from './ElementPracticeTab.vue'
 
 const { engine, rootsVersion, configVersion, charsetVersion, getCurrentCharset, bracedRootToPua, isBracedRoot } = useEngine()
 
 // ==================== 标签页状态 ====================
-type TabType = 'root' | 'char'
-const activeTab = shallowRef<TabType>('root')
+type TabType = 'practice1' | 'practice2' | 'char'
+const activeTab = shallowRef<TabType>('practice1')
 
 // ==================== 字根练习部分 ====================
 interface PracticeCard {
@@ -1018,16 +1019,16 @@ function displayText(text: string): string {
 // ==================== 全局事件处理 ====================
 // 全局键盘事件处理（根据当前标签分发）
 function handleGlobalKeydown(e: KeyboardEvent) {
-  if (activeTab.value === 'root') {
+  if (activeTab.value === 'practice2') {
     handleRootKeydown(e)
   }
 }
 
 // 切换标签时聚焦对应的输入框
 watch(activeTab, (newTab) => {
-  if (newTab === 'root') {
+  if (newTab === 'practice2') {
     setTimeout(focusRootInput, 0)
-  } else {
+  } else if (newTab === 'char') {
     setTimeout(focusCharInput, 0)
   }
 })
@@ -1054,9 +1055,9 @@ onMounted(() => {
   loadCharSettings()
   initCharPractice()
 
-  if (activeTab.value === 'root') {
+  if (activeTab.value === 'practice2') {
     focusRootInput()
-  } else {
+  } else if (activeTab.value === 'char') {
     focusCharInput()
   }
 
@@ -1089,15 +1090,22 @@ watch(configVersion, () => {
   <div class="practice-page">
     <!-- 标签切换 -->
     <div class="tabs-header">
-      <button 
-        class="tab-btn" 
-        :class="{ 'active': activeTab === 'root' }"
-        @click="activeTab = 'root'"
+      <button
+        class="tab-btn"
+        :class="{ 'active': activeTab === 'practice1' }"
+        @click="activeTab = 'practice1'"
       >
-        字根练习
+        字根练习一
       </button>
-      <button 
-        class="tab-btn" 
+      <button
+        class="tab-btn"
+        :class="{ 'active': activeTab === 'practice2' }"
+        @click="activeTab = 'practice2'"
+      >
+        字根练习二
+      </button>
+      <button
+        class="tab-btn"
         :class="{ 'active': activeTab === 'char' }"
         @click="activeTab = 'char'"
       >
@@ -1105,8 +1113,11 @@ watch(configVersion, () => {
       </button>
     </div>
 
-    <!-- ==================== 字根练习 ==================== -->
-    <template v-if="activeTab === 'root'">
+    <!-- ==================== 字根练习一（元素重复练习器） ==================== -->
+    <ElementPracticeTab v-if="activeTab === 'practice1'" />
+
+    <!-- ==================== 字根练习二（Leitner / FSRS） ==================== -->
+    <template v-else-if="activeTab === 'practice2'">
       <!-- 进度条 -->
       <div class="progress-header">
         <div class="progress-info">
