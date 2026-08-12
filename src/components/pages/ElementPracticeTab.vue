@@ -20,6 +20,15 @@ const inputError = ref(false)
 const showSettings = ref(false)
 const showComplete = ref(false)
 const showWelcome = ref(false)
+
+// ===== 极速复习模式状态 =====
+const speedReviewQueue = ref<number[]>([])      // 待复习的卡片索引队列
+const speedReviewIdx = ref(0)                    // 当前指针
+const speedReviewWrongShown = ref(false)         // 当前卡片是否因答错而展示提示
+const speedReviewFinished = ref(false)           // 本轮复习是否已完成
+const speedReviewProgress = ref({ done: 0, total: 0 }) // 进度统计
+let speedReviewTimer: ReturnType<typeof setTimeout> | null = null
+
 const importMode = ref<'file' | 'reimport' | 'zip' | 'font'>('file')
 const importCenterInputRef = ref<HTMLInputElement | null>(null)
 const importCenterZipInputRef = ref<HTMLInputElement | null>(null)
@@ -32,6 +41,11 @@ let toastTimer: ReturnType<typeof setTimeout> | null = null
 
 // 监听输入
 watch(userInput, (val) => {
+  // 极速复习模式：单独走分支
+  if (speedReviewQueue.value.length > 0 && !speedReviewFinished.value) {
+    handleSpeedReviewInput(val)
+    return
+  }
   if (!cards.value.length || !currentCard.value) return
   if (val.includes(' ')) {
     answer(false)
@@ -70,6 +84,106 @@ function showAnswer(correct: boolean) {
   inputError.value = !correct
 }
 
+// ===== 极速复习模式 =====
+const SPEED_REVIEW_DELAY_MS = 1400
+
+function clearSpeedReviewTimer() {
+  if (speedReviewTimer) {
+    clearTimeout(speedReviewTimer)
+    speedReviewTimer = null
+  }
+}
+
+function startSpeedReview() {
+  if (!cards.value.length) return
+  clearSpeedReviewTimer()
+  showComplete.value = false
+  speedReviewQueue.value = cards.value.map((_, i) => i)
+  speedReviewIdx.value = 0
+  speedReviewWrongShown.value = false
+  speedReviewFinished.value = false
+  speedReviewProgress.value = { done: 0, total: speedReviewQueue.value.length }
+  userInput.value = ''
+  inputError.value = false
+  focusInput()
+}
+
+function exitSpeedReview() {
+  clearSpeedReviewTimer()
+  speedReviewQueue.value = []
+  speedReviewIdx.value = 0
+  speedReviewWrongShown.value = false
+  speedReviewFinished.value = false
+  userInput.value = ''
+  inputError.value = false
+  showComplete.value = false
+  focusInput()
+}
+
+function finishSpeedReview() {
+  speedReviewFinished.value = true
+  speedReviewWrongShown.value = false
+  clearSpeedReviewTimer()
+  userInput.value = ''
+  inputError.value = false
+  showComplete.value = true
+  showToast('✓ 极速复习完成')
+}
+
+function advanceSpeedReview() {
+  speedReviewWrongShown.value = false
+  inputError.value = false
+  speedReviewProgress.value = {
+    done: Math.min(speedReviewIdx.value + 1, speedReviewQueue.value.length),
+    total: speedReviewQueue.value.length
+  }
+  if (speedReviewIdx.value >= speedReviewQueue.value.length) {
+    finishSpeedReview()
+    return
+  }
+  userInput.value = ''
+  focusInput()
+}
+
+function handleSpeedReviewInput(val: string) {
+  if (!speedReviewQueue.value.length || speedReviewFinished.value) return
+  if (speedReviewWrongShown.value) return // 等待提示展示期间忽略输入
+  const cardIdx = speedReviewQueue.value[speedReviewIdx.value]
+  const card = cards.value[cardIdx]
+  if (!card) return
+  const targetKey = card.key
+  if (!targetKey) return
+
+  const isCorrect = settings.value.firstCode
+    ? val[0] === targetKey[0]
+    : val === targetKey
+  const complete = settings.value.firstCode
+    ? val.length >= Math.max(1, targetKey.length)
+    : val.length >= targetKey.length
+
+  if (!complete) return
+
+  userInput.value = ''
+  if (isCorrect) {
+    inputError.value = false
+    speedReviewIdx.value++
+    speedReviewTimer = setTimeout(() => advanceSpeedReview(), 350)
+  } else {
+    // 答错也按通过：先展示答案提示，延迟后进入下一张
+    inputError.value = true
+    speedReviewWrongShown.value = true
+    speedReviewIdx.value++
+    speedReviewTimer = setTimeout(() => advanceSpeedReview(), SPEED_REVIEW_DELAY_MS)
+  }
+}
+
+const speedReviewActive = computed(() => speedReviewQueue.value.length > 0 && !speedReviewFinished.value)
+const speedReviewCurrentCard = computed(() => {
+  if (!speedReviewActive.value) return null
+  const idx = speedReviewQueue.value[speedReviewIdx.value]
+  return cards.value[idx] || null
+})
+
 watch(allComplete, (v) => {
   if (v) showComplete.value = true
 })
@@ -81,10 +195,21 @@ function showToast(msg: string) {
   toastTimer = setTimeout(() => { toastVisible.value = false }, 2500)
 }
 
+// 切换顺序模式
+function toggleOrderMode() {
+  settings.value.orderMode = !settings.value.orderMode
+  settings.value = { ...settings.value }
+}
+
 // ===== 计算属性 =====
 const cardSegments = computed(() => {
   if (!currentCard.value) return []
   return parseCardSegments(currentCard.value.originalName)
+})
+
+const speedReviewCardSegments = computed(() => {
+  if (!speedReviewCurrentCard.value) return []
+  return parseCardSegments(speedReviewCurrentCard.value.originalName)
 })
 
 const isSingleRoot = computed(() => {
@@ -94,14 +219,15 @@ const isSingleRoot = computed(() => {
 })
 
 const displayStyle = computed(() => {
-  if (!currentCard.value) return {}
-  const charCount = getPureCharCount(currentCard.value.name)
+  const card = speedReviewActive.value ? speedReviewCurrentCard.value : currentCard.value
+  if (!card) return {}
+  const charCount = getPureCharCount(card.name)
   let fontSize = settings.value.zigenSize
   if (settings.value.fontSizeByCount && charCount > settings.value.fontSizeCountThreshold) {
     fontSize = settings.value.fontSizeWhenLarge
   }
   const wrap = settings.value.wrapByCount && charCount > settings.value.wrapCountThreshold
-  const hlColor = matchHighlight(currentCard.value.name)
+  const hlColor = matchHighlight(card.name)
   const style: Record<string, string> = {
     fontSize: fontSize + 'rem',
     fontFamily: settings.value.fontFamily,
@@ -328,6 +454,12 @@ function focusInput() {
 }
 
 watch(currentCard, () => {
+  if (speedReviewActive.value) return
+  inputError.value = false
+  focusInput()
+})
+
+watch(speedReviewCurrentCard, () => {
   inputError.value = false
   focusInput()
 })
@@ -350,7 +482,8 @@ onMounted(async () => {
     <div class="ep-top-bar">
       <span class="ep-file-name">📄 {{ currentFileName }}</span>
       <span v-if="settings.orderMode" class="ep-round-counter">第 {{ settings.roundCount }} 轮</span>
-      <div class="ep-progress-indicator" @click="togglePercentDisplay">
+      <span v-if="speedReviewActive" class="ep-round-counter ep-speed-badge">⚡ 极速复习 {{ speedReviewProgress.done }}/{{ speedReviewProgress.total }}</span>
+      <div v-if="!speedReviewActive" class="ep-progress-indicator" @click="togglePercentDisplay">
         <span>{{ progressText }}</span>
         <div class="progress-bar" style="width: 120px;">
           <div class="progress-fill" :style="{ width: progressPercent + '%' }"></div>
@@ -360,6 +493,27 @@ onMounted(async () => {
         <input type="checkbox" v-model="settings.firstCode" />
         首码模式
       </label>
+      <button
+        v-if="speedReviewActive"
+        class="btn-ghost ep-speed-btn"
+        @click="exitSpeedReview"
+        title="退出极速复习"
+      >退出</button>
+      <template v-else>
+        <button
+          v-if="cards.length"
+          class="btn-ghost ep-order-btn"
+          :class="{ 'ep-order-btn-active': settings.orderMode }"
+          @click="toggleOrderMode"
+          title="切换顺序模式：按顺序练习每个字根，答错回到上一张"
+        >顺序模式</button>
+        <button
+          v-if="cards.length && settings.speedReviewMode"
+          class="btn-ghost ep-speed-btn"
+          @click="startSpeedReview"
+          title="极速复习：所有字根一遍过，答错提示后也算通过"
+        >⚡ 极速复习</button>
+      </template>
       <button class="icon-btn" @click="showSettings = !showSettings" title="设置">
         <Icon name="settings" :size="16" />
       </button>
@@ -394,23 +548,34 @@ onMounted(async () => {
       <!-- 完成 -->
       <div v-else-if="showComplete" class="ep-complete">
         <div class="ep-complete-icon">🎉</div>
-        <div class="ep-complete-title">恭喜完成练习！</div>
-        <div class="ep-complete-sub">已掌握 {{ progressCount }} / {{ cards.length }}</div>
-        <button class="btn" @click="showComplete = false; handleRestart()">再来一轮</button>
+        <div class="ep-complete-title">{{ speedReviewFinished ? '极速复习完成' : '恭喜完成练习！' }}</div>
+        <div class="ep-complete-sub">
+          <template v-if="speedReviewFinished">
+            本轮复习 {{ speedReviewProgress.total }} 个元素
+          </template>
+          <template v-else>
+            已掌握 {{ progressCount }} / {{ cards.length }}
+          </template>
+        </div>
+        <div v-if="speedReviewFinished" class="ep-row-buttons" style="justify-content: center;">
+          <button class="btn" @click="startSpeedReview">再来一轮</button>
+          <button class="btn-ghost" @click="exitSpeedReview">退出极速复习</button>
+        </div>
+        <button v-else class="btn" @click="showComplete = false; handleRestart()">再来一轮</button>
       </div>
 
       <!-- 练习区 -->
       <div v-else class="ep-practice-area">
         <!-- 元素展示 -->
-        <div v-if="currentCard" class="ep-zigen-display" :style="displayStyle">
-          <template v-for="seg in cardSegments" :key="seg.i">
+        <div v-if="speedReviewActive ? speedReviewCurrentCard : currentCard" class="ep-zigen-display" :style="displayStyle">
+          <template v-for="seg in (speedReviewActive ? speedReviewCardSegments : cardSegments)" :key="seg.i">
             <span v-if="seg.t === 'comment'" class="ep-comment">{{ seg.v }}</span>
             <span v-else>{{ seg.v }}</span>
           </template>
         </div>
-        <div v-if="currentCard?.hint" class="ep-hint-area">💡 {{ currentCard.hint }}</div>
-        <div v-if="isFirst && currentCard" class="ep-answer-preview">
-          答案：<b class="ep-code">{{ currentCard.key }}</b>
+        <div v-if="(speedReviewActive ? speedReviewCurrentCard?.hint : currentCard?.hint)" class="ep-hint-area">💡 {{ speedReviewActive ? speedReviewCurrentCard?.hint : currentCard?.hint }}</div>
+        <div v-if="(speedReviewActive ? speedReviewWrongShown : (isFirst && currentCard))" class="ep-answer-preview">
+          答案：<b class="ep-code">{{ speedReviewActive ? speedReviewCurrentCard?.key : currentCard?.key }}</b>
         </div>
         <div class="ep-input-wrapper">
           <input
@@ -419,7 +584,7 @@ onMounted(async () => {
             type="text"
             class="ep-input"
             :class="{ 'input-error': inputError }"
-            placeholder="编码"
+            :placeholder="speedReviewActive ? '极速复习中…' : '编码'"
             autocomplete="off"
             autocapitalize="none"
             spellcheck="false"
@@ -557,6 +722,14 @@ onMounted(async () => {
           <small class="ep-hint">该模式下每个元素只会出现一次</small>
           <small class="ep-hint">开启后自动显示当前轮次</small>
         </div>
+        <div class="ep-setting-item">
+          <label class="ep-checkbox-label">
+            <input type="checkbox" v-model="settings.speedReviewMode" />
+            启用极速复习按钮
+          </label>
+          <small class="ep-hint">开启后顶栏显示「⚡ 极速复习」按钮</small>
+          <small class="ep-hint">所有字根一遍过，答错提示后也算通过</small>
+        </div>
 
         <div class="ep-section-title">📝 说明</div>
         <div class="ep-setting-item ep-full">
@@ -666,6 +839,40 @@ onMounted(async () => {
   background: var(--bg3);
   border-radius: 10px;
   white-space: nowrap;
+}
+.ep-speed-badge {
+  background: color-mix(in srgb, var(--primary) 15%, var(--bg3));
+  color: var(--primary);
+  opacity: 1;
+}
+.ep-speed-btn {
+  font-size: 0.85rem;
+  font-weight: 600;
+  padding: 4px 12px;
+  border-radius: 8px;
+  color: var(--primary);
+  border: 1px solid color-mix(in srgb, var(--primary) 30%, var(--border));
+}
+.ep-speed-btn:hover {
+  background: color-mix(in srgb, var(--primary) 10%, var(--bg3));
+}
+.ep-order-btn {
+  font-size: 0.85rem;
+  font-weight: 600;
+  padding: 4px 12px;
+  border-radius: 8px;
+  color: var(--text2);
+  border: 1px solid var(--border);
+  background: transparent;
+  transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+}
+.ep-order-btn:hover {
+  background: color-mix(in srgb, var(--primary) 10%, var(--bg3));
+}
+.ep-order-btn-active {
+  color: var(--primary);
+  border-color: color-mix(in srgb, var(--primary) 40%, var(--border));
+  background: color-mix(in srgb, var(--primary) 12%, var(--bg2));
 }
 .ep-progress-indicator {
   display: flex;

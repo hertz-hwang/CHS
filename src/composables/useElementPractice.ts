@@ -37,6 +37,7 @@ export interface ElementPracticeSettings {
   fontSizeCountThreshold: number
   fontSizeWhenLarge: number
   orderMode: boolean
+  speedReviewMode: boolean
   roundCount: number
   highlightRules: HighlightRule[]
   description: string
@@ -64,6 +65,7 @@ export const DEFAULT_SETTINGS: ElementPracticeSettings = {
   fontSizeCountThreshold: 5,
   fontSizeWhenLarge: 3,
   orderMode: false,
+  speedReviewMode: false,
   roundCount: 1,
   highlightRules: [],
   description: '1. 按对会自动跳下一个\n2. 按错会很快重复出现\n3. 五秒内想不起来就按空格'
@@ -292,9 +294,6 @@ export function useElementPractice() {
   })
 
   const allComplete = computed(() => {
-    if (settings.value.orderMode) {
-      return records.value.length > 0 && records.value[0][0] === 8
-    }
     return records.value.length > 0 && records.value.every(r => r[0] === 8)
   })
 
@@ -350,10 +349,16 @@ export function useElementPractice() {
     }
 
     if (settings.value.orderMode) {
-      firstRec[0] = 8
-      records.value = [...records.value]
+      const completed = [8, firstRec[1]] as [number, number]
+      // 答对后把当前记录移到队尾，让 currentCard 自动指向下一张
+      records.value = records.value.length > 1
+        ? [...records.value.slice(1), completed]
+        : [completed]
       await persistRecords()
-      return { correct: true, finished: records.value[0][0] === 8 }
+      return {
+        correct: true,
+        finished: records.value.every(r => r[0] === 8)
+      }
     }
 
     firstRec[0] = firstRec[0] + 1
