@@ -50,7 +50,7 @@ export interface ImportedFont {
 }
 
 export const DEFAULT_SETTINGS: ElementPracticeSettings = {
-  fontFamily: `Chai Sans, 'Noto Sans SC','Helvetica Neue',Helvetica,'PingFang SC','Hiragino Sans GB','Microsoft YaHei','微软雅黑',Arial,sans-serif`,
+  fontFamily: `CHS_PUA, 'ChaiPUA-0.2.7', Chai Sans, 'Noto Sans SC','Helvetica Neue',Helvetica,'PingFang SC','Hiragino Sans GB','Microsoft YaHei','微软雅黑',Arial,sans-serif`,
   zigenSize: 5.5,
   answerSize: 1.2,
   inputSize: 1.3,
@@ -310,7 +310,7 @@ export function useElementPractice() {
   }
 
   /** 从引擎字根构建默认卡片集 */
-  function buildEngineCards() {
+  async function buildEngineCards() {
     rootsVersion.value // 依赖触发
     const newCards: ElementCard[] = []
     for (const [root, rootCode] of engine.rootCodes) {
@@ -330,11 +330,14 @@ export function useElementPractice() {
     cards.value = newCards
     if (newCards.length > 0) {
       currentFileName.value = '引擎字根'
+      // 引擎字根的卡片也持久化，保证下次能恢复练习进度
+      await persistCards()
+      await persistFilename()
     }
   }
 
   // ===== 答题逻辑 =====
-  function answer(correct: boolean) {
+  async function answer(correct: boolean) {
     if (!cards.value.length || !records.value.length) return
     const firstRec = records.value[0]
     if (!firstRec) return
@@ -342,12 +345,14 @@ export function useElementPractice() {
     if (!correct) {
       firstRec[0] = -1
       records.value = [...records.value]
+      await persistRecords()
       return { correct: false }
     }
 
     if (settings.value.orderMode) {
       firstRec[0] = 8
       records.value = [...records.value]
+      await persistRecords()
       return { correct: true, finished: records.value[0][0] === 8 }
     }
 
@@ -368,15 +373,17 @@ export function useElementPractice() {
     newRecords.copyWithin(0, 1, step + 1)
     newRecords[step] = rec
     records.value = newRecords
+    await persistRecords()
     return { correct: true }
   }
 
-  function restartProgress() {
+  async function restartProgress() {
     if (!cards.value.length) return
     initRecords()
     settings.value.roundCount = 1
     settings.value = { ...settings.value }
     saveSettings()
+    await persistRecords()
   }
 
   // ===== 数据导入 =====
@@ -658,7 +665,7 @@ export function useElementPractice() {
       }
     } else {
       // 无持久数据，从引擎构建默认卡片
-      buildEngineCards()
+      await buildEngineCards()
       initRecords()
     }
   }
@@ -684,7 +691,7 @@ export function useElementPractice() {
     currentFileName.value = '未导入元素数据'
     settings.value = { ...DEFAULT_SETTINGS }
     useEngineData.value = true
-    buildEngineCards()
+    await buildEngineCards()
     initRecords()
   }
 
@@ -696,7 +703,7 @@ export function useElementPractice() {
       await loadStoredData()
     } catch (e) {
       console.warn('初始化失败:', e)
-      buildEngineCards()
+      await buildEngineCards()
       initRecords()
     }
   }

@@ -261,24 +261,24 @@ function handleResetAll() {
 }
 
 // 切换数据源：从引擎重新构建
-function rebuildFromEngineAndReset() {
+async function rebuildFromEngineAndReset() {
   if (!confirm('将清空当前进度并从引擎字根重新生成卡片，继续？')) return
-  rebuildFromEngine()
+  await rebuildFromEngine()
   currentFileName.value = '引擎字根'
   init()
 }
 
-function handleClearCards() {
+async function handleClearCards() {
   if (!confirm('清空元素数据？')) return
-  clearCards()
-  rebuildFromEngine()
+  await clearCards()
+  await rebuildFromEngine()
   init()
 }
 
 // ===== 重置按钮（带确认） =====
-function handleRestart() {
+async function handleRestart() {
   if (!confirm('重置所有进度与轮次？')) return
-  restartProgress()
+  await restartProgress()
   showComplete.value = false
 }
 
