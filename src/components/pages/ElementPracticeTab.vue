@@ -27,7 +27,6 @@ const speedReviewIdx = ref(0)                    // 当前指针
 const speedReviewWrongShown = ref(false)         // 当前卡片是否因答错而展示提示
 const speedReviewFinished = ref(false)           // 本轮复习是否已完成
 const speedReviewProgress = ref({ done: 0, total: 0 }) // 进度统计
-let speedReviewTimer: ReturnType<typeof setTimeout> | null = null
 
 const importMode = ref<'file' | 'reimport' | 'zip' | 'font'>('file')
 const importCenterInputRef = ref<HTMLInputElement | null>(null)
@@ -85,18 +84,9 @@ function showAnswer(correct: boolean) {
 }
 
 // ===== 极速复习模式 =====
-const SPEED_REVIEW_DELAY_MS = 1400
-
-function clearSpeedReviewTimer() {
-  if (speedReviewTimer) {
-    clearTimeout(speedReviewTimer)
-    speedReviewTimer = null
-  }
-}
 
 function startSpeedReview() {
   if (!cards.value.length) return
-  clearSpeedReviewTimer()
   showComplete.value = false
   speedReviewQueue.value = cards.value.map((_, i) => i)
   speedReviewIdx.value = 0
@@ -109,7 +99,6 @@ function startSpeedReview() {
 }
 
 function exitSpeedReview() {
-  clearSpeedReviewTimer()
   speedReviewQueue.value = []
   speedReviewIdx.value = 0
   speedReviewWrongShown.value = false
@@ -123,31 +112,14 @@ function exitSpeedReview() {
 function finishSpeedReview() {
   speedReviewFinished.value = true
   speedReviewWrongShown.value = false
-  clearSpeedReviewTimer()
   userInput.value = ''
   inputError.value = false
   showComplete.value = true
   showToast('✓ 极速复习完成')
 }
 
-function advanceSpeedReview() {
-  speedReviewWrongShown.value = false
-  inputError.value = false
-  speedReviewProgress.value = {
-    done: Math.min(speedReviewIdx.value + 1, speedReviewQueue.value.length),
-    total: speedReviewQueue.value.length
-  }
-  if (speedReviewIdx.value >= speedReviewQueue.value.length) {
-    finishSpeedReview()
-    return
-  }
-  userInput.value = ''
-  focusInput()
-}
-
 function handleSpeedReviewInput(val: string) {
   if (!speedReviewQueue.value.length || speedReviewFinished.value) return
-  if (speedReviewWrongShown.value) return // 等待提示展示期间忽略输入
   const cardIdx = speedReviewQueue.value[speedReviewIdx.value]
   const card = cards.value[cardIdx]
   if (!card) return
@@ -165,15 +137,23 @@ function handleSpeedReviewInput(val: string) {
 
   userInput.value = ''
   if (isCorrect) {
+    // 答对：进入下一个字根
     inputError.value = false
+    speedReviewWrongShown.value = false
     speedReviewIdx.value++
-    speedReviewTimer = setTimeout(() => advanceSpeedReview(), 350)
+    if (speedReviewIdx.value >= speedReviewQueue.value.length) {
+      finishSpeedReview()
+      return
+    }
+    speedReviewProgress.value = {
+      done: Math.min(speedReviewIdx.value, speedReviewQueue.value.length),
+      total: speedReviewQueue.value.length
+    }
+    focusInput()
   } else {
-    // 答错也按通过：先展示答案提示，延迟后进入下一张
+    // 答错：展示答案，等待用户输入正确编码后才进入下一个字根
     inputError.value = true
     speedReviewWrongShown.value = true
-    speedReviewIdx.value++
-    speedReviewTimer = setTimeout(() => advanceSpeedReview(), SPEED_REVIEW_DELAY_MS)
   }
 }
 
@@ -511,7 +491,7 @@ onMounted(async () => {
           v-if="cards.length && settings.speedReviewMode"
           class="btn-ghost ep-speed-btn"
           @click="startSpeedReview"
-          title="极速复习：所有字根一遍过，答错提示后也算通过"
+          title="极速复习：所有字根一遍过，答错会展示答案，需输入正确编码后才进入下一个"
         >⚡ 极速复习</button>
       </template>
       <button class="icon-btn" @click="showSettings = !showSettings" title="设置">
